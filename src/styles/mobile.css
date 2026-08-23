@@ -1,0 +1,65 @@
+/* ---------- Touch-first mobile layer ----------
+   Audit fixes for real phone use:
+   - iOS auto-zooms into any input with font-size < 16px  -> force 16px on coarse pointers
+   - tap targets below 44px are hard to hit           -> bump pixel buttons on touch
+   - overscroll / pull-to-refresh fights the console  -> contain it
+   - standalone PWA needs safe-area padding + no text selection */
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+select {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* notched phones: keep the console clear of the home indicator */
+#console-shell {
+  padding-bottom: max(15px, env(safe-area-inset-bottom));
+}
+.game-screen-pad {
+  padding-top: max(16px, env(safe-area-inset-top));
+}
+
+/* modals must scroll inside themselves, not the page behind */
+.modal,
+.panel-slide {
+  overscroll-behavior: contain;
+}
+
+/* touch devices: comfortable targets + no iOS input zoom */
+@media (hover: none) and (pointer: coarse) {
+  .pixel-btn {
+    min-width: 48px;
+    min-height: 48px;
+  }
+  .action-bar .pixel-btn {
+    min-height: 56px;
+  }
+  input,
+  select,
+  textarea {
+    font-size: 16px !important; /* kills the iOS auto-zoom-on-focus */
+  }
+  #virtual-gamepad button {
+    touch-action: none;
+  }
+}
+
+/* reduce motion: skip jiggly animations entirely */
+@media (prefers-reduced-motion: reduce) {
+  .anim-idle,
+  .animate-bounce,
+  .animate-pulse {
+    animation: none !important;
+  }
+}

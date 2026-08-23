@@ -1,0 +1,26 @@
+{
+  "name": "bro-os",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "My Bro'gatchi: Ultimate Edition — rebuilt as a modular Vite app with a Gemini proxy",
+  "scripts": {
+    "dev": "vite",
+    "dev:lan": "node scripts/lan.mjs",
+    "dev:lan:https": "node scripts/lan.mjs https",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "icons": "node scripts/gen-icons.mjs",
+    "proxy": "node server/proxy.mjs"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "jsdom": "^26.1.0",
+    "tailwindcss": "^4.1.0",
+    "vite": "^6.3.0",
+    "vitest": "^3.2.0"
+  }
+}
