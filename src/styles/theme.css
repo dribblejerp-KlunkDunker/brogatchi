@@ -486,12 +486,51 @@ body {
   padding: 0 3px;
   color: #0f172a;
 }
-#ask-response a {
+/* Retro pixel link chips on the light surface — same ↗ affordance as the
+   intel feed: the arrow marks links as opening in a browser tab */
+#ask-response a.md-link {
   color: #1d4ed8;
-  text-decoration: underline;
-  word-break: break-all;
+  text-decoration: none;
+  display: inline-block;
+  border: 2px solid #2563eb;
+  border-radius: 2px;
+  background: #ffffff;
+  padding: 0 4px 2px;
+  margin: 1px 2px;
+  line-height: 1.15;
+  vertical-align: baseline;
+  box-shadow: 2px 2px 0 0 rgba(15, 23, 42, 0.9);
+  overflow-wrap: anywhere;
+  transition: all 0.08s;
+}
+#ask-response a.md-link::after {
+  content: "\2197";
+  display: inline-block;
+  margin-left: 4px;
+  color: #2563eb;
+  font-weight: bold;
+}
+#ask-response a.md-link:hover {
+  background: #dbeafe;
+  color: #1e3a8a;
+}
+#ask-response a.md-link:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 0 rgba(15, 23, 42, 0.9);
+}
+#ask-response a.md-link:focus-visible {
+  outline: 2px solid #b45309;
+  outline-offset: 1px;
 }
 #ask-response strong { color: #b45309; }
+
+/* phones: fatten the chip into a comfortable tap target */
+@media (hover: none) and (pointer: coarse) {
+  #ask-response a.md-link {
+    padding: 4px 8px 5px;
+    margin: 2px 1px;
+  }
+}
 
 /* Composer cells — tiny pixel tracker grid */
 .comp-cell {
