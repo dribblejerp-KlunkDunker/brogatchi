@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>My Bro'gatchi: Bro OS 2.0</title>
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0f172a">
+  <link rel="icon" type="image/png" href="/icon-192.png">
+  <link rel="apple-touch-icon" href="/icon-180.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Bro OS">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <script type="module" crossorigin src="/assets/index-Dhbl5Zqa.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-DpR6dlhj.css">
+</head>
+<body>
+
+<div id="console-shell">
+  <div class="speaker-grill">
+    <div class="speaker-hole"></div><div class="speaker-hole"></div><div class="speaker-hole"></div>
+  </div>
+
+  <div id="screen-bezel">
+    <div id="game-screen" class="theme-lounge p-3 pt-6">
+
+      <!-- Status strip -->
+      <div class="absolute top-1 left-2 right-2 flex justify-between items-center text-[8px] opacity-70 z-30 font-bold">
+        <span id="clock-time">12:00</span>
+        <span>REC 🔴 <span id="ambient-caption" class="font-text text-[11px] text-cyan-400" role="status" aria-live="polite"></span></span>
+        <span id="weather-badge" class="font-text text-[10px] text-yellow-300 ml-1 cursor-pointer hover:opacity-80" onclick="app.setWeatherCity()" title="Click to set fallback city" role="button" tabindex="0" aria-label="Set weather fallback city"></span>
+        <span>BAT 🔋 100% <button onclick="app.setSyncCode()" class="align-middle opacity-80 hover:opacity-100" title="Set cloud sync code" aria-label="Cloud sync settings">☁️</button> <button onclick="app.toggleComposer()" class="align-middle opacity-80 hover:opacity-100" title="Chiptune composer (Ctrl+Shift+M)" aria-label="Open chiptune composer">🎛</button></span>
+      </div>
+
+      <!-- Counters row -->
+      <div class="flex justify-between items-start mb-2 relative z-30">
+        <div class="flex gap-1.5 flex-wrap">
+          <div class="chip">
+            <span>🪙 <span id="coin-count">0</span></span>
+          </div>
+          <div class="flex">
+            <button onclick="app.togglePedometer()" id="pedometer-btn" class="chip !rounded-r-none cursor-pointer active:scale-95 transition-transform" title="Tap to Start Pedometer" aria-label="Start step counter">
+              <span>👟 <span id="step-count">0</span></span>
+            </button>
+            <button onclick="app.openStats()" class="chip-dim rounded-l-none !border-l-0 cursor-pointer" title="View Step Stats" aria-label="View step statistics">📊</button>
+          </div>
+          <button onclick="app.openJournal()" class="chip bg-indigo-100 text-indigo-700 cursor-pointer" title="Level & Forme — click for Evolution Journal" aria-label="Open evolution journal">
+            <span id="lvl-chip">LV 1</span>
+          </button>
+        </div>
+        <div class="flex gap-1.5">
+          <button onclick="app.openDiary()" class="btn-round bg-amber-300" title="Ryan's Diary & Memories" aria-label="Open diary and memories">📖</button>
+          <button onclick="app.openJoohTracker()" class="btn-round bg-green-500 animate-pulse relative group" title="J.O.O.H Tracker" aria-label="Open JOOH tracker">
+            <span class="text-xl">📡</span>
+            <span class="hidden group-hover:block absolute -bottom-5 right-0 bg-black text-green-400 text-[6px] px-1 rounded z-50">J.O.O.H</span>
+          </button>
+          <button onclick="app.openAskModal()" class="btn-round bg-purple-400 animate-bounce" title="Ask AI" aria-label="Ask Ryan a question">🧠</button>
+        </div>
+      </div>
+
+      <!-- Dialogue bubble -->
+      <div class="flex justify-center mb-2 z-30 relative min-h-[52px]">
+        <div class="border-2 border-black rounded-lg p-2 bg-white/90 text-black font-text leading-tight w-4/5 text-center shadow-md relative" role="log" aria-live="polite" aria-atomic="true">
+          <span id="dialogue-text">Initializing Bro OS…</span>
+          <div class="absolute -bottom-2 left-1/2 -translate-x-1/2 w-3 h-3 border-r-2 border-b-2 border-black bg-white/90 rotate-45"></div>
+        </div>
+      </div>
+
+      <!-- Room -->
+      <div class="flex-1 flex justify-center items-end relative pb-4" onclick="app.interactWithPet()">
+        <div id="desk-bg"></div>
+
+        <div id="miner-element" class="miner-rig">
+          <div class="absolute bottom-1 left-1 text-[6px] text-green-400 font-text">MINING…</div>
+        </div>
+
+        <div id="room-clutter" class="absolute bottom-4 w-full h-16 pointer-events-none z-20"></div>
+
+        <div id="ryan-wrapper">
+          <div id="hat-slot" class="absolute -top-7 left-1/2 -translate-x-1/2 text-4xl hidden z-20 drop-shadow">🧢</div>
+          <svg id="ryan-svg" viewBox="0 0 100 120" class="w-40 h-auto drop-shadow-xl anim-idle z-10 pixelated" role="img" aria-label="Ryan, your virtual bro"></svg>
+          <div id="zzz-particles" class="absolute -top-10 right-0 text-2xl text-blue-500 font-bold hidden animate-bounce">Zzz</div>
+        </div>
+
+        <!-- Side bro: Zeke the capybara (multi-pet companion) -->
+        <div id="side-bro-panel" class="absolute right-2 bottom-8 w-[72px] flex flex-col items-center gap-1 z-25" style="display:none">
+          <div class="text-[9px] font-bold text-amber-700" id="side-bro-name">Zeke</div>
+          <div onclick="app.petSideBro()" class="cursor-pointer hover:scale-110 transition-transform" title="Pet Zeke" aria-label="Pet Zeke" role="button" tabindex="0">
+            <div class="text-4xl drop-shadow">🦫</div>
+          </div>
+          <div class="w-full space-y-0.5">
+            <div class="flex items-center gap-1">
+              <span class="text-[6px] w-8 text-amber-800">FOOD</span>
+              <div class="flex-1 h-1.5 bg-gray-200 border border-amber-500 rounded-full overflow-hidden">
+                <div id="side-bro-food" class="h-full bg-amber-500 transition-all" style="width:80%"></div>
+              </div>
+            </div>
+            <div class="flex items-center gap-1">
+              <span class="text-[6px] w-8 text-amber-800">MOOD</span>
+              <div class="flex-1 h-1.5 bg-gray-200 border border-amber-500 rounded-full overflow-hidden">
+                <div id="side-bro-mood" class="h-full bg-pink-400 transition-all" style="width:75%"></div>
+              </div>
+            </div>
+          </div>
+          <button onclick="app.feedSideBro()" class="pixel-btn bg-amber-300 text-[7px] px-1.5 py-0.5" title="Feed Zeke" aria-label="Feed Zeke">🍊</button>
+        </div>
+
+        <!-- Spawn Zeke button (shown when no side bro) -->
+        <button onclick="app.spawnSideBro()" id="spawn-side-bro-btn" class="absolute right-2 bottom-8 pixel-btn bg-amber-100 text-[7px] px-2 py-1" title="Spawn Zeke the Capybara (75c)" aria-label="Spawn Zeke companion">🦫 75c</button>
+
+        <button onclick="app.toggleNewsPanel(event)" class="absolute right-0 top-1/2 -translate-y-1/2 bg-blue-600 border-2 border-r-0 border-black text-white p-2 rounded-l-lg text-[8px] font-bold shadow-lg z-30 cursor-pointer" aria-label="Toggle intel panel">
+          INTEL<br>◀
+        </button>
+      </div>
+
+      <!-- Stat bars -->
+      <div class="space-y-1.5 mb-1.5 bg-white/80 p-2 pt-1.5 rounded border-2 border-black z-20">
+        <div class="flex items-center gap-2">
+          <span class="text-[7px] w-12 font-bold">HAPPY</span>
+          <div class="flex-1 h-3 bg-gray-300 border border-black rounded-full overflow-hidden">
+            <div id="bar-happy" class="h-full bg-green-500 transition-all duration-300" style="width:80%"></div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-[7px] w-12 font-bold">HUNGER</span>
+          <div class="flex-1 h-3 bg-gray-300 border border-black rounded-full overflow-hidden">
+            <div id="bar-hunger" class="h-full bg-orange-500 transition-all duration-300" style="width:75%"></div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-[7px] w-12 font-bold">ENERGY</span>
+          <div class="flex-1 h-3 bg-gray-300 border border-black rounded-full overflow-hidden">
+            <div id="bar-energy" class="h-full bg-blue-500 transition-all duration-300" style="width:100%"></div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-[7px] w-12 font-bold">XP</span>
+          <div class="flex-1 h-2 bg-gray-300 border border-black rounded-full overflow-hidden">
+            <div id="xp-fill" class="h-full bg-fuchsia-500 transition-all duration-500" style="width:0%"></div>
+          </div>
+          <span id="xp-num" class="text-[7px] w-10 text-right opacity-70">0/60</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Action bar -->
+  <div class="action-bar z-40 relative">
+    <button class="pixel-btn p-2 text-xl bg-red-400" onclick="app.openFoodMenu()" title="Feed" aria-label="Open food menu">🍕</button>
+    <button class="pixel-btn p-2 text-xl bg-blue-400" onclick="app.cleanHygiene()" title="Clean" aria-label="Clean room">🚿</button>
+    <button class="pixel-btn p-2 text-xl bg-yellow-400" onclick="app.openWardrobe()" title="Arcade & Shop" aria-label="Open arcade and shop">🕹️</button>
+    <button class="pixel-btn p-2 text-xl bg-indigo-400" onclick="app.toggleSleep()" title="Sleep" aria-label="Toggle sleep">💤</button>
+    <button class="pixel-btn p-2 text-xl bg-green-400" onclick="app.openTaskMenu()" title="Tasks" aria-label="Open quests and tasks">📋</button>
+  </div>
+</div>
+
+<!-- ============ ASK MODAL ============ -->
+<div id="modal-ask" class="modal">
+  <div class="bg-white text-black p-4 rounded-xl border-4 border-black w-full max-w-sm flex flex-col gap-3 relative">
+    <button onclick="app.closeModals()" class="absolute top-2 right-2 text-xl" aria-label="Close">✖</button>
+    <h2 class="text-sm font-bold text-center border-b-2 border-black pb-2">🧠 Ask Ryan</h2>
+    <div class="font-text text-sm bg-gray-100 p-2 rounded border border-gray-400 h-32 overflow-y-auto" id="ask-response" role="status" aria-live="polite">
+      Ask me anything. I'll search the web and bypass the firewall for the TRUTH.
+    </div>
+    <input type="text" id="ask-input" class="border-2 border-black p-2 text-[10px] w-full rounded font-text" placeholder="E.g., Is the earth flat?">
+    <div class="flex gap-2">
+      <button class="pixel-btn flex-1 p-2 text-[10px] bg-blue-500 text-white" onclick="app.submitAsk()">Search</button>
+      <button class="pixel-btn flex-1 p-2 text-[10px] bg-purple-500 text-white" onclick="app.randomDeepDive()">🎲 Random</button>
+    </div>
+    <div id="ask-api-note" class="text-[7px] text-center opacity-60"></div>
+  </div>
+</div>
+
+<!-- ============ FOOD MODAL ============ -->
+<div id="modal-food" class="modal">
+  <div class="bg-white text-black p-4 rounded-xl border-4 border-black w-full max-w-sm flex flex-col gap-3 relative">
+    <button onclick="app.closeModals()" class="absolute top-2 right-2 text-xl" aria-label="Close">✖</button>
+    <h2 class="text-sm font-bold text-center border-b-2 border-black pb-2">Feed Ryan</h2>
+    <div class="grid grid-cols-2 gap-2">
+      <button class="pixel-btn p-2 flex flex-col items-center gap-1" onclick="app.feed('salad')">
+        <span class="text-2xl">🥗</span><span class="text-[8px]">Salad (Free)</span>
+      </button>
+      <button class="pixel-btn p-2 flex flex-col items-center gap-1 bg-orange-100" onclick="app.feed('pizza')">
+        <span class="text-2xl">🍕</span><span class="text-[8px]">Pizza (5c)</span>
+      </button>
+      <button class="pixel-btn p-2 flex flex-col items-center gap-1 bg-red-100" onclick="app.feed('burger')">
+        <span class="text-2xl">🍔</span><span class="text-[8px]">Burger (10c)</span>
+      </button>
+      <button class="pixel-btn p-2 flex flex-col items-center gap-1 bg-blue-100" onclick="app.feed('energy')">
+        <span class="text-2xl">⚡</span><span class="text-[8px]">G-Fuel (15c)</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SHOP / ARCADE MODAL ============ -->
+<div id="modal-shop" class="modal">
+  <div class="bg-white text-black p-4 rounded-xl border-4 border-black w-full max-w-sm flex flex-col gap-3 relative max-h-[88%] overflow-y-auto">
+    <button onclick="app.closeModals()" class="absolute top-2 right-2 text-xl" aria-label="Close">✖</button>
+    <h2 class="text-sm font-bold text-center border-b-2 border-black pb-2">Arcade &amp; Shop</h2>
+
+    <h3 class="text-[10px] font-bold bg-purple-200 p-1 border border-black">🕹️ Play (Earn Coins)</h3>
+    <div class="grid grid-cols-2 gap-2">
+      <button class="pixel-btn p-2 text-[9px] bg-blue-300" onclick="app.startMiniGame('flappy')">Flappy Bro</button>
+      <button class="pixel-btn p-2 text-[9px] bg-red-300" onclick="app.startMiniGame('breaker')">Pixel Breaker</button>
+      <button class="pixel-btn p-2 text-[9px] bg-green-400 col-span-2" onclick="app.startMiniGame('mario')">🍄 Super Bro Land</button>
+      <button class="pixel-btn p-2 text-[9px] bg-indigo-500 text-white col-span-2" onclick="app.startMiniGame('rpg')">⚔️ Final Bro-tasy</button>
+      <button class="pixel-btn p-2 text-[9px] bg-amber-400 col-span-2" onclick="app.startMiniGame('loot')">🪙 Loot Shower</button>
+    </div>
+
+    <h3 class="text-[10px] font-bold bg-yellow-200 p-1 border border-black mt-1">🧢 Style Your Bro</h3>
+    <div class="styled-grid" id="gear-hats"></div>
+    <div class="style-label">👕 Shirts</div>
+    <div class="styled-grid" id="gear-shirts"></div>
+    <div class="style-label">👖 Pants</div>
+    <div class="styled-grid" id="gear-pants"></div>
+    <div class="style-label">👟 Shoes</div>
+    <div class="styled-grid" id="gear-shoes"></div>
+    <div class="style-label">🧤 Wrist</div>
+    <div class="styled-grid" id="gear-wrist"></div>
+    <div class="style-label">🕶️ Glasses</div>
+    <div class="styled-grid" id="gear-glasses"></div>
+    <div class="style-label">⛓️ Chains</div>
+    <div class="styled-grid" id="gear-chains"></div>
+    <div class="style-label">🎒 Backpacks</div>
+    <div class="styled-grid" id="gear-backpacks"></div>
+
+    <h3 class="text-[10px] font-bold bg-green-200 p-1 border border-black mt-2">🛒 Upgrades</h3>
+    <button class="pixel-btn p-2 text-[9px] flex justify-between items-center" onclick="app.buyMiner()">
+      <span>⛏️ Mining Rig</span>
+      <span class="text-yellow-600 font-bold" id="shop-miner-cost">100c</span>
+    </button>
+    <select class="border-2 border-black p-2 text-[10px] w-full font-bold mt-1" onchange="app.setTheme(this.value)" id="theme-select">
+      <option value="lounge">Theme: Vanilla Lounge</option>
+      <option value="gamer">Theme: RGB Gamer</option>
+      <option value="bunker">Theme: Area 51</option>
+      <option value="contrast">Theme: High Contrast</option>
+    </select>
+  </div>
+</div>
+
+<!-- ============ TASKS MODAL ============ -->
+<div id="modal-tasks" class="modal">
+  <div class="bg-white text-black p-4 rounded-xl border-4 border-black w-full max-w-sm flex flex-col gap-3 relative max-h-[88%] overflow-y-auto">
+    <button onclick="app.closeModals()" class="absolute top-2 right-2 text-xl" aria-label="Close">✖</button>
+    <h2 class="text-sm font-bold text-center border-b-2 border-black pb-2">Daily Quests</h2>
+
+    <div class="flex flex-col gap-2">
+      <button class="pixel-btn p-2 text-[8px] text-left" onclick="app.completeTask('Clean Setup', 10, 5)">🧹 Clean Setup (+10c)</button>
+      <button class="pixel-btn p-2 text-[8px] text-left" onclick="app.completeTask('Ranked Grind', 20, 10)">🎮 Ranked Grind (+20c)</button>
+    </div>
+
+    <h3 class="text-[10px] font-bold border-t-2 border-dashed border-gray-400 pt-2 mt-2">Daily Claims</h3>
+    <div id="quest-claims" class="flex flex-col gap-2"></div>
+
+    <h3 class="text-[10px] font-bold border-t-2 border-dashed border-gray-400 pt-2 mt-2">IRL Quests</h3>
+    <div class="flex gap-2">
+      <input type="text" id="irl-input" class="border-2 border-black p-2 text-[8px] flex-1 font-text" placeholder="E.g., Do Laundry">
+      <button class="pixel-btn px-2 text-[8px] bg-green-400" onclick="app.addIrlTask()">Add</button>
+    </div>
+    <div id="irl-list" class="flex flex-col gap-1 mt-1"></div>
+  </div>
+</div>
+
+<!-- ============ STATS MODAL ============ -->
+<div id="modal-stats" class="modal">
+  <div class="bg-white text-black p-4 rounded-xl border-4 border-black w-full max-w-sm flex flex-col gap-3 relative max-h-[88%] overflow-y-auto">
+    <button onclick="app.closeModals()" class="absolute top-2 right-2 text-xl" aria-label="Close">✖</button>
+    <h2 class="text-sm font-bold text-center border-b-2 border-black pb-2">Fitness Stats</h2>
+    <div class="text-[10px] space-y-2 font-text">
+      <div class="flex justify-between bg-yellow-100 p-2 border border-black rounded">
+        <span>🏆 ALL-TIME HIGH:</span>
+        <span id="stat-high" class="font-bold text-yellow-700">0 steps</span>
+      </div>
+      <div class="flex justify-between bg-blue-100 p-2 border border-black rounded">
+        <span>📅 TODAY:</span>
+        <span id="stat-today" class="font-bold text-blue-700">0 steps</span>
+      </div>
+      <div class="mt-4 border-t-2 border-dashed border-gray-400 pt-2">
+        <h3 class="font-bold mb-2">Past Records:</h3>
+        <div id="stat-history" class="space-y-1 max-h-32 overflow-y-auto pr-1"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ DIARY MODAL ============ -->
+<div id="modal-diary" class="modal">
+  <div class="bg-white text-black p-4 rounded-xl border-4 border-black w-full max-w-sm flex flex-col gap-3 relative max-h-[88%] overflow-y-auto">
+    <button onclick="app.closeModals()" class="absolute top-2 right-2 text-xl" aria-label="Close">✖</button>
+    <h2 class="text-sm font-bold text-center border-b-2 border-black pb-2">📖 Ryan's Brain</h2>
+
+    <button class="pixel-btn p-2 text-[8px] w-full bg-fuchsia-200 mb-2" onclick="app.openJournal()">📈 Evolution Journal</button>
+
+    <div class="text-[9px]">
+      <div class="flex justify-between bg-fuchsia-100 p-1.5 border border-black mb-1">
+        <span>LEVEL</span><span id="d-level" class="font-bold">1</span>
+      </div>
+      <div class="flex justify-between bg-purple-100 p-1.5 border border-black mb-1">
+        <span>FORME</span><span id="d-forme" class="font-bold">—</span>
+      </div>
+      <div class="flex justify-between bg-amber-100 p-1.5 border border-black mb-1">
+        <span>TITLE</span><span id="d-title" class="font-bold">—</span>
+      </div>
+      <h3 class="font-bold mt-2 mb-1">Personality Drift</h3>
+      <div id="d-personality" class="space-y-1 mb-2"></div>
+      <h3 class="font-bold mb-1">Memories</h3>
+      <div id="memories-content" class="space-y-1 max-h-36 overflow-y-auto pr-1 mb-2"></div>
+      <h3 class="font-bold mb-1">Diary</h3>
+      <div id="diary-content" class="space-y-1 max-h-40 overflow-y-auto pr-1"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ EVOLUTION JOURNAL MODAL ============ -->
+<div id="modal-journal" class="modal">
+  <div class="bg-white text-black p-4 rounded-xl border-4 border-black w-full max-w-sm flex flex-col gap-3 relative max-h-[88%] overflow-y-auto">
+    <button onclick="app.closeModals()" class="absolute top-2 right-2 text-xl" aria-label="Close">✖</button>
+    <h2 class="text-sm font-bold text-center border-b-2 border-black pb-2">📈 Evolution Journal</h2>
+
+    <h3 class="text-[10px] font-bold">⏳ Save So Far</h3>
+    <div id="j-header" class="grid grid-cols-4 gap-1"></div>
+
+    <h3 class="text-[10px] font-bold border-t-2 border-dashed border-gray-400 pt-2">🧬 Personality History</h3>
+    <div id="j-personality"></div>
+
+    <h3 class="text-[10px] font-bold border-t-2 border-dashed border-gray-400 pt-2">📜 Milestones</h3>
+    <div id="j-timeline" class="space-y-2"></div>
+  </div>
+</div>
+
+<!-- ============ J.O.O.H. MODAL ============ -->
+<div id="modal-jooh" class="modal">
+  <div class="bg-black text-green-400 p-4 rounded-xl border-4 border-green-600 w-full max-w-sm flex flex-col gap-3 relative">
+    <button onclick="app.closeModals()" class="absolute top-2 right-2 text-xl text-green-600 hover:text-green-300" aria-label="Close">✖</button>
+    <h2 class="text-sm font-bold text-center border-b-2 border-green-600 pb-2">📡 J.O.O.H. TRACKER</h2>
+    <p class="text-[8px] text-center text-green-500 -mt-2">Joint Oligarch Observation Hub</p>
+    <div class="font-text text-[12px] bg-green-900/30 p-2 rounded border border-green-800 h-48 overflow-y-auto" id="jooh-feed"></div>
+    <button class="pixel-btn p-2 text-[10px] bg-green-700 text-black w-full border-green-500" onclick="app.hackJooh()">
+      ▶ HACK MAINFRAME (-5 Energy, +10 Coins)
+    </button>
+  </div>
+</div>
+
+<!-- ============ CHIPTUNE COMPOSER ============ -->
+<div id="modal-composer" class="modal">
+  <div class="bg-[#0b1220] text-cyan-300 p-3 rounded-xl border-2 border-cyan-700 w-full max-w-sm flex flex-col gap-2 relative max-h-[92%] overflow-y-auto">
+    <div class="flex justify-between items-center border-b-2 border-cyan-800 pb-1">
+      <h2 class="text-[11px] font-bold">🎹 CHIPTUNE COMPOSER</h2>
+      <button onclick="app.toggleComposer()" class="text-lg text-white hover:text-red-400">✖</button>
+    </div>
+    <div id="comp-tracks" class="flex gap-1 flex-wrap"></div>
+    <div class="flex items-center gap-2 text-[9px]">
+      <button id="comp-play" class="pixel-btn bg-green-700 text-black px-2 py-1 text-[9px]">▶ PLAY</button>
+      <label class="flex items-center gap-1">BPM
+        <input id="comp-bpm" type="number" min="40" max="240" class="w-14 bg-black border border-cyan-700 rounded p-1 text-center font-text">
+      </label>
+      <span id="comp-status" class="text-[8px] text-cyan-500 italic ml-auto"></span>
+    </div>
+    <div id="comp-grid" class="font-text text-[12px]"></div>
+    <div class="flex items-center gap-1 text-[9px]">
+      <span class="text-[8px]">MIDI</span>
+      <input id="comp-midi" type="number" min="0" max="127" class="w-14 bg-black border border-cyan-700 rounded p-1 text-center font-text">
+      <div id="comp-chips" class="flex gap-1 flex-wrap"></div>
+    </div>
+    <div class="flex items-center gap-2 text-[8px]">
+      <button id="comp-reset" class="pixel-btn bg-yellow-700 text-black px-2 py-1">RESET TRACK</button>
+      <span class="text-cyan-700 italic">Edits play in games too. Ctrl+Shift+M toggles me.</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ GAME MODAL ============ -->
+<div id="modal-game" class="modal" style="padding:0; background:#000;">
+  <div class="w-full max-w-[420px] h-full flex flex-col relative bg-gray-900 border-x-2 border-gray-700">
+    <div class="flex justify-between items-center p-2 bg-black text-white text-[10px] font-bold z-10 border-b-2 border-gray-700">
+      <span id="game-score">SCORE: 0</span>
+      <div class="flex items-center gap-2">
+        <span id="game-lives" class="text-red-500">❤️❤️❤️</span>
+        <button id="btn-music" onclick="app.toggleMusic()" title="Toggle music" aria-label="Mute music" class="pixel-btn bg-slate-600 text-white px-2 py-1 text-[9px]">♪</button>
+        <button id="btn-vol" onclick="app.toggleVolPanel()" title="Volume settings" aria-label="Volume settings" class="pixel-btn bg-slate-700 text-white px-2 py-1 text-[9px]">⚙</button>
+        <button onclick="app.closeMiniGame()" class="pixel-btn bg-red-500 text-white px-2 py-1 text-[8px]" aria-label="Quit game">QUIT</button>
+      </div>
+    </div>
+    <!-- Volume settings row (toggled by ⚙) -->
+    <div id="vol-settings" class="hidden bg-black text-white text-[9px] border-b-2 border-gray-700 px-3 py-2 flex flex-col gap-1.5 z-10">
+      <div class="flex items-center gap-2">
+        <span class="w-14 font-bold">♪ BGM</span>
+        <button class="pixel-btn bg-slate-600 text-white w-9 h-8" onclick="app.volStep('music', -1)" title="Quieter BGM">−</button>
+        <span id="vol-music" class="w-9 text-center font-text text-[14px]">100</span>
+        <button class="pixel-btn bg-slate-600 text-white w-9 h-8" onclick="app.volStep('music', 1)" title="Louder BGM">+</button>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="w-14 font-bold">🔊 SFX</span>
+        <button class="pixel-btn bg-slate-700 text-white w-9 h-8" onclick="app.volStep('sfx', -1)" title="Quieter SFX">−</button>
+        <span id="vol-sfx" class="w-9 text-center font-bold text-[12px]">100</span>
+        <button class="pixel-btn bg-slate-700 text-white w-9 h-8" onclick="app.volStep('sfx', 1)" title="Louder SFX">+</button>
+      </div>
+    </div>
+    <canvas id="game-canvas" class="flex-1 w-full h-full cursor-pointer touch-none"></canvas>
+    <div id="virtual-gamepad" class="absolute bottom-6 left-0 right-0 px-6 flex justify-between hidden z-10 pointer-events-none">
+      <div class="flex gap-4 pointer-events-auto">
+        <button id="btn-left" class="pad-btn" aria-label="Move left">◀</button>
+        <button id="btn-right" class="pad-btn" aria-label="Move right">▶</button>
+      </div>
+      <div class="pointer-events-auto">
+        <button id="btn-jump" class="pad-btn bg-red-500/60 border-red-300" aria-label="Jump">A</button>
+      </div>
+    </div>
+    <div id="game-over-screen" class="absolute inset-0 bg-black/90 hidden flex-col justify-center items-center z-20 p-4 text-center">
+      <h2 class="text-2xl text-red-500 font-bold mb-2">GAME OVER</h2>
+      <p id="go-score" class="text-white text-lg font-text mb-1">Score: 0</p>
+      <p id="go-reward" class="text-yellow-400 font-bold text-sm mb-1">+0 Coins</p>
+      <p id="go-msg" class="text-white/70 font-text text-sm mb-6">No comment.</p>
+      <button class="pixel-btn bg-white text-black p-3 text-[10px]" onclick="app.closeMiniGame()">Back to Room</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ INTEL PANEL ============ -->
+<div id="panel-intel" class="panel-slide p-4">
+  <div class="flex justify-between items-center border-b-2 border-blue-500 pb-2 mb-2">
+    <h2 class="text-sm font-bold">📡 Live Gaming Intel</h2>
+    <button onclick="app.toggleNewsPanel(event)" class="text-xl text-white hover:text-red-400">✖</button>
+  </div>
+  <div id="intel-feed" class="flex-1 overflow-y-auto font-text text-[14px] leading-tight space-y-3 pr-2"></div>
+  <div class="mt-2 border-t-2 border-blue-500 pt-2 flex gap-2">
+    <input type="text" id="intel-chat" class="flex-1 bg-black text-green-400 border border-blue-500 rounded p-2 text-[12px] font-text" placeholder="Reply to Ryan…">
+    <button class="pixel-btn bg-blue-600 text-white text-[10px]" onclick="app.sendIntelReply()">Send</button>
+  </div>
+</div>
+
+</body>
+</html>
