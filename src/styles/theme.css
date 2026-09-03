@@ -400,6 +400,29 @@ body {
 }
 .panel-slide.open { right: 0; }
 
+/* Intel feed — rendered model markdown (semantic elements get retro styling) */
+#intel-feed p { margin: 0.35rem 0; }
+#intel-feed p:first-child { margin-top: 0; }
+#intel-feed ul,
+#intel-feed ol { margin: 0.35rem 0; padding-left: 1.15rem; }
+#intel-feed ul { list-style: disc; }
+#intel-feed ol { list-style: decimal; }
+#intel-feed li { margin: 0.2rem 0; }
+#intel-feed code {
+  font-family: "VT323", monospace;
+  font-size: 0.9em;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 3px;
+  padding: 0 3px;
+  color: #4ade80;
+}
+#intel-feed a {
+  color: #7dd3fc;
+  text-decoration: underline;
+  word-break: break-all;
+}
+#intel-feed strong { color: #fde047; }
 /* Composer cells — tiny pixel tracker grid */
 .comp-cell {
   width: 18px;
