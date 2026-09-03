@@ -11,6 +11,7 @@ npm install
 npm run dev          # app on http://127.0.0.1:5173
 npm test             # unit tests
 npm run proxy        # optional: standalone API proxy on :8787 (default)
+npm run build:commit # rebuild dist/ and commit it so deployments never go stale
 ```
 
 ### Enabling the AI brain

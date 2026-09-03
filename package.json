@@ -9,6 +9,7 @@
     "dev:lan": "node scripts/lan.mjs",
     "dev:lan:https": "node scripts/lan.mjs https",
     "build": "vite build",
+    "build:commit": "node scripts/build-dist.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
