@@ -143,7 +143,7 @@ function legY() {
 
 function drawEye(x, y, w, kind, side) {
   const inner = eyeInner(kind, w, side);
-  return `<g class="eye ${side}-eye">${inner}</g>`;
+  return `<g class="eye ${side}-eye" transform="translate(${x}, ${y})">${inner}</g>`;
 }
 
 function eyeInner(kind, w, side) {

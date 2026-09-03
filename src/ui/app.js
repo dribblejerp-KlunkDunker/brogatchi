@@ -48,8 +48,6 @@ export class BroGatchiApp {
     this.chatHistory = [];
     this.gameActive = false;
     this.currentGame = null;
-    this._lastSpecKey = '';
-    this._lastBellyTier = 0;
     this._minuteCounter = 0;
     this._lastTier = weightTier(this.state.stats.weight);
     this._stepsMilestone = this.state.steps >= 5000;
@@ -409,7 +407,13 @@ export class BroGatchiApp {
     }
 
     // Apply personality idle animation classes to the SVG element.
-    svg.setAttribute('class', pidle || '');
+    // NOTE: use classList, NOT setAttribute - setAttribute wipes layout classes
+    // (w-40, h-auto, drop-shadow-xl) set in the HTML, making Ryan invisible.
+    svg.classList.remove(
+      'anim-idle', 'sleeping', 'chewing',
+      'idle-shifty', 'idle-bounce', 'idle-flex', 'idle-chonk', 'idle-slouch'
+    );
+    if (pidle) pidle.split(' ').filter(Boolean).forEach((c) => svg.classList.add(c));
     if (this.sleeping) svg.classList.add('sleeping');
     if (this.chewing) svg.classList.add('chewing');
     if (!this.sleeping && !this.chewing && !pidle) svg.classList.add('anim-idle');

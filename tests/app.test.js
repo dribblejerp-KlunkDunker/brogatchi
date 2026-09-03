@@ -289,4 +289,27 @@ describe('BroGatchiApp integration', () => {
     const { readWeatherCity } = await import('../src/ai/client.js');
     expect(readWeatherCity()).toBe('');
   });
+
+  it('renderRyan keeps Ryan visible: layout classes survive and idle classes layer on', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+    const svg = document.getElementById('ryan-svg');
+    expect(svg).toBeTruthy();
+
+    // Layout classes from index.html must survive rendering (regression: a
+    // setAttribute('class', ...) used to wipe them, hiding Ryan entirely).
+    for (const cls of ['w-40', 'h-auto', 'drop-shadow-xl', 'z-10', 'pixelated', 'anim-idle']) {
+      expect(svg.classList.contains(cls), `svg missing ${cls}`).toBe(true);
+    }
+
+    // Personality idle classes layer on top WITHOUT wiping the layout classes.
+    app.state.personality.paranoia = 70;
+    app.state.stats.energy = 20; // also triggers idle-slouch
+    app.renderRyan();
+    expect(svg.classList.contains('idle-shifty')).toBe(true);
+    expect(svg.classList.contains('idle-slouch')).toBe(true);
+    for (const cls of ['w-40', 'h-auto', 'drop-shadow-xl', 'z-10', 'pixelated']) {
+      expect(svg.classList.contains(cls), `svg lost ${cls}`).toBe(true);
+    }
+  });
 });
