@@ -1,4 +1,4 @@
-// Ryan's personality: 5 trait axes that drift with interactions.
+// Ryan's personality: 6 trait axes that drift with interactions.
 // Traits feed BOTH the local dialogue line picker AND the AI persona prompt.
 
 export const TRAITS = [
@@ -7,10 +7,11 @@ export const TRAITS = [
   { key: 'gluttony', label: 'Gluttony', icon: '🍕' },
   { key: 'fitness', label: 'Fitness', icon: '👟' },
   { key: 'broCode', label: 'Bro Code', icon: '🤝' },
+  { key: 'greed', label: 'Greed', icon: '🤑' },
 ];
 
 export function initialPersonality() {
-  return { paranoia: 20, ego: 22, gluttony: 20, fitness: 12, broCode: 15 };
+  return { paranoia: 20, ego: 22, gluttony: 20, fitness: 12, broCode: 15, greed: 10 };
 }
 
 export function adjust(personality, key, amount) {
@@ -31,6 +32,8 @@ export function minuteDrift(personality, state) {
   if (state.stats.happy > 75) adjust(personality, 'ego', 0.1);
   if (state.stats.weight >= 2.0) adjust(personality, 'gluttony', 0.1);
   if (state.steps === 0 && state.stats.weight < 2.0) adjust(personality, 'fitness', -0.2);
+  if (state.coins >= 100) adjust(personality, 'greed', 0.1);
+  if (state.coins < 30) adjust(personality, 'greed', -0.15);
 }
 
 export function dominant(state) {

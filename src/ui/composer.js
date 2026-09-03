@@ -1,4 +1,4 @@
-// 🎹 CHIPTUNE COMPOSER — a tiny in-browser tracker for the 4 game loops.
+// 🎹 CHIPTUNE COMPOSER — a tiny in-browser tracker for the 5 game loops.
 // Edits go straight into the shared TRACKS objects, so whatever you write
 // here is what plays in the games too (until a reload). The running sequencer
 // picks edits up live; the Play button restarts from step 0 so you can hear

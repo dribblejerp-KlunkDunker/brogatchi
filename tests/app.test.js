@@ -19,7 +19,7 @@ beforeAll(() => {
       {
         get(_t, prop) {
           if (prop === 'measureText') return () => ({ width: 10 });
-          if (prop === 'createLinearGradient') return () => ({ addColorStop() {} });
+          if (prop === 'createLinearGradient' || prop === 'createRadialGradient') return () => ({ addColorStop() {} });
           return typeof prop === 'string' && /^fill|stroke|begin|arc|rect|save|restore|clear|translate|scale|rotate|lineTo|moveTo|ellipse|textBaseline|textAlign$/.test(prop)
             ? () => {}
             : undefined;
@@ -37,6 +37,14 @@ describe('BroGatchiApp integration', () => {
     expect(app.state).toBeTruthy();
     expect(document.getElementById('coin-count').innerText).toBe('50');
     expect(app.state.level).toBe(1);
+
+    // greed meter in the HUD mirrors the personality trait live
+    const greedBar = document.getElementById('bar-greed');
+    expect(greedBar).toBeTruthy();
+    expect(greedBar.style.width).toBe('10%'); // default greed = 10
+    app.state.personality.greed = 42;
+    app.updateUI();
+    expect(greedBar.style.width).toBe('42%');
 
     // pet interaction bumps happiness
     const happyBefore = app.state.stats.happy;
@@ -113,6 +121,23 @@ describe('BroGatchiApp integration', () => {
     app.currentGame.onPointer(200, 400);
     expect(app.currentGame.phase).toBe('combat');
     app.currentGame.update(1 / 60);
+    app.closeMiniGame();
+
+    // loot boots, catches a coin, takes a bomb hit
+    app.startMiniGame('loot');
+    expect(app.gameActive).toBe(true);
+    const g = app.currentGame;
+    expect(g.key).toBe('loot');
+    g.update(1 / 60);
+    g.onPointer(300); // pointer-follow input
+    g.items.push({ x: g.px, y: 515, vy: 300, bomb: false, w: 24, h: 22 });
+    g.update(1 / 60);
+    g.update(1 / 60);
+    expect(g.score).toBeGreaterThan(0);
+    g.items.push({ x: g.px, y: 515, vy: 300, bomb: true, w: 28, h: 28 });
+    g.update(1 / 60);
+    g.update(1 / 60);
+    expect(g.lives).toBe(2);
     app.closeMiniGame();
 
     // persistence
@@ -199,8 +224,8 @@ describe('BroGatchiApp integration', () => {
     // grid built: 3 lane rows x 16 cells
     const cells = modal.querySelectorAll('.comp-cell');
     expect(cells.length).toBe(48);
-    // chips populated
-    expect(document.querySelectorAll('#comp-tracks [data-id]').length).toBe(4);
+    // chips populated (5 game tracks: flappy, breaker, mario, rpg, loot)
+    expect(document.querySelectorAll('#comp-tracks [data-id]').length).toBe(5);
     expect(modal.querySelectorAll('#comp-chips button').length).toBeGreaterThan(3);
 
     // live edit: click a lead cell (col 4 of the flappy lead row) -> midi 60 -> display C4
@@ -311,5 +336,65 @@ describe('BroGatchiApp integration', () => {
     for (const cls of ['w-40', 'h-auto', 'drop-shadow-xl', 'z-10', 'pixelated']) {
       expect(svg.classList.contains(cls), `svg lost ${cls}`).toBe(true);
     }
+  });
+
+  // NOTE: jsdom cannot evaluate inline onclick="app.*" attributes (the global
+  // `app` is never visible to them in this environment), so these tests assert
+  // the HTML wiring by attribute + drive the app methods directly.
+  it('the feed button opens the food menu', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+    const btn = document.querySelector('[aria-label="Open food menu"]');
+    expect(btn.getAttribute('onclick')).toBe('app.openFoodMenu()');
+    app.openFoodMenu();
+    expect(document.getElementById('modal-food').style.display).toBe('flex');
+    app.closeModals();
+  });
+
+  it('petting and feeding Zeke do not also pet Ryan', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+    // ensure a clean companion state regardless of earlier saves
+    app.state.sideBro = null;
+    app.state.coins = 100;
+    app.state.counters.pet = 5;
+    app.spawnSideBro();
+    expect(app.state.sideBro).toBeTruthy();
+    // the room UI wires these companion actions to Zeke, not Ryan
+    const petZeke = document.querySelector('[aria-label="Pet Zeke"]');
+    expect(petZeke.getAttribute('onclick')).toBe('event.stopPropagation(); app.petSideBro()');
+    const feedZeke = document.querySelector('[aria-label="Feed Zeke"]');
+    expect(feedZeke.getAttribute('onclick')).toBe('event.stopPropagation(); app.feedSideBro()');
+
+    const petsBefore = app.state.counters.pet;
+    const zekePetsBefore = app.state.sideBro.pet;
+    app.petSideBro();
+    expect(app.state.sideBro.pet).toBe(zekePetsBefore + 1); // Zeke got petted
+    expect(app.state.counters.pet).toBe(petsBefore); // Ryan did NOT
+
+    const hungerBefore = app.state.sideBro.hunger;
+    app.feedSideBro();
+    expect(app.state.sideBro.hunger).toBeGreaterThan(hungerBefore); // Zeke fed
+    expect(app.state.counters.pet).toBe(petsBefore); // still no Ryan pet
+  });
+
+  it('spawning Zeke never pets Ryan', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+    const spawnBtn = document.getElementById('spawn-side-bro-btn');
+    expect(spawnBtn.getAttribute('onclick')).toBe('event.stopPropagation(); app.spawnSideBro()');
+    // start with no companion (earlier tests may have saved one)
+    app.state.sideBro = null;
+    app.state.coins = 10;
+    app.state.counters.pet = 0;
+
+    app.spawnSideBro(); // too poor -> rejected
+    expect(app.state.sideBro).toBeFalsy();
+    expect(app.state.counters.pet).toBe(0); // spawn did NOT pet Ryan
+
+    app.state.coins = 100;
+    app.spawnSideBro(); // success
+    expect(app.state.sideBro).toBeTruthy();
+    expect(app.state.counters.pet).toBe(0); // still no Ryan pet
   });
 });

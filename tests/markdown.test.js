@@ -57,10 +57,10 @@ describe('renderMarkdown', () => {
       'Read [patch notes](https://example.com/a?x=1&y=2) or https://example.com/b.'
     );
     expect(out).toContain(
-      '<a href="https://example.com/a?x=1&amp;y=2" target="_blank" rel="noopener noreferrer">patch notes</a>'
+      '<a href="https://example.com/a?x=1&amp;y=2" target="_blank" rel="noopener noreferrer" title="Open in browser" class="md-link">patch notes</a>'
     );
     expect(out).toContain(
-      '<a href="https://example.com/b" target="_blank" rel="noopener noreferrer">https://example.com/b</a>.'
+      '<a href="https://example.com/b" target="_blank" rel="noopener noreferrer" title="Open in browser" class="md-link">https://example.com/b</a>.'
     );
     // non-http schemes stay inert plain text
     const evil = renderMarkdown('[click](javascript:alert(1))');

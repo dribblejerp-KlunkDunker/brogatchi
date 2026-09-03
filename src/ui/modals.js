@@ -89,7 +89,7 @@ export function renderDiary(state) {
 }
 
 function traitColor(key) {
-  const map = { paranoia: '#a855f7', ego: '#f59e0b', gluttony: '#ef4444', fitness: '#22c55e', broCode: '#3b82f6' };
+  const map = { paranoia: '#a855f7', ego: '#f59e0b', gluttony: '#ef4444', fitness: '#22c55e', broCode: '#3b82f6', greed: '#eab308' };
   return map[key] || '#94a3b8';
 }
 

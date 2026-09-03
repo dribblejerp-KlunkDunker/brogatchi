@@ -45,6 +45,7 @@ export function titleFor(dom, level = 1) {
     gluttony: ['Snack Warlord', 'Carb Connoisseur', 'Microwave Sommelier'],
     fitness: ['Step Saint', 'Pocket Athlete', 'Cardio Chad'],
     broCode: ['Wingman Supreme', 'Raid Captain', 'Homie MVP'],
+    greed: ['Coin Scrooge', 'Loot Goblin', 'Market Manipulator'],
   };
   const list = pool[dom] || pool.broCode;
   const idx = Math.min(list.length - 1, Math.floor(level / 3));

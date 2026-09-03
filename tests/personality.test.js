@@ -12,6 +12,13 @@ describe('personality.adjust', () => {
   });
 });
 
+describe('personality.initialPersonality', () => {
+  it('includes all six traits including greed', () => {
+    const p = initialPersonality();
+    expect(p.greed).toBe(10);
+  });
+});
+
 describe('personality.applyEvents', () => {
   it('applies trait nudges', () => {
     const p = initialPersonality();
@@ -45,5 +52,29 @@ describe('personality.minuteDrift', () => {
     const before = state.personality.paranoia;
     minuteDrift(state.personality, state);
     expect(state.personality.paranoia).toBeGreaterThan(before);
+  });
+
+  it('rich pets get greedier', () => {
+    const state = defaultState();
+    state.coins = 250;
+    const before = state.personality.greed;
+    minuteDrift(state.personality, state);
+    expect(state.personality.greed).toBeGreaterThan(before);
+  });
+
+  it('broke pets lose greed', () => {
+    const state = defaultState();
+    state.coins = 5;
+    const before = state.personality.greed;
+    minuteDrift(state.personality, state);
+    expect(state.personality.greed).toBeLessThan(before);
+  });
+});
+
+describe('personality.dominant', () => {
+  it('returns greed when it is the highest trait', () => {
+    const state = defaultState();
+    state.personality.greed = 95;
+    expect(dominant(state)).toBe('greed');
   });
 });

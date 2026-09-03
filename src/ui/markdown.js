@@ -76,14 +76,14 @@ function inline(text) {
   // Markdown links — only http(s) targets; anything else stays plain text.
   s = s.replace(
     /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
-    (_, label, url) => hold(`<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`)
+    (_, label, url) => hold(`<a href="${url}" target="_blank" rel="noopener noreferrer" title="Open in browser" class="md-link">${label}</a>`)
   );
 
   // Bare http(s) URLs (the token chars can never appear in model text).
   s = s.replace(/(https?:\/\/[^\s<>"'\u0000]+)/g, (m, url) => {
     const clean = url.replace(/[.,;:!?]+$/, '');
     const trail = url.slice(clean.length);
-    return `${hold(`<a href="${clean}" target="_blank" rel="noopener noreferrer">${clean}</a>`)}${trail}`;
+    return `${hold(`<a href="${clean}" target="_blank" rel="noopener noreferrer" title="Open in browser" class="md-link">${clean}</a>`)}${trail}`;
   });
 
   // Drop leftover unmatched asterisks instead of showing raw **.

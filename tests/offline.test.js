@@ -6,7 +6,7 @@ const state = defaultState();
 
 describe('offline.pickLine', () => {
   it('returns a line for known categories', () => {
-    for (const cat of ['boot', 'morning', 'hunger', 'fed', 'clean', 'sleepOn', 'pedOn', 'hack', 'newDay', 'miner', 'level']) {
+    for (const cat of ['boot', 'morning', 'hunger', 'fed', 'clean', 'sleepOn', 'pedOn', 'hack', 'newDay', 'miner', 'level', 'greedy']) {
       expect(typeof pickLine(cat, state)).toBe('string');
       expect(pickLine(cat, state).length).toBeGreaterThan(0);
     }

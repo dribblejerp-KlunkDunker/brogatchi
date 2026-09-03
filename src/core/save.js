@@ -57,7 +57,7 @@ export function defaultState() {
     level: 1,
     title: null,
     forme: null,
-    bestScores: { flappy: 0, breaker: 0, mario: 0, rpg: 0 },
+    bestScores: { flappy: 0, breaker: 0, mario: 0, rpg: 0, loot: 0 },
     counters: { pizzas: 0, salads: 0, burgers: 0, fuels: 0, gamesWon: 0, hacks: 0, steps: 0, pet: 0 },
     claims: {},
     steps: 0,

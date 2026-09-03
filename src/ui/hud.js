@@ -22,6 +22,7 @@ export function updateHud(state) {
   bar('bar-happy', state.stats.happy);
   bar('bar-hunger', state.stats.hunger);
   bar('bar-energy', state.stats.energy);
+  bar('bar-greed', state.personality.greed);
 
   const coins = $('coin-count');
   if (coins) coins.innerText = String(state.coins);

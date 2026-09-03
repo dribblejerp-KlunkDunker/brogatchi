@@ -6,7 +6,7 @@ import { AudioEngine, TRACKS, TRACKSETS, AMBIENT, ORIGINAL_TRACKS, setNote, setB
 
 describe('TRACKS bank', () => {
   it('has one track per mini-game', () => {
-    expect(Object.keys(TRACKS).sort()).toEqual(['breaker', 'flappy', 'mario', 'rpg']);
+    expect(Object.keys(TRACKS).sort()).toEqual(['breaker', 'flappy', 'loot', 'mario', 'rpg']);
   });
 
   it('every track has equal-length, number-only lead/bass/hat arrays', () => {

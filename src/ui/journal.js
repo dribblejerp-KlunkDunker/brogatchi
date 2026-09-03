@@ -13,6 +13,7 @@ const TRAIT_COLORS = {
   gluttony: '#ef4444',
   fitness: '#22c55e',
   broCode: '#3b82f6',
+  greed: '#eab308',
 };
 
 export function renderJournal(state) {

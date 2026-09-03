@@ -9,6 +9,7 @@ import * as intel from './intel.js';
 import * as jooh from './jooh.js';
 import { renderJournal } from './journal.js';
 import * as composer from './composer.js';
+import { renderMarkdown } from './markdown.js';
 
 import { tick as statsTick, applyOffline, FOODS, weightTier, TIER_NAMES } from '../core/stats.js';
 import { entryFromState, addEntry as journalAdd } from '../core/journal.js';
@@ -30,6 +31,7 @@ import { FlappyGame } from '../games/flappy.js';
 import { BreakerGame } from '../games/breaker.js';
 import { MarioGame } from '../games/mario.js';
 import { RPGGame } from '../games/rpg.js';
+import { LootGame } from '../games/loot.js';
 
 export class BroGatchiApp {
   constructor() {
@@ -411,7 +413,7 @@ export class BroGatchiApp {
     // (w-40, h-auto, drop-shadow-xl) set in the HTML, making Ryan invisible.
     svg.classList.remove(
       'anim-idle', 'sleeping', 'chewing',
-      'idle-shifty', 'idle-bounce', 'idle-flex', 'idle-chonk', 'idle-slouch'
+      'idle-shifty', 'idle-bounce', 'idle-flex', 'idle-chonk', 'idle-slouch', 'idle-greedy'
     );
     if (pidle) pidle.split(' ').filter(Boolean).forEach((c) => svg.classList.add(c));
     if (this.sleeping) svg.classList.add('sleeping');
@@ -506,6 +508,11 @@ export class BroGatchiApp {
     else if (this.state.clutter.length > 2) this.say('Peak gamer setup in here.');
     else this.say(['Lag spike?', 'Skill issue.', 'Need more RGB.', 'Is the mic on?'][Math.floor(Math.random() * 4)]);
     this.updateUI();
+  }
+
+  openFoodMenu() {
+    this.audio.playBeep();
+    modals.openModal('modal-food');
   }
 
   feed(foodKey) {
@@ -739,6 +746,7 @@ export class BroGatchiApp {
       this.state.coins -= 100;
       this.state.inventory.miner = true;
       this.audio.playLevelUp();
+      personality.applyEvents(this.state.personality, [{ trait: 'greed', amount: 3 }]);
       this.memory('Deployed the mining rig. Passive income go brrr.', '\u26CF\uFE0F', 3);
       this.milestone('rig', 'Mining rig online');
       this.say(pickLine('miner', this.state));
@@ -812,6 +820,7 @@ export class BroGatchiApp {
     this.audio.playCoin();
     if (quest.key === 'steps100') personality.applyEvents(this.state.personality, [{ trait: 'fitness', amount: 3 }]);
     if (quest.key === 'pet10') personality.applyEvents(this.state.personality, [{ trait: 'broCode', amount: 2 }]);
+    personality.applyEvents(this.state.personality, [{ trait: 'greed', amount: 1 }]);
     this.say(`Daily claim banked: +${quest.reward} coins. The quest log says nice.`);
     this.gainXp(10);
     this.updateUI();
@@ -872,7 +881,7 @@ export class BroGatchiApp {
 
     if (result.ok) {
       this.chatHistory.push({ role: 'model', parts: [{ text: result.text }] });
-      res.innerHTML = result.text + (result.grounded === false
+      res.innerHTML = renderMarkdown(result.text) + (result.grounded === false
         ? '<div class="mt-2 border-t border-gray-300 pt-1 text-[7px] text-gray-400">\u26A1 no live web search on this key \u2014 answers from my firmware</div>'
         : '');
       this.state.coins += 5;
@@ -913,7 +922,7 @@ export class BroGatchiApp {
     this.state.stats.energy -= 5;
     this.state.stats.happy = Math.min(100, this.state.stats.happy + 5);
     this.state.counters.hacks++;
-    personality.applyEvents(this.state.personality, [{ trait: 'paranoia', amount: 5 }, { trait: 'ego', amount: 2 }]);
+    personality.applyEvents(this.state.personality, [{ trait: 'paranoia', amount: 5 }, { trait: 'ego', amount: 2 }, { trait: 'greed', amount: 3 }]);
     this.memory('Hacked the billionaire grid. They fear us.', '\uD83D\uDEF0\uFE0F', 3);
     jooh.refreshJoohFeed(this.state);
     this.say(pickLine('hack', this.state));
@@ -982,6 +991,7 @@ export class BroGatchiApp {
     if (s.hunger < 30) line = pickLine('hunger', this.state);
     else if (s.happy < 40) line = pickLine('happy', this.state);
     else if (s.energy < 20) line = pickLine('tired', this.state);
+    else if (this.state.personality.greed > 60 && Math.random() < 0.5) line = pickLine('greedy', this.state);
     else if (Math.random() < 0.5) {
       const hour = new Date().getHours();
       const bank = hour < 11 ? 'morning' : hour < 18 ? 'midday' : hour < 23 ? 'evening' : 'night';
@@ -1004,7 +1014,7 @@ export class BroGatchiApp {
     hud.$('game-score').innerText = 'SCORE: 0';
     hud.$('game-lives').innerText = '\u2764\uFE0F\u2764\uFE0F\u2764\uFE0F';
 
-    const Games = { flappy: FlappyGame, breaker: BreakerGame, mario: MarioGame, rpg: RPGGame };
+    const Games = { flappy: FlappyGame, breaker: BreakerGame, mario: MarioGame, rpg: RPGGame, loot: LootGame };
     this.currentGame = new Games[type](this, cvs);
     this.currentGame.start();
 
@@ -1026,7 +1036,7 @@ export class BroGatchiApp {
       if (p) this.currentGame.onPointerMove(p.x, p.y, e);
     };
 
-    if (type === 'mario') {
+    if (type === 'mario' || type === 'loot') {
       hud.$('virtual-gamepad').classList.remove('hidden');
     } else {
       hud.$('virtual-gamepad').classList.add('hidden');
@@ -1124,7 +1134,7 @@ export class BroGatchiApp {
     }
     this.state.stats.happy = Math.min(100, this.state.stats.happy + 20);
     this.state.stats.weight = Math.max(1.0, this.state.stats.weight - 0.2);
-    personality.applyEvents(this.state.personality, [{ trait: 'ego', amount: 4 }]);
+    personality.applyEvents(this.state.personality, [{ trait: 'ego', amount: 4 }, { trait: 'greed', amount: 1 }]);
     this.memory(`Won ${gameLabel(gameKey)} with ${score} points.`, '\uD83C\uDFAE', 3);
 
     const scr = hud.$('game-over-screen');
@@ -1196,5 +1206,5 @@ export class BroGatchiApp {
 // helpers
 // ------------------------------------------------------------------------
 function gameLabel(key) {
-  return { flappy: 'Flappy Bro', breaker: 'Pixel Breaker', mario: 'Super Bro Land', rpg: 'Final Bro-tasy' }[key] || key;
+  return { flappy: 'Flappy Bro', breaker: 'Pixel Breaker', mario: 'Super Bro Land', rpg: 'Final Bro-tasy', loot: 'Loot Shower' }[key] || key;
 }

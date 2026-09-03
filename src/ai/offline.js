@@ -18,6 +18,7 @@ export function generatedTheory(state) {
     `my energy is ${Math.round(state.stats.energy)}% — they cap the battery to keep us offline`,
     `${state.steps} steps today and my location data still leaked to the rats`,
     `I'm level ${state.level} and NOW they nerf my favorite food`,
+    `my ${state.coins} coins are being debased by the inflation patch`,
   ];
   const conspiracies = [
     'the floor is a loading screen for a bigger room',
@@ -147,6 +148,13 @@ const LINES = {
   intelFallback: [
     '<span class="text-red-400">[SIGNAL JAM - no API key set]</span> Rumor wire says: a crab dev is buffing everything, one studio drops a patch nobody asked for, and the capybaras have opinions.',
   ],
+  greedy: [
+    'Coins at {coins}. The vault breathes. I love the vault.',
+    'Another coin banked. The market hates to see me coming.',
+    'More loot secured. My wallet has its own gravitational pull.',
+    'I would trade a memory card for coins. Not a memory. Never a memory.',
+    'Every coin is one step closer to buying the devs out.',
+  ],
   stormLine: [
     'Bro… I can feel the {condition} in my circuits. The roof is DEFINITELY leaking.',
     'Storm detected. {temp}°C outside and I am staying INDOORS. You should too.',
@@ -168,6 +176,7 @@ const gameWinLines = {
   breaker: ['Brick status: vaporized. Physics bends to me.', 'Breaker cleared. The rectangles had a family.'],
   mario: ['SUPER BRO LAND complete. The 5G tower is mine.', 'Beat the level AND the agency. New best.'],
   rpg: ['VICTORY. The feds cannot throttle a save file.', 'RPG won. Zeke firewall hack performed. Bargain.'],
+  loot: ['LOOT SECURED. The billionaire grid just got lighter.', 'Caught it all. The leak is MY payroll now.', 'Every coin caught. The devs will never patch this leak.'],
 };
 
 // ---- public API ----

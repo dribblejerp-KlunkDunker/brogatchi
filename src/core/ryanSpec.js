@@ -14,6 +14,7 @@ export function personalityIdleClasses(state) {
   if (p.broCode > 45) c.push('idle-bounce');
   if (p.ego > 50) c.push('idle-flex');
   if (p.gluttony > 55) c.push('idle-chonk');
+  if (p.greed > 55) c.push('idle-greedy');
   if (s.energy < 30) c.push('idle-slouch');
   return c.join(' ');
 }

@@ -51,6 +51,7 @@ export function buildStateReport(state) {
       gluttony: Math.round(state.personality.gluttony),
       fitness: Math.round(state.personality.fitness),
       broCode: Math.round(state.personality.broCode),
+      greed: Math.round(state.personality.greed),
     },
     recentMemories: memories,
     lastDiaryEntry: lastDiary ? lastDiary.lines[0] : null,
