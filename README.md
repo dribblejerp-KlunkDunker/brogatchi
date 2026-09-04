@@ -170,6 +170,35 @@ in character and goes quiet for a while — the Tide keeps its own rate limits.
 > Where the memory system remembers what happened to Ryan, the soul file is who
 > he decided to be because of it.
 
+## 📡 Intel, J.O.O.H., and Ask Ryan
+
+Three more AI surfaces, all sharing one quota-resilient gateway, the markdown
+renderer, and the retro pixel-link styling:
+
+- **Live Gaming Intel** (📺 button) — real game news and drops, stat-grounded
+  in Ryan's persona, with a reply box so you can talk to him about it.
+- **J.O.O.H. Tracker** (🟢 button) — the Joint Oligarch Observation Hub: a
+  satirical surveillance feed of tech-billionaire caricatures, plus a rogue
+  AI-generated signal. The HACK MAINFRAME button pays coins for energy.
+- **Ask Ryan** (🧠 button) — ask him anything; he answers in character with
+  live web search when the wire is up, from his firmware (opinions, memories,
+  soul) when it isn't. Every exchange becomes a memory on both sides.
+
+![Live Gaming Intel — markdown news feed with pixel-chip links](docs/screenshots/intel-feed.png)
+
+*Live Gaming Intel: bold, bullets, and tap-friendly pixel-chip links; your
+replies thread right into the feed.*
+
+![J.O.O.H. Tracker — satirical billionaire surveillance feed](docs/screenshots/jooh-tracker.png)
+
+*J.O.O.H.: green-terminal status lines, with the AI's rogue signal riding on
+top when a key is configured.*
+
+![Ask Ryan — in-character answers with markdown](docs/screenshots/ask-ryan.png)
+
+*Ask Ryan: answers render markdown with the same pixel-chip links; the offline
+note appears when he answers from firmware instead of the wire.*
+
 ## Audio
 
 - **Chiptune loops** — each mini-game has 3 tracks that switch on milestones
