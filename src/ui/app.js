@@ -7,6 +7,7 @@ import * as modals from './modals.js';
 import * as inventory from './inventory.js';
 import * as intel from './intel.js';
 import * as jooh from './jooh.js';
+import * as moltbook from './moltbook.js';
 import { renderJournal } from './journal.js';
 import * as composer from './composer.js';
 import { renderMarkdown } from './markdown.js';
@@ -401,6 +402,7 @@ export class BroGatchiApp {
       spec.outfit.glasses.id, spec.outfit.chain.id, spec.outfit.wrist ? spec.outfit.wrist.id : 'n',
       spec.outfit.backpack.id,
       this.state.forme || 'none', this.sleeping ? 1 : 0, this.chewing ? 1 : 0,
+      this.state.moltbook?.eye || 'closed',
       pidle,
     ].join('|');
     if (key !== this.lastSpecKey) {
@@ -884,6 +886,9 @@ export class BroGatchiApp {
       res.innerHTML = renderMarkdown(result.text) + (result.grounded === false
         ? '<div class="mt-2 border-t border-gray-300 pt-1 text-[7px] text-gray-400">\u26A1 no live web search on this key \u2014 answers from my firmware</div>'
         : '');
+      // Ryan remembers his own answer, not just the question.
+      const plain = result.text.replace(/[#*>`<\b]/g, '').trim().replace(/\s+/g, ' ');
+      this.rememberOnce(`answered-${plain.slice(0, 40)}`, `Ryan answered: "${plain.slice(0, 60)}"`, '\uD83D\uDCDD', 2);
       this.state.coins += 5;
       this.state.stats.happy = Math.min(100, this.state.stats.happy + 10);
       personality.applyEvents(this.state.personality, [{ trait: 'paranoia', amount: 1 }]);
@@ -943,6 +948,34 @@ export class BroGatchiApp {
   fetchNews() { return intel.fetchNews(this); }
   sendIntelReply() { intel.sendReply(this); }
 
+  // ---------------------------------------------------------- moltbook
+  openMoltbook() {
+    this.audio.playBeep();
+    modals.openModal('modal-moltbook');
+    moltbook.bindFeedEvents(this);
+    moltbook.openMoltbook(this);
+  }
+
+  moltbookPost() {
+    this.audio.playBeep();
+    moltbook.postTheory(this);
+  }
+
+  moltbookUsher() {
+    this.audio.playBeep();
+    moltbook.usher(this);
+  }
+
+  moltbookOpenConv(convId) {
+    this.audio.playBeep();
+    moltbook.openConversationView(this, convId);
+  }
+
+  moltbookBack() {
+    this.audio.playBeep();
+    moltbook.backToFeed(this);
+  }
+
   // ---------------------------------------------------------- leveling
   gainXp(amount) {
     const before = this.state.level;
@@ -972,6 +1005,15 @@ export class BroGatchiApp {
     this.state.memories.sort((a, b) => b.imp - a.imp);
     if (this.state.memories.length > 14) this.state.memories.length = 14;
     this.save();
+  }
+
+  // Like memory(), but skips duplicates of the same logical event (keyed).
+  rememberOnce(key, text, icon, imp) {
+    this._memoryKeys = this._memoryKeys || {};
+    if (this._memoryKeys[key] === text) return false;
+    this._memoryKeys[key] = text;
+    this.memory(text, icon, imp);
+    return true;
   }
 
   // ---------------------------------------------------------- rollover

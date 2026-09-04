@@ -5,6 +5,7 @@ import { $ } from './hud.js';
 import { chat } from '../ai/client.js';
 import { buildStateReport } from '../ai/context.js';
 import { buildRyanSystemPrompt } from '../ai/prompt.js';
+import { renderMarkdown } from './markdown.js';
 
 const CEOS_LIST = [
   'Zucker-borg 9000 (Meta)', 'Elon Martian (X/Space)', 'Jeff Space-zos (Amazon)',
@@ -58,7 +59,7 @@ export async function appendAIIntercept(state, containerSelector) {
       feed.innerHTML += `
         <div class="mt-3 p-2 border border-purple-600 bg-purple-900/30">
           <div class="font-bold text-purple-300">🛰️ ROGUE SIGNAL</div>
-          <div class="text-purple-200">${result.text}</div>
+          <div class="text-purple-200">${renderMarkdown(result.text)}</div>
         </div>`;
     }
   }

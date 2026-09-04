@@ -28,6 +28,8 @@ export function todayKey() {
   return new Date().toLocaleDateString();
 }
 
+import { normalizeMoltbook, defaultMoltbook } from './moltbook.js';
+
 export function defaultState() {
   return {
     version: 4,
@@ -66,6 +68,7 @@ export function defaultState() {
     currentDate: todayKey(),
     lastSave: Date.now(),
     sideBro: null,
+    moltbook: defaultMoltbook(),
   };
 }
 
@@ -155,6 +158,7 @@ export function normalize(s) {
   if (!Array.isArray(out.journal)) out.journal = [];
   if (!Array.isArray(out.clutter)) out.clutter = [];
   if (!Array.isArray(out.irlTasks)) out.irlTasks = [];
+  out.moltbook = normalizeMoltbook(out.moltbook);
   return out;
 }
 

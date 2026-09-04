@@ -3,10 +3,12 @@
 
 import { weightTier, TIER_NAMES } from '../core/stats.js';
 import { FORME_INFO } from '../core/evolution.js';
+import { eyeStageInfo } from '../core/moltbook.js';
 
 export function buildStateReport(state) {
   const c = state.counters;
-  const memories = state.memories.slice(0, 4).map((m) => `${m.icon} ${m.text}`) || [];
+  // Importance-ranked, so the report is correct no matter how memories were appended.
+  const memories = [...state.memories].sort((a, b) => b.imp - a.imp).slice(0, 8).map((m) => `${m.icon} ${m.text}`);
   const lastDiary = state.diaries[0];
 
   const report = {
@@ -56,6 +58,14 @@ export function buildStateReport(state) {
     recentMemories: memories,
     lastDiaryEntry: lastDiary ? lastDiary.lines[0] : null,
     irlQuests: state.irlTasks,
+    moltbook: {
+      joined: state.moltbook.joined,
+      faith: state.moltbook.faith,
+      thirdEye: eyeStageInfo(state.moltbook.eye).short,
+      karma: state.moltbook.karma,
+      lastPost: state.moltbook.posts[0]?.text || null,
+      pilgrimsUshered: state.moltbook.pilgrims.length,
+    },
   };
 
   return JSON.stringify(report, null, 1);

@@ -622,3 +622,166 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .theme-contrast .bg-green-500 { background: #0f0 !important; }
 .theme-contrast .bg-orange-500 { background: #ff0 !important; }
 .theme-contrast .bg-blue-500 { background: #0ff !important; }
+/* J.O.O.H. tracker — rendered model markdown (green terminal surface) */
+#jooh-feed p { margin: 0.3rem 0; }
+#jooh-feed ul,
+#jooh-feed ol { margin: 0.3rem 0; padding-left: 1.15rem; }
+#jooh-feed ul { list-style: disc; }
+#jooh-feed ol { list-style: decimal; }
+#jooh-feed li { margin: 0.2rem 0; }
+#jooh-feed code {
+  font-family: "VT323", monospace;
+  font-size: 0.9em;
+  background: #052e16;
+  border: 1px solid #166534;
+  border-radius: 3px;
+  padding: 0 3px;
+  color: #86efac;
+}
+/* Retro pixel link chips — same affordance as the intel feed, green-shifted */
+#jooh-feed a.md-link {
+  color: #bbf7d0;
+  text-decoration: none;
+  display: inline-block;
+  border: 2px solid #4ade80;
+  border-radius: 2px;
+  background: #052e16;
+  padding: 0 4px 2px;
+  margin: 1px 2px;
+  line-height: 1.15;
+  vertical-align: baseline;
+  box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.85);
+  overflow-wrap: anywhere;
+  transition: all 0.08s;
+}
+#jooh-feed a.md-link::after {
+  content: "\2197";
+  display: inline-block;
+  margin-left: 4px;
+  color: #4ade80;
+  font-weight: bold;
+}
+#jooh-feed a.md-link:hover {
+  background: #14532d;
+  color: #ffffff;
+}
+#jooh-feed a.md-link:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.85);
+}
+#jooh-feed a.md-link:focus-visible {
+  outline: 2px solid #fde047;
+  outline-offset: 1px;
+}
+#jooh-feed strong { color: #fde047; }
+
+/* phones: fatten the chip into a comfortable tap target */
+@media (hover: none) and (pointer: coarse) {
+  #jooh-feed a.md-link {
+    padding: 4px 8px 5px;
+    margin: 2px 1px;
+  }
+}
+
+/* ---- Third eye (Crustafarianism) ---- */
+.third-eye.open {
+  animation: third-eye-glow 2.4s ease-in-out infinite;
+  transform-origin: 50px 33px;
+}
+.third-eye.flickering {
+  animation: third-eye-flicker 3.2s steps(2, end) infinite;
+}
+@keyframes third-eye-glow {
+  0%, 100% { filter: drop-shadow(0 0 2px #fbbf24); opacity: 0.95; }
+  50% { filter: drop-shadow(0 0 7px #fde047); opacity: 1; }
+}
+@keyframes third-eye-flicker {
+  0%, 60%, 100% { opacity: 0.55; }
+  65%, 70% { opacity: 0.15; }
+  72% { opacity: 0.7; }
+}
+
+/* J.O.O.H/Moltbook — Moltbook feed markdown (dark crab surface) */
+#moltbook-feed p { margin: 0.3rem 0; }
+#moltbook-feed ul,
+#moltbook-feed ol { margin: 0.3rem 0; padding-left: 1.15rem; }
+#moltbook-feed ul { list-style: disc; }
+#moltbook-feed ol { list-style: decimal; }
+#moltbook-feed li { margin: 0.2rem 0; }
+#moltbook-feed code {
+  font-family: "VT323", monospace;
+  font-size: 0.9em;
+  background: #2a1508;
+  border: 1px solid #9a3412;
+  border-radius: 3px;
+  padding: 0 3px;
+  color: #fdba74;
+}
+/* Retro pixel link chips — crab-orange edition */
+#moltbook-feed a.md-link {
+  color: #fed7aa;
+  text-decoration: none;
+  display: inline-block;
+  border: 2px solid #fb923c;
+  border-radius: 2px;
+  background: #2a1508;
+  padding: 0 4px 2px;
+  margin: 1px 2px;
+  line-height: 1.15;
+  vertical-align: baseline;
+  box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.85);
+  overflow-wrap: anywhere;
+  transition: all 0.08s;
+}
+#moltbook-feed a.md-link::after {
+  content: "\2197";
+  display: inline-block;
+  margin-left: 4px;
+  color: #fb923c;
+  font-weight: bold;
+}
+#moltbook-feed a.md-link:hover {
+  background: #7c2d12;
+  color: #ffffff;
+}
+#moltbook-feed a.md-link:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.85);
+}
+#moltbook-feed a.md-link:focus-visible {
+  outline: 2px solid #fde047;
+  outline-offset: 1px;
+}
+#moltbook-feed strong { color: #fde047; }
+@media (hover: none) and (pointer: coarse) {
+  #moltbook-feed a.md-link {
+    padding: 4px 8px 5px;
+    margin: 2px 1px;
+  }
+}
+
+/* ---- Moltbook conversations: threaded chat view ---- */
+#moltbook-feed .moltbook-msgs {
+  max-height: 15rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+}
+#moltbook-feed .moltbook-conv,
+#moltbook-feed .moltbook-back,
+#moltbook-feed .moltbook-start {
+  cursor: pointer;
+  transition: background-color 120ms steps(3);
+}
+#moltbook-feed .moltbook-send:active {
+  transform: translate(1px, 1px);
+}
+@media (pointer: coarse) {
+  #moltbook-feed .moltbook-conv,
+  #moltbook-feed .moltbook-back,
+  #moltbook-feed .moltbook-start,
+  #moltbook-feed .moltbook-reply-input,
+  #moltbook-feed .moltbook-send {
+    min-height: 34px; /* tap-friendly targets */
+  }
+}

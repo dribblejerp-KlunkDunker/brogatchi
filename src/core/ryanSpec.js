@@ -140,5 +140,6 @@ export function buildSpec(state, flags = {}) {
     outfit: outfitOf(state),
     forme,
     sleeping: !!flags.sleeping,
+    thirdEye: state.moltbook?.eye || 'closed',
   };
 }

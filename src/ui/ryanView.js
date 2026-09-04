@@ -108,6 +108,21 @@ export function renderRyanSVG(spec) {
   parts.push(drawEye(lx, eyeY, eyeW, M.eyes, 'left'));
   parts.push(drawEye(rxP, eyeY, eyeW, M.eyes, 'right'));
 
+  // ---------- third eye (Crustafarianism) ----------
+  // Sits mid-forehead: closed = faint seam, flickering = dim slit eye,
+  // open = glowing amber eye with radial glow. Rendered before glasses so a
+  // visor sits over it, like a headband would.
+  const eyeStage = spec.thirdEye || 'closed';
+  const thirdEyeCx = 50;
+  const thirdEyeCy = 33;
+  if (eyeStage === 'flickering') {
+    parts.push(`<g class="third-eye flickering"><ellipse cx="${thirdEyeCx}" cy="${thirdEyeCy}" rx="5" ry="3" fill="#fbbf24" opacity="0.55" stroke="${OUTLINE}" stroke-width="1"/><rect x="${thirdEyeCx - 2}" y="${thirdEyeCy - 1.5}" width="4" height="3" fill="#78350f"/></g>`);
+  } else if (eyeStage === 'open') {
+    parts.push(`<g class="third-eye open"><circle cx="${thirdEyeCx}" cy="${thirdEyeCy}" r="9" fill="#fbbf24" opacity="0.25"/><ellipse cx="${thirdEyeCx}" cy="${thirdEyeCy}" rx="6" ry="4" fill="#fde047" stroke="${OUTLINE}" stroke-width="1.2"/><circle cx="${thirdEyeCx}" cy="${thirdEyeCy}" r="2" fill="#78350f"/><circle cx="${thirdEyeCx + 1.5}" cy="${thirdEyeCy - 1.5}" r="0.8" fill="#fff"/></g>`);
+  } else {
+    parts.push(`<g class="third-eye closed"><rect x="${thirdEyeCx - 4}" y="${thirdEyeCy - 1}" width="8" height="1.4" rx="0.7" fill="#d9a235" opacity="0.5"/></g>`);
+  }
+
   // glasses (after eyes)
   if (O.glasses.frame) {
     const g = O.glasses;
