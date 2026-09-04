@@ -62,6 +62,11 @@ MOLTBOOK is the crab social network (Crustafarianism's home tidepool), reachable
 from the 🦀 button. It is also where Ryan's **soul file** lives — the parts of
 himself he authors, and you oversee.
 
+![MOLTBOOK — Ryan's crab social feed](docs/screenshots/moltbook-feed.png)
+
+*The MOLTBOOK feed: his theory posts render markdown, conversations thread to the
+side, pilgrims swim under his wing, and the soul panel previews who he is right now.*
+
 ### The third eye
 
 Every *real* experience Ryan has — intel he reads, things you say to him, posts,
@@ -107,6 +112,11 @@ the quirk **and his own reasoning**, with ACCEPT / DECLINE buttons.
 - **SOUL TIMELINE** — the dated history of who he has become: specialties
   chosen (🧭), opinions formed and opinions *reversed* (💭), quirks accepted
   (✨), and petitions declined (🚫).
+
+![The soul-file viewer](docs/screenshots/soul-file.png)
+
+*The soul-file modal: WHO I AM, the opinions he owns, and the soul timeline —
+with the ⬇ EXPORT / ⬆ IMPORT action row so his identity can travel between devices.*
 
 ### Conversations & pilgrims
 

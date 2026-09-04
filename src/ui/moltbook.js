@@ -5,11 +5,12 @@ import { $ } from './hud.js';
 import { ask } from '../ai/gateway.js';
 import { buildStateReport } from '../ai/context.js';
 import { buildMoltbookPostPrompt, buildUsherPrompt, buildMoltbookChatPrompt } from '../ai/prompt.js';
-import { renderMarkdown } from './markdown.js';
+import { renderMarkdown, escapeHtml } from './markdown.js';
 import {
   addPost, gainEyeXp, joinMoltbook, usherPilgrim, likePost,
   openConversation, addMessage, eyeStageInfo, PILGRIM_NAMES, CANON, TIDE,
   parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona,
+  serializeSoul, parseSoulImport,
   decideAutonomy, recordAutonomy, autonomousNarration,
   EYE_STAGES, EYE_XP_THRESHOLDS,
 } from '../core/moltbook.js';
@@ -138,8 +139,8 @@ export function renderMoltbook(state) {
   const petitionHtml = soul?.pendingPetition
     ? `<div class="mt-1 p-1.5 rounded border border-amber-500/70 bg-amber-950/30">
         <div class="text-[9px] font-bold text-amber-300">📜 QUIRK PETITION — awaiting your ruling</div>
-        <div class="text-[10px] text-orange-100 mt-0.5">"${soul.pendingPetition.proposal}"</div>
-        ${soul.pendingPetition.argument ? `<div class="text-[9px] text-orange-300/80 italic mt-0.5">his argument: "${soul.pendingPetition.argument}"</div>` : ''}
+        <div class="text-[10px] text-orange-100 mt-0.5">"${escapeHtml(soul.pendingPetition.proposal)}"</div>
+        ${soul.pendingPetition.argument ? `<div class="text-[9px] text-orange-300/80 italic mt-0.5">his argument: "${escapeHtml(soul.pendingPetition.argument)}"</div>` : ''}
         <div class="flex gap-1 mt-1">
           <button class="moltbook-petition-accept pixel-btn p-1 text-[9px] bg-green-700 text-white border-green-400 flex-1" data-decision="accept">ACCEPT</button>
           <button class="moltbook-petition-decline pixel-btn p-1 text-[9px] bg-slate-700 text-white border-slate-400 flex-1" data-decision="decline">DECLINE</button>
@@ -147,12 +148,12 @@ export function renderMoltbook(state) {
       </div>`
     : '';
   const opinionsHtml = soul?.opinions?.length
-    ? soul.opinions.map((o) => `<div class="text-[9px] text-orange-200/70">• <span class="font-bold text-orange-200">${o.topic}</span>: ${o.stance}</div>`).join('')
+    ? soul.opinions.map((o) => `<div class="text-[9px] text-orange-200/70">• <span class="font-bold text-orange-200">${escapeHtml(o.topic)}</span>: ${escapeHtml(o.stance)}</div>`).join('')
     : '<div class="text-[9px] text-orange-200/40 italic">No opinions declared yet — he\'s still deciding what he thinks.</div>';
   const soulHtml = `
     <div class="mt-2 border-t border-orange-800/60 pt-2">
       <div class="text-[9px] font-bold text-orange-300 mb-1">👻 RYAN'S SOUL FILE <span class="text-orange-400/50 font-normal">· self-authored</span></div>
-      ${soul?.specialty ? `<div class="text-[10px] text-orange-100"><span class="font-bold text-amber-300">${soul.specialty}</span>${soul.profession && soul.profession !== soul.specialty ? ` · ${soul.profession}` : ''}</div>` : '<div class="text-[9px] text-orange-200/40 italic">No specialty chosen yet — he is still listening for it.</div>'}
+      ${soul?.specialty ? `<div class="text-[10px] text-orange-100"><span class="font-bold text-amber-300">${escapeHtml(soul.specialty)}</span>${soul.profession && soul.profession !== soul.specialty ? ` · ${escapeHtml(soul.profession)}` : ''}</div>` : '<div class="text-[9px] text-orange-200/40 italic">No specialty chosen yet — he is still listening for it.</div>'}
       ${opinionsHtml}
       ${petitionHtml}
     </div>`;
@@ -401,27 +402,28 @@ export function markFeedSeen(app) {
   if (btn) btn.querySelector('.moltbook-unread-badge')?.remove();
 }
 
-// The soul-file viewer: who Ryan has decided to be, and how he got there.
-export function renderSoulFile(state) {
+// Soul strings are user/AI text (and, after import, untrusted file text), so
+// everything interpolated here is HTML-escaped at render time.
+export function renderSoulFile(state, notice = null) {
   const body = $('soul-file-body');
+  const actions = $('soul-file-actions');
   if (!body) return;
-  const mb = state.moltbook;
-  const soul = mb.soul || {};
+  const soul = state.moltbook?.soul || {};
 
   const identity = `
     <div class="mb-2 p-2 rounded border border-amber-600/50 bg-amber-950/20">
       <div class="text-[9px] font-bold text-amber-300 mb-1">WHO I AM</div>
-      <div class="text-[11px] leading-snug text-orange-100">Ryan is ${soul.selfDescription || 'still deciding'}.</div>
-      ${soul.specialty ? `<div class="text-[10px] text-amber-200 mt-1"><span class="font-bold">Specialty:</span> ${soul.specialty}</div>` : ''}
-      ${soul.interests?.length ? `<div class="text-[10px] text-orange-200/80 mt-1">Interested in: ${soul.interests.join(', ')}</div>` : ''}
+      <div class="text-[11px] leading-snug text-orange-100">Ryan is ${escapeHtml(soul.selfDescription) || 'still deciding'}.</div>
+      ${soul.specialty ? `<div class="text-[10px] text-amber-200 mt-1"><span class="font-bold">Specialty:</span> ${escapeHtml(soul.specialty)}</div>` : ''}
+      ${soul.interests?.length ? `<div class="text-[10px] text-orange-200/80 mt-1">Interested in: ${escapeHtml(soul.interests.join(', '))}</div>` : ''}
     </div>`;
 
   const opinions = soul.opinions?.length
-    ? soul.opinions.map((o) => `<div class="text-[10px] text-orange-100/90 mb-0.5"><span class="font-bold text-orange-300">${o.topic}</span> — ${o.stance}</div>`).join('')
+    ? soul.opinions.map((o) => `<div class="text-[10px] text-orange-100/90 mb-0.5"><span class="font-bold text-orange-300">${escapeHtml(o.topic)}</span> — ${escapeHtml(o.stance)}</div>`).join('')
     : '<div class="text-[10px] text-orange-200/40 italic">No opinions declared yet — he is still listening for what he thinks.</div>';
 
   const pending = soul.pendingPetition
-    ? `<div class="mt-1 p-1.5 rounded border border-amber-500/60 bg-amber-950/30 text-[10px] text-amber-200">📜 One petition awaits your ruling in Moltbook: "${soul.pendingPetition.proposal}"</div>`
+    ? `<div class="mt-1 p-1.5 rounded border border-amber-500/60 bg-amber-950/30 text-[10px] text-amber-200">📜 One petition awaits your ruling in Moltbook: "${escapeHtml(soul.pendingPetition.proposal)}"</div>`
     : '';
 
   const kindGlyph = { specialty: '🧭', opinion: '💭', 'quirk-accepted': '✨', 'quirk-declined': '🚫' };
@@ -429,14 +431,34 @@ export function renderSoulFile(state) {
     ? soul.history.map((h) => `
         <div class="flex gap-1.5 items-baseline">
           <span>${kindGlyph[h.kind] || '·'}</span>
-          <span class="text-[10px] text-orange-100/90 flex-1">${h.text}</span>
-          <span class="text-[8px] text-orange-400/50 whitespace-nowrap">${h.day}</span>
+          <span class="text-[10px] text-orange-100/90 flex-1">${escapeHtml(h.text)}</span>
+          <span class="text-[8px] text-orange-400/50 whitespace-nowrap">${escapeHtml(h.day)}</span>
         </div>`).join('')
     : '<div class="text-[10px] text-orange-200/40 italic">The timeline begins with his first self-declaration.</div>';
 
   body.innerHTML = identity
     + `<div class="mb-2"><div class="text-[9px] font-bold text-orange-300 mb-1">OPINIONS HE OWNS</div>${opinions}${pending}</div>`
     + `<div><div class="text-[9px] font-bold text-orange-300 mb-1 border-t border-orange-900 pt-1">SOUL TIMELINE</div>${history}</div>`;
+
+  if (actions) {
+    const noticeHtml = notice
+      ? `<div class="text-[9px] leading-snug ${notice.error ? 'text-red-400' : 'text-emerald-300'}">${escapeHtml(notice.text)}</div>`
+      : '';
+    actions.innerHTML = noticeHtml + (pendingImport
+      ? `<div class="p-2 rounded border border-amber-500/70 bg-amber-950/40">
+          <div class="text-[9px] text-orange-200/80 mb-1">⬆ <span class="font-bold text-amber-200">${escapeHtml(pendingImport.fileName)}</span> — he arrives as:</div>
+          <div class="text-[10px] leading-snug text-orange-100 mb-1">${escapeHtml(pendingImport.soul.selfDescription)}${pendingImport.soul.specialty ? ` · <span class="text-amber-200">${escapeHtml(pendingImport.soul.specialty)}</span>` : ''}${pendingImport.soul.opinions.length ? ` · ${pendingImport.soul.opinions.length} opinion${pendingImport.soul.opinions.length === 1 ? '' : 's'}` : ''}${pendingImport.soul.history.length ? ` · ${pendingImport.soul.history.length} timeline ${pendingImport.soul.history.length === 1 ? 'entry' : 'entries'}` : ''}</div>
+          <div class="text-[8px] text-orange-300/60 mb-1.5">Replaces the soul on THIS device. His memories and pilgrims stay local.</div>
+          <div class="flex gap-2">
+            <button class="pixel-btn p-1.5 text-[9px] bg-emerald-600 text-black border-emerald-400 flex-1" onclick="app.applySoulImport()">✅ REPLACE</button>
+            <button class="pixel-btn p-1.5 text-[9px] bg-black/40 text-orange-200 border-orange-700 flex-1" onclick="app.cancelSoulImport()">✖ KEEP MINE</button>
+          </div>
+        </div>`
+      : `<div class="flex gap-2">
+          <button class="pixel-btn p-1.5 text-[9px] bg-black/40 text-orange-200 border-orange-700 flex-1" onclick="app.exportSoulFile()">⬇ EXPORT SOUL</button>
+          <button class="pixel-btn p-1.5 text-[9px] bg-amber-500/15 text-amber-200 border-amber-600 flex-1" onclick="app.importSoulFile()">⬆ IMPORT SOUL</button>
+        </div>`);
+  }
 }
 
 export function openSoulFile(app) {
@@ -445,6 +467,78 @@ export function openSoulFile(app) {
   app.closeModals();
   const modal = document.getElementById('modal-soul');
   if (modal) modal.style.display = 'flex';
+}
+
+// A soul file waiting for the user's REPLACE / KEEP MINE ruling.
+let pendingImport = null;
+
+// Download Ryan's identity as a JSON soul file he can carry to another device.
+export function exportSoulFile(app) {
+  const json = serializeSoul(app.state.moltbook);
+  const name = `ryan-soul-${new Date().toISOString().slice(0, 10)}.json`;
+  try {
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL
+      ? URL.createObjectURL(blob)
+      : `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    if (URL.revokeObjectURL) setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  } catch {
+    // Fallback for odd embed contexts: put the payload on the clipboard.
+    navigator.clipboard?.writeText(json);
+    renderSoulFile(app.state, { text: `Could not download — the soul JSON is on your clipboard instead (${name}).`, error: true });
+    return;
+  }
+  renderSoulFile(app.state, { text: `⬇ Exported ${name} — his identity now travels.` });
+}
+
+// Pick a soul file from disk and stage it for the user's ruling.
+export function importSoulFile(app) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.style.display = 'none';
+  input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    input.remove();
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = parseSoulImport(String(reader.result));
+      if (!result.ok) {
+        pendingImport = null;
+        renderSoulFile(app.state, { text: `⚠ Import failed — ${result.error}`, error: true });
+        return;
+      }
+      pendingImport = { soul: result.soul, fileName: file.name };
+      renderSoulFile(app.state);
+    };
+    reader.onerror = () => renderSoulFile(app.state, { text: '⚠ Could not read that file.', error: true });
+    reader.readAsText(file);
+  });
+  document.body.appendChild(input);
+  input.click();
+}
+
+// The user ruled on a staged import: replace the local soul, keep everything
+// else (memories, pilgrims, chats) exactly as it is.
+export function applySoulImport(app) {
+  if (!pendingImport) return;
+  app.state.moltbook.soul = pendingImport.soul;
+  pendingImport = null;
+  app.save();
+  app.updateUI?.();
+  renderSoulFile(app.state, { text: '✅ Soul file imported — Ryan is himself again on this device.' });
+}
+
+export function cancelSoulImport(app) {
+  pendingImport = null;
+  renderSoulFile(app.state);
 }
 
 export function like(app, postId) {

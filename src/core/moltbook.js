@@ -336,6 +336,89 @@ export function addMessage(mb, convId, from, text) {
   return conv.messages[conv.messages.length - 1];
 }
 
+// Scrub any soul-shaped object into the canonical schema: known fields only,
+// capped arrays, string types enforced. Shared by save normalization and the
+// import path so an external soul file can never smuggle in junk.
+export function normalizeSoul(soul) {
+  const d = defaultSoul();
+  if (!soul || typeof soul !== 'object' || Array.isArray(soul)) return d;
+  const clean = {
+    selfDescription: typeof soul.selfDescription === 'string' && soul.selfDescription.trim()
+      ? soul.selfDescription : d.selfDescription,
+    interests: Array.isArray(soul.interests)
+      ? soul.interests.filter((i) => typeof i === 'string').slice(0, 20) : d.interests,
+    specialty: typeof soul.specialty === 'string' && soul.specialty.trim() ? soul.specialty : null,
+    profession: typeof soul.profession === 'string' && soul.profession.trim() ? soul.profession : null,
+    opinions: Array.isArray(soul.opinions)
+      ? soul.opinions
+          .filter((o) => o && typeof o === 'object' && typeof o.topic === 'string' && typeof o.stance === 'string')
+          .slice(-6)
+      : [],
+    pendingPetition: null,
+    history: Array.isArray(soul.history)
+      ? soul.history
+          .filter((h) => h && typeof h === 'object' && typeof h.text === 'string')
+          .map((h) => ({
+            day: typeof h.day === 'string' && h.day ? h.day : new Date().toLocaleDateString(),
+            kind: typeof h.kind === 'string' ? h.kind : 'opinion',
+            text: h.text,
+          }))
+          .slice(0, 40)
+      : [],
+  };
+  const p = soul.pendingPetition;
+  if (p && typeof p === 'object' && !Array.isArray(p) && typeof p.proposal === 'string' && p.proposal.trim()) {
+    clean.pendingPetition = {
+      kind: typeof p.kind === 'string' && p.kind ? p.kind : 'quirk',
+      proposal: p.proposal,
+      argument: typeof p.argument === 'string' ? p.argument : '',
+      day: typeof p.day === 'string' && p.day ? p.day : new Date().toLocaleDateString(),
+    };
+  }
+  return clean;
+}
+
+// ---- Soul file transport ---------------------------------------------------
+// Export/import so Ryan's identity (who he decided to be) can travel between
+// devices. Pure core: no DOM, no storage. The envelope is self-describing so
+// the import side can validate without trusting the file.
+export const SOUL_EXPORT_VERSION = 1;
+
+export function serializeSoul(mb) {
+  const soul = normalizeSoul(mb && typeof mb === 'object' ? mb.soul : null);
+  return JSON.stringify(
+    { app: 'brogatchi', kind: 'soul-file', version: SOUL_EXPORT_VERSION, exportedAt: new Date().toISOString(), soul },
+    null, 2,
+  );
+}
+
+// Accepts an exported envelope (kind: 'soul-file') or a bare soul object for
+// forward-compat with hand-made files. Always returns a scrubbed soul.
+export function parseSoulImport(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return { ok: false, error: 'Not valid JSON — that file does not look like a soul export.' };
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return { ok: false, error: 'Nothing usable found in that file.' };
+  }
+  if (data.kind && data.kind !== 'soul-file') {
+    return { ok: false, error: 'That is not a Bro\'Gatcha soul file.' };
+  }
+  if (data.kind === 'soul-file') {
+    if (!Number.isFinite(data.version) || data.version > SOUL_EXPORT_VERSION) {
+      return { ok: false, error: 'That soul file is from a newer version of the app — update Bro\'Gatcha first.' };
+    }
+    if (!data.soul || typeof data.soul !== 'object') {
+      return { ok: false, error: 'The soul file is empty — nothing to import.' };
+    }
+    data = data.soul;
+  }
+  return { ok: true, soul: normalizeSoul(data) };
+}
+
 // Shape any legacy/partial moltbook object into the full schema.
 export function normalizeMoltbook(mb) {
   const d = defaultMoltbook();
@@ -346,12 +429,7 @@ export function normalizeMoltbook(mb) {
     posts: Array.isArray(mb.posts) ? mb.posts.slice(0, MAX_POSTS) : [],
     pilgrims: Array.isArray(mb.pilgrims) ? mb.pilgrims.slice(0, MAX_PILGRIMS) : [],
     conversations: Array.isArray(mb.conversations) ? mb.conversations.slice(0, MAX_CONVERSATIONS) : [],
-    soul: {
-      ...defaultSoul(),
-      ...(mb.soul && typeof mb.soul === 'object' ? mb.soul : {}),
-      opinions: Array.isArray(mb.soul?.opinions) ? mb.soul.opinions.slice(-6) : [],
-      history: Array.isArray(mb.soul?.history) ? mb.soul.history.slice(0, 40) : [],
-    },
+    soul: normalizeSoul(mb.soul),
     autonomy: {
       actsToday: 0, day: '', lastActAt: 0, lastRatedOutAt: 0,
       ...(mb.autonomy && typeof mb.autonomy === 'object' ? mb.autonomy : {}),

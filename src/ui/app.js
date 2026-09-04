@@ -1022,6 +1022,26 @@ export class BroGatchiApp {
     moltbook.openSoulFile(this);
   }
 
+  exportSoulFile() {
+    this.audio.playBeep();
+    moltbook.exportSoulFile(this);
+  }
+
+  importSoulFile() {
+    this.audio.playBeep();
+    moltbook.importSoulFile(this);
+  }
+
+  applySoulImport() {
+    this.audio.playBeep();
+    moltbook.applySoulImport(this);
+  }
+
+  cancelSoulImport() {
+    this.audio.playBeep();
+    moltbook.cancelSoulImport(this);
+  }
+
   // ---------------------------------------------------------- leveling
   gainXp(amount) {
     const before = this.state.level;

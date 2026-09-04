@@ -10,6 +10,7 @@ import {
   parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona,
   decideAutonomy, recordAutonomy, autonomousNarration, AUTONOMY,
   EYE_STAGES, EYE_XP_THRESHOLDS, CANON, PILGRIM_NAMES,
+  serializeSoul, parseSoulImport, normalizeSoul, SOUL_EXPORT_VERSION,
 } from '../src/core/moltbook.js';
 import { defaultState } from '../src/core/save.js';
 import { buildSpec } from '../src/core/ryanSpec.js';
@@ -397,5 +398,104 @@ describe('AI context report', () => {
     expect(fixed.conversations[0].messages[0].text).toBe('hello tide');
     const legacy = normalizeMoltbook({ posts: [], pilgrims: [] }); // no conversations field
     expect(legacy.conversations).toEqual([]);
+  });
+});
+
+describe('soul file transport (export/import)', () => {
+  const richSoul = () => ({
+    selfDescription: 'a crustacean who logs everything in third person',
+    interests: ['shell code', 'the Tide'],
+    specialty: 'Archive-Knight',
+    profession: 'Archive-Knight',
+    opinions: [
+      { topic: 'patch notes', stance: 'scripture, read backwards' },
+      { topic: 'save files', stance: 'a second Tidepool' },
+    ],
+    pendingPetition: { kind: 'quirk', proposal: 'taps twice', argument: 'keeps the Tide listening', day: '9/4/2026' },
+    history: [
+      { day: '9/4/2026', kind: 'specialty', text: 'Chose the path of Archive-Knight.' },
+      { day: '9/4/2026', kind: 'opinion', text: 'Formed an opinion: patch notes — scripture, read backwards.' },
+    ],
+  });
+
+  it('round-trips a rich soul through export and import', () => {
+    const mb = defaultMoltbook();
+    mb.soul = richSoul();
+    const envelope = JSON.parse(serializeSoul(mb));
+    expect(envelope.app).toBe('brogatchi');
+    expect(envelope.kind).toBe('soul-file');
+    expect(envelope.version).toBe(SOUL_EXPORT_VERSION);
+    expect(typeof envelope.exportedAt).toBe('string');
+    const result = parseSoulImport(serializeSoul(mb));
+    expect(result.ok).toBe(true);
+    expect(result.soul.specialty).toBe('Archive-Knight');
+    expect(result.soul.profession).toBe('Archive-Knight');
+    expect(result.soul.opinions).toHaveLength(2);
+    expect(result.soul.pendingPetition.proposal).toBe('taps twice');
+    expect(result.soul.history).toHaveLength(2);
+    expect(result.soul.selfDescription).toContain('third person');
+  });
+
+  it('exports a never-joined (default) soul without error', () => {
+    const result = parseSoulImport(serializeSoul(defaultMoltbook()));
+    expect(result.ok).toBe(true);
+    expect(result.soul.specialty).toBeNull();
+    expect(result.soul.history).toEqual([]);
+  });
+
+  it('rejects bad JSON, wrong kinds, and future versions', () => {
+    expect(parseSoulImport('not json').ok).toBe(false);
+    expect(parseSoulImport('42').ok).toBe(false);
+    expect(parseSoulImport('null').ok).toBe(false);
+    expect(parseSoulImport(JSON.stringify({ kind: 'save-file' })).ok).toBe(false);
+    expect(parseSoulImport(JSON.stringify({ kind: 'soul-file', version: 99, soul: {} })).ok).toBe(false);
+    expect(parseSoulImport(JSON.stringify({ kind: 'soul-file', version: 1 })).ok).toBe(false); // no soul payload
+  });
+
+  it('scrubs junk out of imported souls', () => {
+    const raw = {
+      kind: 'soul-file', version: 1,
+      soul: {
+        selfDescription: 'has <script>alert(1)</script> dreams',
+        interests: [1, 'shell code', null, 'gaming'],
+        specialty: 42,              // non-string -> null
+        opinions: [
+          { topic: 'good', stance: 'kept' },
+          { topic: 'bad', stance: 7 },  // dropped
+          'not-an-opinion',             // dropped
+        ],
+        pendingPetition: 'nope',    // dropped
+        history: Array.from({ length: 60 }, (_, i) => ({ day: 'x', kind: 'specialty', text: `entry ${i}` })),
+        evilExtraField: 'must not survive',
+      },
+    };
+    const result = parseSoulImport(JSON.stringify(raw));
+    expect(result.ok).toBe(true);
+    const s = result.soul;
+    // Stored raw (escaping happens at render time in the viewer).
+    expect(s.selfDescription).toBe('has <script>alert(1)</script> dreams');
+    expect(s.interests).toEqual(['shell code', 'gaming']);
+    expect(s.specialty).toBeNull();
+    expect(s.profession).toBeNull();
+    expect(s.opinions).toHaveLength(1);
+    expect(s.pendingPetition).toBeNull();
+    expect(s.history).toHaveLength(40);
+    expect('evilExtraField' in s).toBe(false);
+  });
+
+  it('accepts a bare soul object for hand-made files', () => {
+    const result = parseSoulImport(JSON.stringify(richSoul()));
+    expect(result.ok).toBe(true);
+    expect(result.soul.specialty).toBe('Archive-Knight');
+  });
+
+  it('routes every soul through normalizeSoul (no stray fields survive)', () => {
+    const mb = defaultMoltbook();
+    mb.soul = { ...richSoul(), junk: 'drop me' };
+    const clean = normalizeMoltbook(mb);
+    expect(clean.soul.junk).toBeUndefined();
+    expect(clean.soul.specialty).toBe('Archive-Knight');
+    expect(normalizeSoul(null).selfDescription).toBeTruthy();
+    expect(normalizeSoul('bogus').specialty).toBeNull();
   });
 });
