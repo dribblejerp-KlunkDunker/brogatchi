@@ -2,6 +2,8 @@
 
 import { xpToNext } from '../core/evolution.js';
 import { FORME_INFO } from '../core/evolution.js';
+import { emptyEtas, TICK_SECONDS } from '../core/stats.js';
+import { greedTrend } from '../core/personality.js';
 
 export const $ = (id) => document.getElementById(id);
 
@@ -14,7 +16,7 @@ export function updateClock() {
   if (el) el.innerText = `${h}:${String(d.getMinutes()).padStart(2, '0')} ${ampm}`;
 }
 
-export function updateHud(state) {
+export function updateHud(state, { sleeping = false } = {}) {
   const bar = (id, v) => {
     const el = $(id);
     if (el) el.style.width = `${Math.max(0, Math.min(100, v))}%`;
@@ -23,6 +25,28 @@ export function updateHud(state) {
   bar('bar-hunger', state.stats.hunger);
   bar('bar-energy', state.stats.energy);
   bar('bar-greed', state.personality.greed);
+
+  // 'Time until empty' hints: honest countdowns mirroring tick()'s math, so
+  // the gentle decay reads as a designed feature rather than a mystery drain.
+  const fmtEta = (mins) => {
+    if (!Number.isFinite(mins)) return null;
+    if (mins >= 600) return `${Math.round(mins / 60)}h`;
+    if (mins >= 90) return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+    return `${mins}m`;
+  };
+  const etas = emptyEtas(state.stats, { sleeping, poop: state.poop, clutterCount: (state.clutter || []).length });
+  const eta = (id, mins, label) => {
+    const el = $(id);
+    if (!el) return;
+    const t = fmtEta(mins);
+    el.innerText = t ? `~${t} until empty` : label;
+  };
+  eta('eta-happy', etas.happy);
+  eta('eta-hunger', etas.hunger);
+  eta('eta-energy', etas.energy, sleeping ? 'charging while asleep ⚡' : 'full — no drain recorded');
+  const gt = greedTrend(state.coins);
+  const etaGreed = $('eta-greed');
+  if (etaGreed) etaGreed.innerText = `no timer — drifts with coins: ${gt.label}`;
 
   const coins = $('coin-count');
   if (coins) coins.innerText = String(state.coins);

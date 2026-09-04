@@ -36,6 +36,15 @@ export function minuteDrift(personality, state) {
   if (state.coins < 30) adjust(personality, 'greed', -0.07);
 }
 
+// Greed has no decay clock — it drifts with your coin balance (see
+// minuteDrift: rich → greedier, broke → mellower). The stat-bar hint reports
+// that trend honestly instead of pretending there's a countdown.
+export function greedTrend(coins) {
+  if (coins >= 100) return { dir: 'rising', label: 'coins piling up — greed feeding' };
+  if (coins < 30) return { dir: 'easing', label: 'broke — greed mellowing' };
+  return { dir: 'steady', label: 'balanced — greed holding' };
+}
+
 export function dominant(state) {
   const p = state.personality;
   let best = 'broCode';

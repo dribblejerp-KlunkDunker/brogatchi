@@ -19,6 +19,29 @@ export function tick(stats, { sleeping = false, poop = 0, clutterCount = 0 } = {
   return s;
 }
 
+// 'Time until empty' estimates for the stat-bar hints. These mirror tick()'s
+// math exactly so the countdown is honest: hunger 1/tick, happy 0.5 + mess
+// penalty per tick, energy 0.5/tick (or +5 regen while asleep), tick = 15s,// sleeping multiplies decay by 0.2. Greed isn't here — it has no clock.
+export const TICK_SECONDS = 15;
+
+export function emptyEtas(stats, { sleeping = false, poop = 0, clutterCount = 0 } = {}) {
+  const mod = sleeping ? 0.2 : 1;
+  const perTick = {
+    happy: (0.5 + (clutterCount * 0.5 + poop * 1) * 0.5) * mod,
+    hunger: 1 * mod,
+    energy: sleeping ? -5 : 0.5, // negative = regenerating
+  };
+  const eta = (v, rate) => {
+    if (rate <= 0) return Infinity; // regenerating or static: never empties
+    return Math.ceil((v / rate) * TICK_SECONDS / 60); // minutes until 0
+  };
+  return {
+    happy: eta(stats.happy, perTick.happy),
+    hunger: eta(stats.hunger, perTick.hunger),
+    energy: eta(stats.energy, perTick.energy),
+  };
+}
+
 // Offline decay: returns new stats + coin gain from a passive miner.
 export function applyOffline(stats, mins, { hasMiner = false } = {}) {
   if (mins <= 0) return { stats: { ...stats }, coins: 0 };

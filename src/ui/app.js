@@ -376,7 +376,7 @@ export class BroGatchiApp {
 
   // ---------------------------------------------------------- colors / bars
   updateUI() {
-    hud.updateHud(this.state);
+    hud.updateHud(this.state, { sleeping: this.sleeping });
     hud.updateMiner(this.state);
     hud.renderClutter(this.state);
     this.renderRyan();

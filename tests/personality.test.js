@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { initialPersonality, adjust, applyEvents, dominant, minuteDrift } from '../src/core/personality.js';
+import { initialPersonality, adjust, applyEvents, dominant, minuteDrift, greedTrend } from '../src/core/personality.js';
 import { defaultState } from '../src/core/save.js';
 
 describe('personality.adjust', () => {
@@ -76,5 +76,13 @@ describe('personality.dominant', () => {
     const state = defaultState();
     state.personality.greed = 95;
     expect(dominant(state)).toBe('greed');
+  });
+});
+
+describe('personality.greedTrend', () => {
+  it('reports the coin-driven drift honestly (no fake countdown)', () => {
+    expect(greedTrend(150).dir).toBe('rising'); // minuteDrift feeds greed ≥100
+    expect(greedTrend(12).dir).toBe('easing'); // minuteDrift mellows greed <30
+    expect(greedTrend(50).dir).toBe('steady'); // in between, neither pushes
   });
 });
