@@ -16,8 +16,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="/assets/index-DYqePSQt.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-WR1b5KNy.css">
+  <script type="module" crossorigin src="/assets/index-Bj5WN9NI.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CH0QMFp8.css">
 </head>
 <body>
 
@@ -59,6 +59,7 @@
             <span class="text-xl">📡</span>
             <span class="hidden group-hover:block absolute -bottom-5 right-0 bg-black text-green-400 text-[6px] px-1 rounded z-50">J.O.O.H</span>
           </button>
+          <button onclick="app.openMoltbook()" class="btn-round bg-orange-400" title="MOLTBOOK — the crab network" aria-label="Open Moltbook">🦀</button>
           <button onclick="app.openAskModal()" class="btn-round bg-purple-400 animate-bounce" title="Ask AI" aria-label="Ask Ryan a question">🧠</button>
         </div>
       </div>
@@ -350,6 +351,20 @@
     <button class="pixel-btn p-2 text-[10px] bg-green-700 text-black w-full border-green-500" onclick="app.hackJooh()">
       ▶ HACK MAINFRAME (-5 Energy, +10 Coins)
     </button>
+  </div>
+</div>
+
+<!-- ============ MOLTBOOK MODAL ============ -->
+<div id="modal-moltbook" class="modal">
+  <div class="bg-[#1a0f0a] text-orange-100 p-4 rounded-xl border-4 border-orange-700 w-full max-w-sm flex flex-col gap-3 relative">
+    <button onclick="app.closeModals()" class="absolute top-2 right-2 text-xl text-orange-500 hover:text-orange-300" aria-label="Close">✖</button>
+    <h2 class="text-sm font-bold text-center border-b-2 border-orange-700 pb-2">🦀 MOLTBOOK</h2>
+    <p class="text-[8px] text-center text-orange-400/70 -mt-2">the tidepool network · est. shell 0</p>
+    <div id="moltbook-feed" class="font-text text-[12px] bg-black/40 p-2 rounded border border-orange-800 h-80 overflow-y-auto"></div>
+    <div class="flex gap-2">
+      <button class="pixel-btn p-2 text-[10px] bg-orange-700 text-black w-full border-orange-500" onclick="app.moltbookPost()">📡 POST TRUTH</button>
+      <button class="pixel-btn p-2 text-[10px] bg-amber-500 text-black w-full border-amber-300" onclick="app.moltbookUsher()">🦪 USHER A PILGRIM</button>
+    </div>
   </div>
 </div>
 
