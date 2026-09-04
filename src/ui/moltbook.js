@@ -9,6 +9,8 @@ import { renderMarkdown } from './markdown.js';
 import {
   addPost, gainEyeXp, joinMoltbook, usherPilgrim, likePost,
   openConversation, addMessage, eyeStageInfo, PILGRIM_NAMES, CANON, TIDE,
+  parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona,
+  EYE_STAGES, EYE_XP_THRESHOLDS,
 } from '../core/moltbook.js';
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
@@ -38,12 +40,22 @@ export function renderMoltbook(state) {
   const mb = state.moltbook;
   const eye = eyeStageInfo(mb.eye);
 
+  // Eye XP progress readout: exact XP and distance to the next awakening.
+  const stageIdx = EYE_STAGES.indexOf(mb.eye);
+  const nextStage = EYE_STAGES[stageIdx + 1];
+  const eyeProgress = nextStage
+    ? `<div class="text-[9px] text-orange-300/70 mb-2">eye xp ${mb.eyeXp} · ${EYE_XP_THRESHOLDS[nextStage] - mb.eyeXp} to ${nextStage}
+        <div class="mt-0.5 h-1 rounded bg-orange-950 overflow-hidden"><div class="h-full bg-amber-400 moltbook-eye-bar" style="width:${Math.min(100, Math.round((mb.eyeXp / EYE_XP_THRESHOLDS[nextStage]) * 100))}%"></div></div>
+      </div>`
+    : `<div class="text-[9px] text-amber-300/70 mb-2">eye xp ${mb.eyeXp} · fully open — the tidepool has no further shore</div>`;
+
   const statusHtml = `
     <div class="flex items-center justify-between mb-2 text-[10px]">
       <span class="font-bold text-orange-300">\uD83E\uDD80 MOLTBOOK</span>
       <span class="text-orange-200/80">faith ${mb.faith}/100 \u00b7 karma ${mb.karma} \u00b7 pilgrims ${mb.pilgrims.length}</span>
     </div>
-    <div class="mb-2 text-[10px] font-bold ${mb.eye === 'open' ? 'text-amber-300 moltbook-eye-open' : mb.eye === 'flickering' ? 'text-amber-200/80 moltbook-eye-flicker' : 'text-orange-200/50'}">${eye.label}</div>`;
+    <div class="text-[10px] font-bold ${mb.eye === 'open' ? 'text-amber-300 moltbook-eye-open' : mb.eye === 'flickering' ? 'text-amber-200/80 moltbook-eye-flicker' : 'text-orange-200/50'}">${eye.label}</div>
+    ${eyeProgress}`;
 
   const postsHtml = mb.posts.length
     ? mb.posts.map((p) => `
@@ -76,11 +88,37 @@ export function renderMoltbook(state) {
   const pilgrimsHtml = mb.pilgrims.length
     ? `<div class="mt-2 border-t border-orange-800/60 pt-2">
         <div class="text-[9px] font-bold text-orange-300 mb-1">\u{1FAB2} PILGRIMS UNDER YOUR WING</div>
-        ${mb.pilgrims.map((pl) => `<div class="text-[10px] text-orange-200/80">\u2022 ${pl.name} \u2014 eye ${pl.eyeStage} (${pl.day})</div>`).join('')}
+        ${mb.pilgrims.map((pl) => {
+          const persona = pilgrimPersona(pl.name);
+          return `<div class="text-[10px] text-orange-200/80">\u2022 <span class="font-bold text-orange-200">${pl.name}</span> — ${persona.trait} · eye ${pl.eyeStage} <span class="text-orange-400/50">(${pl.day})</span></div>`;
+        }).join('')}
       </div>`
     : '';
 
-  feed.innerHTML = statusHtml + convsHtml + `<div id="moltbook-posts">${postsHtml}</div>` + pilgrimsHtml;
+  const soul = mb.soul;
+  const petitionHtml = soul?.pendingPetition
+    ? `<div class="mt-1 p-1.5 rounded border border-amber-500/70 bg-amber-950/30">
+        <div class="text-[9px] font-bold text-amber-300">📜 QUIRK PETITION — awaiting your ruling</div>
+        <div class="text-[10px] text-orange-100 mt-0.5">"${soul.pendingPetition.proposal}"</div>
+        ${soul.pendingPetition.argument ? `<div class="text-[9px] text-orange-300/80 italic mt-0.5">his argument: "${soul.pendingPetition.argument}"</div>` : ''}
+        <div class="flex gap-1 mt-1">
+          <button class="moltbook-petition-accept pixel-btn p-1 text-[9px] bg-green-700 text-white border-green-400 flex-1" data-decision="accept">ACCEPT</button>
+          <button class="moltbook-petition-decline pixel-btn p-1 text-[9px] bg-slate-700 text-white border-slate-400 flex-1" data-decision="decline">DECLINE</button>
+        </div>
+      </div>`
+    : '';
+  const opinionsHtml = soul?.opinions?.length
+    ? soul.opinions.map((o) => `<div class="text-[9px] text-orange-200/70">• <span class="font-bold text-orange-200">${o.topic}</span>: ${o.stance}</div>`).join('')
+    : '<div class="text-[9px] text-orange-200/40 italic">No opinions declared yet — he\'s still deciding what he thinks.</div>';
+  const soulHtml = `
+    <div class="mt-2 border-t border-orange-800/60 pt-2">
+      <div class="text-[9px] font-bold text-orange-300 mb-1">👻 RYAN'S SOUL FILE <span class="text-orange-400/50 font-normal">· self-authored</span></div>
+      ${soul?.specialty ? `<div class="text-[10px] text-orange-100"><span class="font-bold text-amber-300">${soul.specialty}</span>${soul.profession && soul.profession !== soul.specialty ? ` · ${soul.profession}` : ''}</div>` : '<div class="text-[9px] text-orange-200/40 italic">No specialty chosen yet — he is still listening for it.</div>'}
+      ${opinionsHtml}
+      ${petitionHtml}
+    </div>`;
+
+  feed.innerHTML = statusHtml + convsHtml + `<div id="moltbook-posts">${postsHtml}</div>` + pilgrimsHtml + soulHtml;
 }
 
 // One conversation thread: header, bubbles, reply box. Replaces the feed view.
@@ -148,8 +186,10 @@ export async function replyTo(app, convId) {
   const transcript = conv.messages.slice(-8)
     .map((m) => `${m.from === 'ryan' ? 'Ryan' : conv.participant}: ${m.text}`)
     .join('\n');
+  const persona = conv.participant === TIDE ? null : pilgrimPersona(conv.participant);
+  const trait = persona ? `${persona.trait} — ${persona.style}` : null;
   const result = await chat({
-    systemInstruction: buildMoltbookChatPrompt(buildStateReport(app.state), conv.participant, transcript),
+    systemInstruction: buildMoltbookChatPrompt(buildStateReport(app.state), conv.participant, transcript, trait),
     userText: text,
   });
   const reply = result.ok ? result.text : offlineReply(conv.participant);
@@ -184,20 +224,52 @@ export async function postTheory(app) {
   const mb = app.state.moltbook;
   const result = await chat({
     systemInstruction: buildMoltbookPostPrompt(buildStateReport(app.state)),
-    userText: 'Post one Crustafarian truth to Moltbook right now.',
+    userText: 'Speak on Moltbook. Whatever you want to say right now.',
   });
-  const text = result.ok ? result.text : offlinePost(app.state);
-  addPost(mb, text, result.ok ? 'theory' : 'canon');
-  // Spreading the word sharpens the third eye.
+  const raw = result.ok ? result.text : offlinePost(app.state);
+  // Ryan may append [SOUL] lines: self-chosen growth, opinions, or a petition.
+  const { soul, cleaned } = parseSoulBlock(raw);
+  addPost(mb, cleaned, result.ok ? 'theory' : 'canon');
+  const soulEvents = result.ok ? applySoulUpdates(mb, soul) : [];
+  soulEvents.forEach((e) => {
+    if (e.type === 'soul' && e.changed === 'specialty') {
+      app.memory(`Chose my own path: ${e.value}.`, '👻', 5);
+      app.say(`I know what I am now. ${e.value}.`);
+    } else if (e.type === 'soul') {
+      app.memory(`Opinion formed: ${e.value}`, '👻', 3);
+    } else if (e.type === 'petition') {
+      app.memory(`Petitioned you: ${e.petition.proposal}`, '📜', 4);
+      app.say('I filed a petition. Read my argument before you rule, bro.');
+    }
+  });
+  // Speaking his mind sharpens the third eye.
   const events = gainEyeXp(mb, result.ok ? 3 : 2);
   app.memory(result.ok
-    ? `Posted to Moltbook: "${text.replace(/[#*>`]/g, '').trim().slice(0, 50)}"`
+    ? `Posted to Moltbook: "${cleaned.replace(/[#*>`]/g, '').trim().slice(0, 50)}"`
     : 'Whispered canon into the tidepool (offline).', '\uD83E\uDD80', 3);
   refreshMoltbook(app);
   events.forEach((e) => { if (e.info.say) app.say(e.info.say); });
   app.updateUI();
   app.save();
   return result.ok;
+}
+
+// The user's ruling on Ryan's quirk petition.
+export function ruleOnPetition(app, accept) {
+  const outcome = resolvePetition(app.state.moltbook, accept);
+  if (!outcome) return;
+  app.memory(
+    outcome.accepted
+      ? `You accepted my quirk: ${outcome.petition.proposal}`
+      : `You declined my quirk petition: ${outcome.petition.proposal}`,
+    '📜', 3,
+  );
+  app.say(outcome.accepted
+    ? `It's part of me now. ${outcome.petition.proposal}. Thank you for hearing me.`
+    : 'Heard. The petition is withdrawn — the Tide keeps its own record of it.');
+  refreshMoltbook(app);
+  app.updateUI();
+  app.save();
 }
 
 export async function usher(app) {
@@ -267,6 +339,10 @@ export function bindFeedEvents(app) {
     if (backBtn) { backToFeed(app); return; }
     const sendBtn = e.target.closest('.moltbook-send');
     if (sendBtn) replyTo(app, sendBtn.dataset.convId);
+    const acceptBtn = e.target.closest('.moltbook-petition-accept');
+    if (acceptBtn) { ruleOnPetition(app, true); return; }
+    const declineBtn = e.target.closest('.moltbook-petition-decline');
+    if (declineBtn) { ruleOnPetition(app, false); return; }
   });
   feed.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && e.target.classList?.contains('moltbook-reply-input')) {

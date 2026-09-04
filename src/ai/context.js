@@ -66,6 +66,14 @@ export function buildStateReport(state) {
       lastPost: state.moltbook.posts[0]?.text || null,
       pilgrimsUshered: state.moltbook.pilgrims.length,
     },
+    soul: {
+      selfDescription: state.moltbook.soul?.selfDescription || null,
+      specialty: state.moltbook.soul?.specialty || null,
+      profession: state.moltbook.soul?.profession || null,
+      interests: state.moltbook.soul?.interests || [],
+      opinions: state.moltbook.soul?.opinions || [],
+      pendingPetition: state.moltbook.soul?.pendingPetition || null,
+    },
   };
 
   return JSON.stringify(report, null, 1);

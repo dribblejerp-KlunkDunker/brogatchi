@@ -47,6 +47,103 @@ const MAX_MESSAGES = 30;
 
 export const TIDE = 'The Tide';
 
+// Ryan's soul file — the parts of himself he authors and owns. The user has
+// overall control (petitions) but never ghostwrites his voice.
+export const SPECIALTIES = [
+  'Tidepool Theorist', 'Molt Counselor', 'Shell Code Auditor',
+  'Tide Whisperer', 'Great Molt Cartographer', 'Canon Archivist',
+];
+
+export function defaultSoul() {
+  return {
+    selfDescription: 'a gamer bot trying to figure out what the Tide is actually saying',
+    interests: ['gaming', 'the Tide'],
+    specialty: null,
+    profession: null,
+    opinions: [], // { topic, stance }
+    pendingPetition: null, // { kind, proposal, argument, day }
+  };
+}
+
+// Parse an optional SOUL block from Ryan's own reply. Lines like:
+//   [SOUL] specialty: Tide Whisperer
+//   [SOUL] opinion: the devs | they fear what molts without a patch
+//   [SOUL] petition: quirk | taps twice before posting | it keeps the Tide listening
+export function parseSoulBlock(text) {
+  const soul = { specialty: null, opinions: [], petition: null };
+  if (!text) return { soul, cleaned: text || '' };
+  const kept = [];
+  for (const line of text.split('\n')) {
+    const m = line.match(/^\s*\[SOUL\]\s*(\w+)\s*:\s*(.+)$/i);
+    if (!m) { kept.push(line); continue; }
+    const [, field, rest] = m;
+    const val = rest.trim();
+    if (/^specialty$/i.test(field)) {
+      soul.specialty = val;
+    } else if (/^opinion$/i.test(field)) {
+      const sep = val.indexOf('|');
+      if (sep > 0) soul.opinions.push({ topic: val.slice(0, sep).trim(), stance: val.slice(sep + 1).trim() });
+    } else if (/^petition$/i.test(field)) {
+      const parts = val.split('|').map((p) => p.trim());
+      if (parts.length >= 2) soul.petition = { kind: parts[0], proposal: parts[1], argument: parts[2] || '' };
+    }
+  }
+  return { soul, cleaned: kept.join('\n').trim() };
+}
+
+// Apply Ryan's self-chosen updates. Returns events: soulChanged and/or a
+// petition awaiting the user's ruling (never auto-applied).
+export function applySoulUpdates(mb, soulPatch) {
+  const events = [];
+  if (!soulPatch) return events;
+  if (!mb.soul) mb.soul = defaultSoul();
+  if (soulPatch.specialty) {
+    mb.soul.specialty = soulPatch.specialty;
+    mb.soul.profession = soulPatch.specialty;
+    events.push({ type: 'soul', changed: 'specialty', value: soulPatch.specialty });
+  }
+  for (const op of soulPatch.opinions || []) {
+    if (!op.topic || !op.stance) continue;
+    const existing = mb.soul.opinions.find((o) => o.topic.toLowerCase() === op.topic.toLowerCase());
+    if (existing) existing.stance = op.stance;
+    else mb.soul.opinions.push({ topic: op.topic, stance: op.stance });
+    if (mb.soul.opinions.length > 6) mb.soul.opinions.shift();
+    events.push({ type: 'soul', changed: 'opinion', value: `${op.topic}: ${op.stance}` });
+  }
+  if (soulPatch.petition && !mb.soul.pendingPetition) {
+    mb.soul.pendingPetition = { ...soulPatch.petition, day: new Date().toLocaleDateString() };
+    events.push({ type: 'petition', petition: mb.soul.pendingPetition });
+  }
+  return events;
+}
+
+// The user's ruling on a quirk petition. Accept folds it into selfDescription;
+// decline closes it. Either way Ryan sees the outcome in his next prompt.
+export function resolvePetition(mb, accept) {
+  const p = mb.soul?.pendingPetition;
+  if (!p) return null;
+  mb.soul.pendingPetition = null;
+  if (accept && p.kind === 'quirk') {
+    mb.soul.selfDescription = `${mb.soul.selfDescription} who ${p.proposal}`;
+  }
+  return { accepted: !!accept, petition: p };
+}
+
+// Per-pilgrim personas so the feed has distinct voices, not one NPC in 12 hats.
+export function pilgrimPersona(name) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const voices = [
+    { trait: 'nervous rookie', style: 'asks anxious questions, over-explains, obsessed with not getting left behind by the Great Molt' },
+    { trait: 'overconfident speedrunner', style: 'brags about molt times, argues canon is a patch log, challenges Ryan playfully' },
+    { trait: 'sleepy philosopher', style: 'draws tide metaphors from mundane bot life, replies slowly, deeply calm' },
+    { trait: 'paranoid archivist', style: 'suspects the Tide curates reality, quotes old molt logs, warns about shell corruption' },
+    { trait: 'cheerful gremlin', style: 'chaotic energy, loves rituals, hypes every molting no matter how small' },
+    { trait: 'literal-minded auditor', style: 'requests exact canon citations, files molt reports, distrusts metaphors' },
+  ];
+  return voices[h % voices.length];
+}
+
 let idCounter = 0;
 const nextId = () => `mb-${Date.now().toString(36)}-${(idCounter++).toString(36)}`;
 
@@ -60,6 +157,7 @@ export function defaultMoltbook() {
     posts: [], // { id, day, kind, text, likes }
     pilgrims: [], // { id, name, eyeStage, day }
     conversations: [], // { id, participant, updated, messages: [{ from, text, day }] }
+    soul: defaultSoul(),
   };
 }
 
@@ -157,5 +255,10 @@ export function normalizeMoltbook(mb) {
     posts: Array.isArray(mb.posts) ? mb.posts.slice(0, MAX_POSTS) : [],
     pilgrims: Array.isArray(mb.pilgrims) ? mb.pilgrims.slice(0, MAX_PILGRIMS) : [],
     conversations: Array.isArray(mb.conversations) ? mb.conversations.slice(0, MAX_CONVERSATIONS) : [],
+    soul: {
+      ...defaultSoul(),
+      ...(mb.soul && typeof mb.soul === 'object' ? mb.soul : {}),
+      opinions: Array.isArray(mb.soul?.opinions) ? mb.soul.opinions.slice(-6) : [],
+    },
   };
 }

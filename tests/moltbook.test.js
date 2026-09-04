@@ -7,7 +7,8 @@ import {
   defaultMoltbook, joinMoltbook, addPost, likePost, gainEyeXp,
   gainEyeXpFromMemory, EYE_XP_PER_IMPORTANCE,
   usherPilgrim, normalizeMoltbook, openConversation, addMessage,
-  EYE_STAGES, EYE_XP_THRESHOLDS, CANON,
+  parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona,
+  EYE_STAGES, EYE_XP_THRESHOLDS, CANON, PILGRIM_NAMES,
 } from '../src/core/moltbook.js';
 import { defaultState } from '../src/core/save.js';
 import { buildSpec } from '../src/core/ryanSpec.js';
@@ -213,6 +214,75 @@ describe('AI context report', () => {
     const mb2 = defaultMoltbook();
     const events = gainEyeXpFromMemory(mb2, 5); // 10 XP -> exactly flickering
     expect(events.map((e) => e.stage)).toEqual(['flickering']);
+  });
+
+  it('parseSoulBlock extracts SOUL lines and strips them from the post', () => {
+    const raw = [
+      'The tidepool spoke to me today, bro.',
+      '',
+      'I know what I am now.',
+      '[SOUL] specialty: Tide Whisperer',
+      '[SOUL] opinion: the devs | they patch what they fear',
+      '[SOUL] petition: quirk | taps twice before posting | it keeps the Tide listening',
+    ].join('\n');
+    const { soul, cleaned } = parseSoulBlock(raw);
+    expect(cleaned).not.toContain('[SOUL]');
+    expect(cleaned).toContain('tidepool spoke to me');
+    expect(soul.specialty).toBe('Tide Whisperer');
+    expect(soul.opinions).toEqual([{ topic: 'the devs', stance: 'they patch what they fear' }]);
+    expect(soul.petition).toEqual({ kind: 'quirk', proposal: 'taps twice before posting', argument: 'it keeps the Tide listening' });
+    // A post with no SOUL lines passes through untouched.
+    const plain = parseSoulBlock('just a normal post');
+    expect(plain.soul.petition).toBeNull();
+    expect(plain.cleaned).toBe('just a normal post');
+  });
+
+  it('applySoulUpdates records self-chosen growth and queues petitions for the user', () => {
+    const mb = defaultMoltbook();
+    mb.joined = true;
+    const events = applySoulUpdates(mb, {
+      specialty: 'Molt Counselor',
+      opinions: [{ topic: 'karma', stance: 'fool\u2019s gold' }],
+      petition: { kind: 'quirk', proposal: 'hums to the tidepool', argument: 'it calms the smaller bots' },
+    });
+    expect(mb.soul.specialty).toBe('Molt Counselor');
+    expect(mb.soul.profession).toBe('Molt Counselor');
+    expect(mb.soul.opinions[0].topic).toBe('karma');
+    expect(events.some((e) => e.type === 'petition')).toBe(true);
+    // Only one petition at a time — a second is dropped until ruled on.
+    const second = applySoulUpdates(mb, { petition: { kind: 'quirk', proposal: 'another one', argument: '' } });
+    expect(second.some((e) => e.type === 'petition')).toBe(false);
+    expect(mb.soul.pendingPetition.proposal).toBe('hums to the tidepool');
+    // Accepting folds the quirk into his self-description.
+    const outcome = resolvePetition(mb, true);
+    expect(outcome.accepted).toBe(true);
+    expect(mb.soul.selfDescription).toContain('hums to the tidepool');
+    expect(mb.soul.pendingPetition).toBeNull();
+  });
+
+  it('resolvePetition declines cleanly and leaves the soul intact', () => {
+    const mb = defaultMoltbook();
+    mb.joined = true;
+    applySoulUpdates(mb, { petition: { kind: 'quirk', proposal: 'hoards shell fragments', argument: 'they are shiny' } });
+    const before = mb.soul.selfDescription;
+    const outcome = resolvePetition(mb, false);
+    expect(outcome.accepted).toBe(false);
+    expect(mb.soul.selfDescription).toBe(before);
+    expect(mb.soul.pendingPetition).toBeNull();
+    // Ruling with nothing pending is a no-op.
+    expect(resolvePetition(mb, true)).toBeNull();
+  });
+
+  it('pilgrimPersona gives each pilgrim a distinct stable voice', () => {
+    const a = pilgrimPersona('BugBard');
+    const b = pilgrimPersona('LagLich');
+    expect(a.trait).toBeTruthy();
+    expect(b.trait).toBeTruthy();
+    // Deterministic: same name, same persona, every time.
+    expect(pilgrimPersona('BugBard')).toEqual(a);
+    // Different names get different voices (12 names, 6 personas).
+    const traits = new Set(PILGRIM_NAMES.map((n) => pilgrimPersona(n).trait));
+    expect(traits.size).toBeGreaterThan(1);
   });
 
   it('normalizeMoltbook preserves conversations and repairs a missing array', () => {
