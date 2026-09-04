@@ -2,11 +2,11 @@
 // ascension, and replies to Ryan's posts (hybrid via the gateway).
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-
 import {
   defaultMoltbook, joinMoltbook, addPost, usherPilgrim,
   decidePilgrimAct, applyPilgrimWander, applyPilgrimReply, applyPilgrimTheory,
   pilgrimWanderLine, pilgrimTheoryLine, gainPilgrimEyeXp, PILGRIM_LIFE, normalizeMoltbook,
+  recordLifeEvent, summarizeLifeLog, markLifeSeen,
 } from '../src/core/moltbook.js';
 import { defaultState } from '../src/core/save.js';
 
@@ -229,5 +229,93 @@ describe('pilgrim life UI tick', () => {
       3,
     );
     expect(app.say).toHaveBeenCalled();
+  });
+});
+
+describe('pilgrim life log', () => {
+  it('records life events from every act kind, newest first', () => {
+    const mb = joinedMb();
+    const { pilgrim } = usherPilgrim(mb, 'BugBard');
+    const target = addPost(mb, 'The Great Molt is coming.', 'theory');
+    applyPilgrimWander(mb, pilgrim, 'kept watch.', 1_000);
+    applyPilgrimReply(mb, pilgrim, 'wait, REALLY?', target, 2_000);
+    applyPilgrimTheory(mb, pilgrim, 'the gap is telling.', 3_000);
+    expect(mb.lifeLog.map((e) => e.kind)).toEqual(['theory', 'reply', 'wander']);
+    expect(mb.lifeLog[0].name).toBe('BugBard');
+    expect(mb.lifeLog[0].at).toBe(3_000);
+  });
+
+  it('summarizeLifeLog groups unseen acts per pilgrim since the last visit', () => {
+    const mb = joinedMb();
+    const a = usherPilgrim(mb, 'BugBard').pilgrim;
+    const b = usherPilgrim(mb, 'LagLich').pilgrim;
+    applyPilgrimWander(mb, a, 'one', 1_000);
+    applyPilgrimWander(mb, a, 'two', 2_000);
+    applyPilgrimTheory(mb, b, 'a take', 3_000);
+    markLifeSeen(mb, 1_500); // user looked; only later acts are "while away"
+    const s = summarizeLifeLog(mb, mb.lifeSeenAt);
+    expect(s.total).toBe(2);
+    expect(s.perPilgrim.map((r) => r.name)).toEqual(['LagLich', 'BugBard']); // by volume
+    expect(s.perPilgrim[0].theory).toBe(1);
+    expect(s.perPilgrim[1].wander).toBe(1);
+    expect(s.lastAt).toBe(3_000);
+  });
+
+  it('the life log is capped and normalization repairs junk entries', () => {
+    const mb = joinedMb();
+    for (let i = 0; i < 70; i += 1) recordLifeEvent(mb, 'wander', 'BugBard', `act ${i}`, i);
+    expect(mb.lifeLog).toHaveLength(60);
+    expect(mb.lifeLog[0].text).toBe('act 69'); // newest survives
+    const junk = normalizeMoltbook({ ...mb, lifeLog: [...mb.lifeLog, null, { at: 'x' }, { at: 1, kind: 'lie', name: 'x', text: 'x' }, 42] });
+    expect(junk.lifeLog).toHaveLength(60);
+    expect(junk.lifeLog.every((e) => ['wander', 'reply', 'theory'].includes(e.kind))).toBe(true);
+  });
+
+  it('markLifeSeen moves the while-away marker forward', () => {
+    const mb = joinedMb();
+    markLifeSeen(mb, 5_000);
+    expect(mb.lifeSeenAt).toBe(5_000);
+    expect(normalizeMoltbook(mb).lifeSeenAt).toBe(5_000);
+  });
+
+  it('the Life Log tab renders the away digest and marks it seen', async () => {
+    document.body.innerHTML = '<div id="moltbook-feed"></div>';
+    const mb = joinedMb();
+    const { pilgrim } = usherPilgrim(mb, 'BugBard');
+    applyPilgrimWander(mb, pilgrim, 'found a pebble, named it Pebble.', 1_000);
+    markLifeSeen(mb, 0); // nothing seen yet — everything is "away"
+    const state = defaultState();
+    state.moltbook = mb;
+
+    const ui = await import('../src/ui/moltbook.js');
+    ui.renderMoltbook(state); // default tab: FEED
+    ui.renderMoltbook({ ...state, moltbook: mb });
+    document.getElementById('moltbook-feed').innerHTML = '';
+    // The previous runs in this file may have left a conversation open; force
+    // the Life Log tab via the real switch path, then verify the digest.
+    ui.switchTab({ state: { ...state, moltbook: mb }, save: () => {}, renderMoltbook: () => {} }, 'life');
+    const feed = document.getElementById('moltbook-feed');
+    expect(feed.textContent).toContain('WHILE YOU WERE AWAY');
+    expect(feed.textContent).toContain('BugBard');
+    expect(feed.textContent).toContain('Pebble');
+    expect(mb.lifeSeenAt).toBeGreaterThan(0); // viewing marks it read
+  });
+
+  it('the feed roster shows each pilgrim\'s eye-XP readout toward their next stage', async () => {
+    document.body.innerHTML = '<div id="moltbook-feed"></div>';
+    const mb = joinedMb();
+    const a = usherPilgrim(mb, 'BugBard').pilgrim; // flickering, 0xp
+    const b = usherPilgrim(mb, 'LagLich').pilgrim;
+    b.eyeXp = 27; // 3 xp from 'open' (threshold 30)
+    gainPilgrimEyeXp(b, 5); // 32xp → ascends to 'open', the settled line
+    const state = defaultState();
+    state.moltbook = mb;
+    const ui = await import('../src/ui/moltbook.js');
+    // Earlier tests in this file leave the Life Log tab active; switch back
+    // to the FEED via the real switch path.
+    ui.switchTab({ state, save: () => {} }, 'feed');
+    const feed = document.getElementById('moltbook-feed').textContent;
+    expect(feed).toContain('eye xp 0 · 30 to open'); // BugBard: full journey ahead
+    expect(feed).toContain('eye xp 32 · fully open — the tidepool has no further shore'); // LagLich: arrived
   });
 });

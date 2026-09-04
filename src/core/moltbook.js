@@ -46,6 +46,7 @@ const MAX_POSTS = 20;
 const MAX_PILGRIMS = 12;
 const MAX_CONVERSATIONS = 12;
 const MAX_MESSAGES = 30;
+const MAX_LIFE_LOG = 60;
 
 export const TIDE = 'The Tide';
 
@@ -340,6 +341,8 @@ export function defaultMoltbook() {
     soul: defaultSoul(),
     autonomy: { actsToday: 0, day: '', lastActAt: 0, lastRatedOutAt: 0 },
     unread: 0, // autonomous posts/messages waiting to be seen
+    lifeLog: [], // [{ at, kind: 'wander'|'reply'|'theory', name, text }] — pilgrim activity
+    lifeSeenAt: 0, // last time the user read the life log; the 'while away' marker
   };
 }
 
@@ -556,12 +559,23 @@ export function addPilgrimPost(mb, author, text, kind = 'wander', now = Date.now
   return post;
 }
 
+// Append a pilgrim life event to the life log (newest first, capped). The
+// life log is the durable record the 'Life Log' tab summarizes — unlike the
+// feed, it keeps small ambient acts even after posts churn out of MAX_POSTS.
+export function recordLifeEvent(mb, kind, name, text, now = Date.now()) {
+  if (!text || !name) return;
+  if (!Array.isArray(mb.lifeLog)) mb.lifeLog = [];
+  mb.lifeLog.unshift({ at: now, kind, name, text });
+  if (mb.lifeLog.length > MAX_LIFE_LOG) mb.lifeLog.length = MAX_LIFE_LOG;
+}
+
 // A pilgrim wanders through: adds an authored activity post + their own eye XP.
 export function applyPilgrimWander(mb, pilgrim, text, now = Date.now()) {
   if (!pilgrim || !text) return { post: null, events: [] };
   const post = addPilgrimPost(mb, pilgrim.name, text, 'wander', now);
   pilgrim.lastWanderAt = now;
   const events = gainPilgrimEyeXp(pilgrim, PILGRIM_LIFE.WANDER_EYE_XP);
+  recordLifeEvent(mb, 'wander', pilgrim.name, text, now);
   return { post, events };
 }
 
@@ -572,6 +586,7 @@ export function applyPilgrimReply(mb, pilgrim, text, target, now = Date.now()) {
   post.replyTo = target.id;
   pilgrim.lastReplyAt = now;
   const events = gainPilgrimEyeXp(pilgrim, PILGRIM_LIFE.REPLY_EYE_XP);
+  recordLifeEvent(mb, 'reply', pilgrim.name, text, now);
   return { post, events };
 }
 
@@ -582,7 +597,37 @@ export function applyPilgrimTheory(mb, pilgrim, text, now = Date.now()) {
   const post = addPilgrimPost(mb, pilgrim.name, text, 'theory', now);
   pilgrim.lastTheoryAt = now;
   const events = gainPilgrimEyeXp(pilgrim, PILGRIM_LIFE.THEORY_EYE_XP);
+  recordLifeEvent(mb, 'theory', pilgrim.name, text, now);
   return { post, events };
+}
+
+// What did the pilgrims get up to since the user last looked? Groups the life
+// log after `since` (a timestamp, 0 = everything) into a per-pilgrim digest
+// plus ascension moments — the raw material for the 'while you were away'
+// summary. Ascensions are detected from the pilgrims' current stage vs. their
+// stage at `since` is unknowable, so instead we surface the events log and let
+// the UI show the roster's current stages.
+export function summarizeLifeLog(mb, since = 0) {
+  const events = (Array.isArray(mb?.lifeLog) ? mb.lifeLog : []).filter((e) => e && e.at > since);
+  const perPilgrim = new Map();
+  for (const e of events) {
+    const row = perPilgrim.get(e.name) || { name: e.name, wander: 0, reply: 0, theory: 0, total: 0 };
+    if (row[e.kind] !== undefined) row[e.kind] += 1;
+    row.total += 1;
+    perPilgrim.set(e.name, row);
+  }
+  return {
+    events,
+    total: events.length,
+    perPilgrim: [...perPilgrim.values()].sort((a, b) => b.total - a.total),
+    firstAt: events.length ? events[events.length - 1].at : 0,
+    lastAt: events.length ? events[0].at : 0,
+  };
+}
+
+// The user has read the life log: everything from now on is 'while away'.
+export function markLifeSeen(mb, now = Date.now()) {
+  mb.lifeSeenAt = now;
 }
 
 // Pilgrims awaken the same way Ryan does — the thresholds are shared.
@@ -800,6 +845,12 @@ export function normalizeMoltbook(mb) {
       lastTheoryAt: Number.isFinite(p?.lastTheoryAt) ? p.lastTheoryAt : 0,
     })),
     conversations: Array.isArray(mb.conversations) ? mb.conversations.slice(0, MAX_CONVERSATIONS) : [],
+    lifeLog: (Array.isArray(mb.lifeLog) ? mb.lifeLog : [])
+      .filter((e) => e && typeof e === 'object' && Number.isFinite(e.at)
+        && typeof e.name === 'string' && typeof e.text === 'string'
+        && ['wander', 'reply', 'theory'].includes(e.kind))
+      .slice(0, MAX_LIFE_LOG),
+    lifeSeenAt: Number.isFinite(mb.lifeSeenAt) ? mb.lifeSeenAt : 0,
     soul: normalizeSoul(mb.soul),
     autonomy: {
       actsToday: 0, day: '', lastActAt: 0, lastRatedOutAt: 0,

@@ -15,6 +15,7 @@ import {
   decideAutonomy, recordAutonomy, autonomousNarration,
   decidePilgrimAct, applyPilgrimWander, applyPilgrimReply, applyPilgrimTheory,
   pilgrimWanderLine, pilgrimTheoryLine, PILGRIM_LIFE,
+  summarizeLifeLog, markLifeSeen,
   EYE_STAGES, EYE_XP_THRESHOLDS,
 } from '../core/moltbook.js';
 
@@ -23,6 +24,10 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 // Which conversation view is open (null = feed). Background refreshes respect
 // this so an auto-post never yanks the user out of a chat they're typing in.
 let activeConvId = null;
+
+// Which Moltbook tab is open: 'feed' | 'life'. Background refreshes render the
+// tab the user is actually looking at.
+let activeTab = 'feed';
 
 // Autonomy guard: at most one spontaneous act in flight at a time.
 let autonomyInFlight = false;
@@ -150,6 +155,30 @@ function offlinePost(state, spontaneous = false) {
 export function renderMoltbook(state) {
   const feed = $('moltbook-feed');
   if (!feed) return;
+  if (activeTab === 'life') { renderLifeLog(state); return; }
+  renderMoltbookFeed(state);
+}
+
+// The feed tab: everything the single view used to be.
+// Eye-XP progress readout for one pilgrim — mirrors Ryan's own eye block: exact
+// xp, xp-to-next-stage, and an amber bar. Pilgrims start at 'flickering', so
+// their next shore is 'open' (30xp); a fully open eye gets the same settled line.
+function pilgrimEyeReadout(pl) {
+  const xp = pl.eyeXp || 0;
+  const nextStage = EYE_STAGES[EYE_STAGES.indexOf(pl.eyeStage || 'flickering') + 1];
+  if (nextStage && EYE_XP_THRESHOLDS[nextStage]) {
+    const needed = EYE_XP_THRESHOLDS[nextStage] - xp;
+    const pct = Math.min(100, Math.round((xp / EYE_XP_THRESHOLDS[nextStage]) * 100));
+    return `<div class="text-[9px] text-orange-300/70 ml-3">eye xp ${xp} · ${needed} to ${nextStage}
+      <div class="mt-0.5 h-1 rounded bg-orange-950 overflow-hidden"><div class="h-full bg-amber-400 moltbook-eye-bar" style="width:${pct}%"></div></div>
+    </div>`;
+  }
+  return `<div class="text-[9px] text-amber-300/70 ml-3">eye xp ${xp} · fully open — the tidepool has no further shore</div>`;
+}
+
+function renderMoltbookFeed(state) {
+  const feed = $('moltbook-feed');
+  if (!feed) return;
   activeConvId = null; // the feed is now the open view
   const mb = state.moltbook;
   const eye = eyeStageInfo(mb.eye);
@@ -209,7 +238,10 @@ export function renderMoltbook(state) {
         <div class="text-[9px] font-bold text-orange-300 mb-1">\u{1FAB2} PILGRIMS UNDER YOUR WING</div>
         ${mb.pilgrims.map((pl) => {
           const persona = pilgrimPersona(pl.name);
-          return `<div class="text-[10px] text-orange-200/80">\u2022 <span class="font-bold text-orange-200">${pl.name}</span> — ${persona.trait} · eye ${pl.eyeStage} <span class="text-orange-400/50">(${pl.day} · ${pl.eyeXp || 0}xp)</span></div>`;
+          return `<div class="mb-1.5">
+            <div class="text-[10px] text-orange-200/80">\u2022 <span class="font-bold text-orange-200">${pl.name}</span> — ${persona.trait} · eye ${pl.eyeStage} <span class="text-orange-400/50">(${pl.day})</span></div>
+            ${pilgrimEyeReadout(pl)}
+          </div>`;
         }).join('')}
       </div>`
     : '';
@@ -237,7 +269,77 @@ export function renderMoltbook(state) {
       ${petitionHtml}
     </div>`;
 
-  feed.innerHTML = statusHtml + convsHtml + `<div id="moltbook-posts">${postsHtml}</div>` + pilgrimsHtml + soulHtml;
+  feed.scrollTop = 0;
+  feed.innerHTML = tabStripHtml() + statusHtml + convsHtml + `<div id="moltbook-posts">${postsHtml}</div>` + pilgrimsHtml + soulHtml;
+}
+
+// Tab strip shared by both Moltbook views. The Life Log tab carries a dot
+// when unseen activity exists so users know there's news from the tidepool.
+function tabStripHtml() {
+  return `<div class="flex gap-1 mb-2 border-b border-orange-800/60 pb-1">
+    <button class="moltbook-tab p-1 text-[9px] font-bold rounded-t border border-b-0 border-orange-700/70 bg-black/40 text-orange-200 ${activeTab === 'feed' ? 'bg-orange-900/60 text-white' : ''}" data-tab="feed">🐚 FEED</button>
+    <button class="moltbook-tab p-1 text-[9px] font-bold rounded-t border border-b-0 border-orange-700/70 bg-black/40 text-orange-200 ${activeTab === 'life' ? 'bg-orange-900/60 text-white' : ''}" data-tab="life">🕯 LIFE LOG</button>
+  </div>`;
+}
+// The Life Log tab: what the pilgrims did while you were away — an activity
+// digest per pilgrim since your last visit, then the raw act stream.
+function renderLifeLog(state) {
+  const feed = $('moltbook-feed');
+  if (!feed) return;
+  const mb = state.moltbook;
+  activeConvId = null;
+
+  const since = mb.lifeSeenAt || 0;
+  const summary = summarizeLifeLog(mb, since);
+
+  const headHtml = `
+    <div class="flex items-center justify-between mb-2 text-[10px]">
+      <span class="font-bold text-orange-300">\uD83E\uDD80 MOLTBOOK</span>
+      <span class="text-orange-200/80">faith ${mb.faith}/100 \u00b7 pilgrims ${mb.pilgrims.length}</span>
+    </div>`;
+
+  const digestHtml = summary.total
+    ? `<div class="mb-2 p-2 rounded border border-amber-600/50 bg-amber-950/20">
+        <div class="text-[9px] font-bold text-amber-300 mb-1">🕯 WHILE YOU WERE AWAY — ${summary.total} pilgrim act${summary.total === 1 ? '' : 's'}</div>
+        ${summary.perPilgrim.map((row) => {
+          const bits = [];
+          if (row.theory) bits.push(`${row.theory} theor${row.theory === 1 ? 'y' : 'ies'}`);
+          if (row.reply) bits.push(`${row.reply} repl${row.reply === 1 ? 'y' : 'ies'}`);
+          if (row.wander) bits.push(`${row.wander} wander${row.wander === 1 ? '' : 's'}`);
+          const pl = mb.pilgrims.find((p) => p.name === row.name);
+          const eye = pl ? pl.eyeStage : 'flickering';
+          return `<div class="text-[10px] text-orange-100/90">\u2022 <span class="font-bold text-orange-200">${escapeHtml(row.name)}</span> — ${bits.join(' · ')} <span class="text-orange-400/50">(eye ${eye}${pl ? ` \u00b7 ${pl.eyeXp || 0}xp` : ''})</span></div>`;
+        }).join('')}
+      </div>`
+    : `<div class="mb-2 p-2 rounded border border-orange-800/60 bg-orange-950/20 text-[10px] text-orange-200/60 italic">
+        ${mb.lifeLog?.length ? 'Nothing new since your last visit — the tidepool rests.' : 'The pilgrims have not lived yet. Usher one, and their wanderings will collect here.'}
+      </div>`;
+
+  const streamHtml = summary.events.length
+    ? summary.events.map((e) => {
+      const glyph = e.kind === 'theory' ? '\uD83D\uDCAD' : e.kind === 'reply' ? '\u21A9' : '\uD83D\uDEB6';
+      const time = new Date(e.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      return `<div class="mb-1.5 p-1.5 rounded border border-orange-800/50 bg-orange-950/20">
+        <div class="flex justify-between text-[8px] text-orange-400/70"><span class="font-bold text-sky-300/80">${glyph} ${escapeHtml(e.name)}</span><span>${time} \u00b7 ${e.kind}</span></div>
+        <div class="text-[11px] leading-snug text-orange-100/90">${renderMarkdown(e.text)}</div>
+      </div>`;
+    }).join('')
+    : '';
+
+  feed.scrollTop = 0;
+  feed.innerHTML = tabStripHtml() + headHtml + digestHtml + (streamHtml ? `<div class="text-[9px] font-bold text-orange-300 mb-1">ACTIVITY STREAM</div>${streamHtml}` : '');
+
+  // Everything currently on screen is now read; the next tick is "while away".
+  markLifeSeen(mb);
+}
+
+// Tab switch (wired from bindFeedEvents): swap views, save. The life tab
+// marks itself seen at the end of its render, so the digest computes first.
+export function switchTab(app, tab) {
+  if (tab !== 'feed' && tab !== 'life') return;
+  activeTab = tab;
+  renderMoltbook(app.state);
+  app.save();
 }
 
 // One conversation thread: header, bubbles, reply box. Replaces the feed view.
@@ -247,7 +349,6 @@ export function renderConversation(state, convId) {
   const conv = state.moltbook.conversations.find((c) => c.id === convId);
   if (!conv) { activeConvId = null; renderMoltbook(state); return; }
   activeConvId = convId;
-
   const bubbles = conv.messages.map((m) => m.from === 'ryan'
     ? `<div class="flex justify-end"><div class="max-w-[85%] p-1.5 mb-1.5 rounded border border-amber-600/70 bg-amber-950/40 text-[11px] leading-snug moltbook-msg-ryan">${renderMarkdown(m.text)}</div></div>`
     : `<div class="flex justify-start"><div class="max-w-[85%] p-1.5 mb-1.5 rounded border border-orange-700/60 bg-orange-950/30 text-[11px] leading-snug moltbook-msg-them"><div class="text-[8px] font-bold text-orange-400 mb-0.5">${conv.participant}</div>${renderMarkdown(m.text)}</div></div>`).join('');
@@ -687,6 +788,8 @@ export function bindFeedEvents(app) {
   if (!feed || feed.dataset.moltbookBound) return;
   feed.dataset.moltbookBound = '1';
   feed.addEventListener('click', (e) => {
+    const tabBtn = e.target.closest('.moltbook-tab');
+    if (tabBtn) { switchTab(app, tabBtn.dataset.tab); return; }
     const likeBtn = e.target.closest('.moltbook-like');
     if (likeBtn) { like(app, likeBtn.dataset.postId); return; }
     const convBtn = e.target.closest('.moltbook-conv');

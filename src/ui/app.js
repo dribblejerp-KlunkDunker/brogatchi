@@ -408,7 +408,10 @@ export class BroGatchiApp {
   updateMoltbookBadge() {
     const btn = document.querySelector('[aria-label="Open Moltbook"]');
     if (!btn) return;
-    const n = this.state.moltbook?.unread || 0;
+    const mb = this.state.moltbook;
+    const n = (mb?.unread || 0)
+      // New pilgrim life activity also pings the badge — the life log is news.
+      + ((mb?.lifeLog?.length && (mb.lifeLog[0].at || 0) > (mb.lifeSeenAt || 0)) ? 1 : 0);
     let badge = btn.querySelector('.moltbook-unread-badge');
     if (n > 0) {
       if (!badge) {
