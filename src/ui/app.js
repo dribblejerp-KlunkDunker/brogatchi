@@ -7,6 +7,7 @@ import * as modals from './modals.js';
 import * as inventory from './inventory.js';
 import * as intel from './intel.js';
 import * as jooh from './jooh.js';
+import { gainEyeXpFromMemory } from '../core/moltbook.js';
 import * as moltbook from './moltbook.js';
 import { renderJournal } from './journal.js';
 import * as composer from './composer.js';
@@ -421,6 +422,17 @@ export class BroGatchiApp {
     if (this.sleeping) svg.classList.add('sleeping');
     if (this.chewing) svg.classList.add('chewing');
     if (!this.sleeping && !this.chewing && !pidle) svg.classList.add('anim-idle');
+
+    // One-shot third-eye awakening burst after an eye-stage ascension.
+    if (this.state.moltbook?.eyeFlash) {
+      this.state.moltbook.eyeFlash = false;
+      svg.classList.remove('eye-awakening');
+      void svg.getBoundingClientRect(); // force reflow so the animation can replay
+      svg.classList.add('eye-awakening');
+      clearTimeout(this._eyeFlashTimer);
+      this._eyeFlashTimer = setTimeout(() => svg.classList.remove('eye-awakening'), 1900);
+      this.save();
+    }
 
     // hat slot
     const hat = hud.$('hat-slot');
@@ -1004,6 +1016,14 @@ export class BroGatchiApp {
     this.state.memories.push({ icon, text, imp, day: todayKey() });
     this.state.memories.sort((a, b) => b.imp - a.imp);
     if (this.state.memories.length > 14) this.state.memories.length = 14;
+    // The third eye feeds on lived experience: every memory is eye XP.
+    if (this.state.moltbook?.joined) {
+      const events = gainEyeXpFromMemory(this.state.moltbook, imp);
+      events.forEach((e) => {
+        if (e.info.say) this.say(e.info.say);
+        this.state.moltbook.eyeFlash = true;
+      });
+    }
     this.save();
   }
 

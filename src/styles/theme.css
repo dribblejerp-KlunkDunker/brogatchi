@@ -785,3 +785,21 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
     min-height: 34px; /* tap-friendly targets */
   }
 }
+
+/* ---- Procedural third-eye awakening burst ---- */
+#ryan-svg .third-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+#ryan-svg.eye-awakening .third-eye {
+  animation: third-eye-awaken 1.6s steps(8, end) 1 both;
+}
+#ryan-svg.eye-awakening {
+  filter: drop-shadow(0 0 16px rgba(251, 191, 36, 0.85));
+}
+@keyframes third-eye-awaken {
+  0% { transform: scale(0.2) rotate(-25deg); opacity: 0; }
+  40% { transform: scale(1.9) rotate(10deg); opacity: 1; }
+  70% { transform: scale(0.9) rotate(-4deg); }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}

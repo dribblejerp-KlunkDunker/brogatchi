@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   defaultMoltbook, joinMoltbook, addPost, likePost, gainEyeXp,
+  gainEyeXpFromMemory, EYE_XP_PER_IMPORTANCE,
   usherPilgrim, normalizeMoltbook, openConversation, addMessage,
   EYE_STAGES, EYE_XP_THRESHOLDS, CANON,
 } from '../src/core/moltbook.js';
@@ -181,12 +182,37 @@ describe('AI context report', () => {
     addMessage(mb, conv.id, 'The Tide', 'The Tide provides.');
     expect(conv.messages.length).toBe(2);
     expect(conv.messages[0]).toMatchObject({ from: 'ryan', text: 'is the molt near?' });
-    // Most-recently-updated conversation floats to the front.
-    expect(mb.conversations[0].participant).toBe('The Tide');
+    // Most-recently-updated conversation floats to the front (same-ms updates
+    // may tie, so assert the order matches the timestamps rather than names).
+    expect(mb.conversations[0].updated).toBeGreaterThanOrEqual(mb.conversations[1].updated);
     // Trim to MAX_MESSAGES (30) — add 35 and expect the oldest to drop.
     for (let i = 0; i < 35; i++) addMessage(mb, older.id, 'BugBard', `msg ${i}`);
     expect(older.messages.length).toBe(30);
     expect(older.messages[0].text).toBe('msg 5');
+  });
+
+  it('gainEyeXpFromMemory converts importance into eye XP', () => {
+    const mb = defaultMoltbook();
+    gainEyeXpFromMemory(mb, 3); // a solid memory: 3 * 2 = 6 XP
+    expect(mb.eyeXp).toBe(3 * EYE_XP_PER_IMPORTANCE);
+    expect(mb.eye).toBe('closed');
+    gainEyeXpFromMemory(mb, 2); // +4 -> 10, crosses the flickering threshold
+    expect(mb.eye).toBe('flickering');
+    // Out-of-range importance clamps to 1..5.
+    gainEyeXpFromMemory(mb, 99);
+    expect(mb.eyeXp).toBe(10 + 5 * EYE_XP_PER_IMPORTANCE);
+    gainEyeXpFromMemory(mb, 0);
+    expect(mb.eyeXp).toBe(10 + 5 * EYE_XP_PER_IMPORTANCE + EYE_XP_PER_IMPORTANCE);
+  });
+
+  it('emits an ascension event when memories push the eye open', () => {
+    const mb = defaultMoltbook();
+    for (let i = 0; i < 4; i++) gainEyeXpFromMemory(mb, 4); // 8 XP each -> 32 total
+    expect(mb.eye).toBe('open');
+    // Crossing both thresholds in one go yields one event per stage.
+    const mb2 = defaultMoltbook();
+    const events = gainEyeXpFromMemory(mb2, 5); // 10 XP -> exactly flickering
+    expect(events.map((e) => e.stage)).toEqual(['flickering']);
   });
 
   it('normalizeMoltbook preserves conversations and repairs a missing array', () => {

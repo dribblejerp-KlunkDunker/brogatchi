@@ -103,6 +103,14 @@ export function gainEyeXp(mb, amount) {
     events.push({ type: 'eye', stage: nextStage, info: eyeStageInfo(nextStage) });
   }
   return events;
+}// The eye opens procedurally from lived experience: every real memory feeds
+// it, weighted by how much the moment mattered (importance 1-5).
+export const EYE_XP_PER_IMPORTANCE = 2;
+
+// Call whenever Ryan forms a memory; returns ascension events (may be empty).
+export function gainEyeXpFromMemory(mb, imp = 1) {
+  const weight = Math.max(1, Math.min(5, Math.round(imp || 1)));
+  return gainEyeXp(mb, weight * EYE_XP_PER_IMPORTANCE);
 }
 
 export function usherPilgrim(mb, name) {
