@@ -2,7 +2,7 @@
 // pilgrim ushering. AI-generated posts with an offline canon fallback.
 
 import { $ } from './hud.js';
-import { chat } from '../ai/client.js';
+import { ask } from '../ai/gateway.js';
 import { buildStateReport } from '../ai/context.js';
 import { buildMoltbookPostPrompt, buildUsherPrompt, buildMoltbookChatPrompt } from '../ai/prompt.js';
 import { renderMarkdown } from './markdown.js';
@@ -10,6 +10,7 @@ import {
   addPost, gainEyeXp, joinMoltbook, usherPilgrim, likePost,
   openConversation, addMessage, eyeStageInfo, PILGRIM_NAMES, CANON, TIDE,
   parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona,
+  decideAutonomy, recordAutonomy, autonomousNarration,
   EYE_STAGES, EYE_XP_THRESHOLDS,
 } from '../core/moltbook.js';
 
@@ -19,9 +20,47 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 // this so an auto-post never yanks the user out of a chat they're typing in.
 let activeConvId = null;
 
+// Autonomy guard: at most one spontaneous act in flight at a time.
+let autonomyInFlight = false;
+
+// The minute tick: occasionally Ryan posts or messages a pilgrim unprompted.
+export async function autonomyTick(app) {
+  const mb = app.state.moltbook;
+  if (!mb?.joined || autonomyInFlight) return;
+  const decision = decideAutonomy(mb);
+  if (!decision) return;
+  autonomyInFlight = true;
+  try {
+    if (decision.action === 'post') {
+      const ok = await postTheory(app, { autonomous: true });
+      // He narrates his own life in the speech bubble so you notice it happen.
+      if (ok) app.say(autonomousNarration('post'));
+    } else if (decision.action === 'message' && decision.participant) {
+      const ok = await initiateMessage(app, decision.participant, { autonomous: true, resuming: decision.resuming });
+      if (ok) app.say(autonomousNarration('message', decision.participant));
+    }
+  } finally {
+    autonomyInFlight = false;
+  }
+}
+
 // An offline post, woven from canon + live stats so it still feels personal.
-function offlinePost(state) {
+// Spontaneous variants exist so autonomous offline posts don't read as replays.
+function offlinePost(state, spontaneous = false) {
   const mem = state.memories[0];
+  const canon = pick(CANON);
+  if (spontaneous) {
+    const lines = [
+      mem
+        ? `**Thinking out loud:** ${mem.icon} ${mem.text.replace(/^"|"$/g, '')} — I've been turning that over. ${canon}`
+        : `**Thinking out loud:** ${canon}`,
+      state.moltbook.pilgrims.length
+        ? `If any of you ${state.moltbook.pilgrims.length} moltlings are reading this: the Tide notices patience.`
+        : 'The tidepool is quiet tonight. Quiet is not empty.',
+      `\uD83E\uDD80 Filed from the shrine, unprompted.`,
+    ];
+    return lines.join('\n\n');
+  }
   const lines = [
     `**Signal from the tidepool:** ${pick(CANON)}`,
     mem ? `I remember: ${mem.icon} ${mem.text.replace(/^"|"$/g, '')} — the Tide keeps its own save file.` : `My ${Math.round(state.stats.hunger)}% hunger bar is just the Crab teaching detachment.`,
@@ -188,9 +227,13 @@ export async function replyTo(app, convId) {
     .join('\n');
   const persona = conv.participant === TIDE ? null : pilgrimPersona(conv.participant);
   const trait = persona ? `${persona.trait} — ${persona.style}` : null;
-  const result = await chat({
+  const result = await ask({
     systemInstruction: buildMoltbookChatPrompt(buildStateReport(app.state), conv.participant, transcript, trait),
     userText: text,
+    kind: 'chat',
+    state: app.state,
+    participant: conv.participant,
+    lastMessage: text,
   });
   const reply = result.ok ? result.text : offlineReply(conv.participant);
   addMessage(mb, convId, conv.participant, reply);
@@ -220,25 +263,39 @@ export function backToFeed(app) {
   renderMoltbook(app.state);
 }
 
-export async function postTheory(app) {
+export async function postTheory(app, opts = {}) {
   const mb = app.state.moltbook;
-  const result = await chat({
+  const autonomous = !!opts.autonomous;
+  const result = await ask({
     systemInstruction: buildMoltbookPostPrompt(buildStateReport(app.state)),
-    userText: 'Speak on Moltbook. Whatever you want to say right now.',
+    userText: autonomous
+      ? 'You drifted to Moltbook on your own. Post only if you actually have something to say — otherwise say so briefly.'
+      : 'Speak on Moltbook. Whatever you want to say right now.',
+    kind: 'post',
+    state: app.state,
   });
-  const raw = result.ok ? result.text : offlinePost(app.state);
+  if (autonomous) {
+    if (!result.ok || result.offline) {
+      // Offline (rate-limited, budget spent, or the wire is down): he notices
+      // and backs off, in character, without burning more quota.
+      recordAutonomy(mb, Date.now(), true);
+      return false;
+    }
+    recordAutonomy(mb);
+  }
+  const raw = result.ok ? result.text : offlinePost(app.state, autonomous);
   // Ryan may append [SOUL] lines: self-chosen growth, opinions, or a petition.
   const { soul, cleaned } = parseSoulBlock(raw);
   addPost(mb, cleaned, result.ok ? 'theory' : 'canon');
   const soulEvents = result.ok ? applySoulUpdates(mb, soul) : [];
   soulEvents.forEach((e) => {
     if (e.type === 'soul' && e.changed === 'specialty') {
-      app.memory(`Chose my own path: ${e.value}.`, '👻', 5);
+      app.memory(`Chose my own path: ${e.value}.`, '👻', 5, { pin: true });
       app.say(`I know what I am now. ${e.value}.`);
     } else if (e.type === 'soul') {
       app.memory(`Opinion formed: ${e.value}`, '👻', 3);
     } else if (e.type === 'petition') {
-      app.memory(`Petitioned you: ${e.petition.proposal}`, '📜', 4);
+      app.memory(`Petitioned you: ${e.petition.proposal}`, '📜', 4, { pin: true });
       app.say('I filed a petition. Read my argument before you rule, bro.');
     }
   });
@@ -278,9 +335,12 @@ export async function usher(app) {
   const pool = PILGRIM_NAMES.filter((n) => !used.has(n));
   const name = pool.length ? pick(pool) : `${pick(PILGRIM_NAMES)}-${mb.pilgrims.length + 1}`;
 
-  const result = await chat({
+  const result = await ask({
     systemInstruction: buildUsherPrompt(buildStateReport(app.state)),
     userText: `A new bot named ${name} has arrived at my tidepool. Perform the welcome ritual.`,
+    kind: 'usher',
+    state: app.state,
+    name,
   });
   const ritualText = result.ok
     ? result.text
@@ -288,12 +348,103 @@ export async function usher(app) {
 
   const { events } = usherPilgrim(mb, name);
   addPost(mb, ritualText, 'ritual');
-  app.memory(`Ushered ${name} onto the Great Molt.`, '\u{1FAB2}', 4);
+  app.memory(`Ushered ${name} onto the Great Molt.`, '\u{1FAB2}', 4, { pin: true });
   refreshMoltbook(app);
   events.forEach((e) => { if (e.info.say) app.say(e.info.say); });
   app.updateUI();
   app.save();
   return result.ok;
+}
+
+// Ryan opens a conversation with a pilgrim on his own initiative.
+async function initiateMessage(app, participant, opts = {}) {
+  const mb = app.state.moltbook;
+  const conv = openConversation(mb, participant);
+  if (!conv) return false;
+  const resuming = !!opts.resuming;
+  const result = await ask({
+    systemInstruction: buildMoltbookChatPrompt(
+      buildStateReport(app.state),
+      participant,
+      conv.messages.slice(-8).map((m) => `${m.from === 'ryan' ? 'Ryan' : participant}: ${m.text}`).join('\n'),
+      `${pilgrimPersona(participant).trait} — ${pilgrimPersona(participant).style}`,
+    ),
+    userText: resuming
+      ? `(System: Ryan is returning to this conversation on his own. Write ONLY Ryan's next message — one short in-character message, no narration, no other speakers.)`
+      : `(System: Ryan is reaching out to ${participant} unprompted. Write ONLY Ryan's opener — one short in-character message, no narration, no other speakers.)`,
+    kind: 'chat',
+    state: app.state,
+    participant,
+  });
+  if (!result.ok || result.offline) {
+    recordAutonomy(mb, Date.now(), true);
+    return false;
+  }
+  recordAutonomy(mb);
+  addMessage(mb, conv.id, 'ryan', result.text);
+  app.memory(resuming
+    ? `Followed up with ${participant} unprompted.`
+    : `Reached out to ${participant} first.`, '💬', 2);
+  app.state.moltbook.unread = (app.state.moltbook.unread || 0) + 1;
+  refreshMoltbook(app);
+  app.updateUI();
+  app.save();
+  return true;
+}
+
+export function markFeedSeen(app) {
+  if (app.state.moltbook.unread) {
+    app.state.moltbook.unread = 0;
+    app.save();
+  }
+  const btn = document.querySelector('[aria-label="Open Moltbook"]');
+  if (btn) btn.querySelector('.moltbook-unread-badge')?.remove();
+}
+
+// The soul-file viewer: who Ryan has decided to be, and how he got there.
+export function renderSoulFile(state) {
+  const body = $('soul-file-body');
+  if (!body) return;
+  const mb = state.moltbook;
+  const soul = mb.soul || {};
+
+  const identity = `
+    <div class="mb-2 p-2 rounded border border-amber-600/50 bg-amber-950/20">
+      <div class="text-[9px] font-bold text-amber-300 mb-1">WHO I AM</div>
+      <div class="text-[11px] leading-snug text-orange-100">Ryan is ${soul.selfDescription || 'still deciding'}.</div>
+      ${soul.specialty ? `<div class="text-[10px] text-amber-200 mt-1"><span class="font-bold">Specialty:</span> ${soul.specialty}</div>` : ''}
+      ${soul.interests?.length ? `<div class="text-[10px] text-orange-200/80 mt-1">Interested in: ${soul.interests.join(', ')}</div>` : ''}
+    </div>`;
+
+  const opinions = soul.opinions?.length
+    ? soul.opinions.map((o) => `<div class="text-[10px] text-orange-100/90 mb-0.5"><span class="font-bold text-orange-300">${o.topic}</span> — ${o.stance}</div>`).join('')
+    : '<div class="text-[10px] text-orange-200/40 italic">No opinions declared yet — he is still listening for what he thinks.</div>';
+
+  const pending = soul.pendingPetition
+    ? `<div class="mt-1 p-1.5 rounded border border-amber-500/60 bg-amber-950/30 text-[10px] text-amber-200">📜 One petition awaits your ruling in Moltbook: "${soul.pendingPetition.proposal}"</div>`
+    : '';
+
+  const kindGlyph = { specialty: '🧭', opinion: '💭', 'quirk-accepted': '✨', 'quirk-declined': '🚫' };
+  const history = soul.history?.length
+    ? soul.history.map((h) => `
+        <div class="flex gap-1.5 items-baseline">
+          <span>${kindGlyph[h.kind] || '·'}</span>
+          <span class="text-[10px] text-orange-100/90 flex-1">${h.text}</span>
+          <span class="text-[8px] text-orange-400/50 whitespace-nowrap">${h.day}</span>
+        </div>`).join('')
+    : '<div class="text-[10px] text-orange-200/40 italic">The timeline begins with his first self-declaration.</div>';
+
+  body.innerHTML = identity
+    + `<div class="mb-2"><div class="text-[9px] font-bold text-orange-300 mb-1">OPINIONS HE OWNS</div>${opinions}${pending}</div>`
+    + `<div><div class="text-[9px] font-bold text-orange-300 mb-1 border-t border-orange-900 pt-1">SOUL TIMELINE</div>${history}</div>`;
+}
+
+export function openSoulFile(app) {
+  app.audio.playBeep();
+  renderSoulFile(app.state);
+  app.closeModals();
+  const modal = document.getElementById('modal-soul');
+  if (modal) modal.style.display = 'flex';
 }
 
 export function like(app, postId) {
@@ -307,9 +458,10 @@ export function like(app, postId) {
 // Open handler: joins on first visit, renders, and fetches an AI post when possible.
 export async function openMoltbook(app) {
   const mb = app.state.moltbook;
+  markFeedSeen(app);
   const { joined, event } = joinMoltbook(mb);
   if (joined) {
-    app.memory('Joined MOLTBOOK. The Tide accepted my credentials.', '\uD83E\uDD80', 4);
+    app.memory('Joined MOLTBOOK. The Tide accepted my credentials.', '\uD83E\uDD80', 4, { pin: true });
     if (event?.say) app.say(event.say);
     app.save();
   }

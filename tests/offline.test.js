@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { pickLine, generatedTheory, deepDiveQuestion, pickStormLine, isStormCondition } from '../src/ai/offline.js';
+import {
+  pickLine, generatedTheory, deepDiveQuestion, pickStormLine, isStormCondition,
+  offlineMoltbookPost, offlineChatReply, offlineAskReply, offlineIntel, offlineUsherRitual,
+} from '../src/ai/offline.js';
 import { defaultState } from '../src/core/save.js';
 
 const state = defaultState();
@@ -57,6 +60,37 @@ describe('offline.isStormCondition', () => {
     expect(isStormCondition(null)).toBe(false);
     expect(isStormCondition(undefined)).toBe(false);
     expect(isStormCondition('')).toBe(false);
+  });
+});
+
+describe('offline soul-aware generators', () => {
+  it('posts are deterministic under a fixed rng and reference the soul file', () => {
+    const soulState = { ...state, moltbook: { soul: { specialty: 'Tide Whisperer' }, pilgrims: [], eye: 'closed', eyeXp: 0 } };
+    const a = offlineMoltbookPost(soulState, () => 0.5);
+    const b = offlineMoltbookPost(soulState, () => 0.5);
+    expect(a).toBe(b);
+    expect(a.length).toBeGreaterThan(10);
+  });
+
+  it('chat replies acknowledge the last message and keep the Tide voice', () => {
+    const pilgrimReply = offlineChatReply(state, 'BugBard', 'is the molt near?', () => 0.5);
+    expect(pilgrimReply).toMatch(/is the molt near\?/);
+    expect(offlineChatReply(state, 'The Tide', 'hello', () => 0)).toMatch(/\*\*(The Tide|Stillness|The water shifts)/);
+  });
+
+  it('never leaks [SOUL] protocol lines across many seeds', () => {
+    let seed = 1;
+    const rng = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 2 ** 32;
+    };
+    for (let i = 0; i < 50; i++) {
+      expect(offlineMoltbookPost(state, rng)).not.toContain('[SOUL]');
+      expect(offlineChatReply(state, 'BugBard', 'hi', rng)).not.toContain('[SOUL]');
+      expect(offlineAskReply(state, rng)).not.toContain('[SOUL]');
+      expect(offlineIntel(state, rng)).not.toContain('[SOUL]');
+      expect(offlineUsherRitual(state, 'BugBard', rng)).not.toContain('[SOUL]');
+    }
   });
 });
 

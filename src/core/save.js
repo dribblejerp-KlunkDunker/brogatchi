@@ -2,7 +2,7 @@
 
 import { initialStats } from './stats.js';
 import { initialPersonality } from './personality.js';
-import { addDiaryEntry, buildDayLines } from './memory.js';
+import { addDiaryEntry, buildDayLines, memoryId, capMemories } from './memory.js';
 
 const KEY = 'brogatchi_v4';
 const KEY_V3 = 'brogatchi_v3';
@@ -69,6 +69,11 @@ export function defaultState() {
     lastSave: Date.now(),
     sideBro: null,
     moltbook: defaultMoltbook(),
+    // The Tide's Budget: persistent AI cache + soft daily self-rationing.
+    // cap is duplicated from ai/gateway.js AI_BUDGET_CAP (schema default only;
+    // the gateway treats any missing/odd cap as its own constant).
+    aiCache: [],
+    aiBudget: { day: todayKey(), used: 0, cap: 40, rateLimitedUntil: 0 },
   };
 }
 
@@ -153,11 +158,31 @@ export function normalize(s) {
   out.bestScores = { ...d.bestScores, ...(s.bestScores || {}) };
   out.counters = { ...d.counters, ...(s.counters || {}) };
   out.claims = s.claims || {};
+  // Memories: backfill ids for pre-pinning saves, drop malformed entries,
+  // enforce the pin-aware cap (pinned milestones survive; legacy saves can't
+  // have pins, so this equals the old 14-cap for them).
   if (!Array.isArray(out.memories)) out.memories = [];
+  out.memories = capMemories(
+    out.memories
+      .filter((m) => m && typeof m === 'object' && typeof m.text === 'string')
+      .map((m) => (m.id ? m : { ...m, id: memoryId() })),
+  );
   if (!Array.isArray(out.diaries)) out.diaries = [];
   if (!Array.isArray(out.journal)) out.journal = [];
   if (!Array.isArray(out.clutter)) out.clutter = [];
   if (!Array.isArray(out.irlTasks)) out.irlTasks = [];
+  // AI gateway state: repair malformed cache/budget, keep valid entries.
+  if (!Array.isArray(out.aiCache)) out.aiCache = [];
+  out.aiCache = out.aiCache
+    .filter((e) => e && typeof e === 'object' && typeof e.k === 'string' && typeof e.text === 'string' && Number.isFinite(e.at))
+    .slice(0, 40);
+  const b = out.aiBudget || {};
+  out.aiBudget = {
+    day: typeof b.day === 'string' && b.day ? b.day : todayKey(),
+    used: Number.isFinite(b.used) ? Math.max(0, Math.floor(b.used)) : 0,
+    cap: Number.isFinite(b.cap) && b.cap > 0 ? Math.floor(b.cap) : 40,
+    rateLimitedUntil: Number.isFinite(b.rateLimitedUntil) ? b.rateLimitedUntil : 0,
+  };
   out.moltbook = normalizeMoltbook(out.moltbook);
   return out;
 }
@@ -174,6 +199,14 @@ export function rolloverIfNeeded(state) {
   state.diaries = addDiaryEntry(state.diaries, state.currentDate, lines);
   state.counters = defaultState().counters;
   state.claims = {};
+  // The Tide's budget resets each new day; the 45-min rate-limit cooldown is
+  // a timestamp and survives the rollover untouched.
+  state.aiBudget = {
+    day: today,
+    used: 0,
+    cap: state.aiBudget?.cap || 40,
+    rateLimitedUntil: state.aiBudget?.rateLimitedUntil || 0,
+  };
   state.currentDate = today;
   events.push({ type: 'newday', lines });
   return events;

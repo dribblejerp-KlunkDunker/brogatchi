@@ -1,7 +1,7 @@
 // Live Gaming Intel panel — AI news with stat-grounded persona + offline fallback.
 
 import { $ } from './hud.js';
-import { chat } from '../ai/client.js';
+import { ask } from '../ai/gateway.js';
 import { buildStateReport } from '../ai/context.js';
 import { buildIntelSystemPrompt, buildIntelReplyPrompt } from '../ai/prompt.js';
 import { pickLine, generatedTheory } from '../ai/offline.js';
@@ -15,10 +15,12 @@ export async function fetchNews(app) {
   feed.innerHTML = '<div class="animate-pulse text-center mt-10">Intercepting game data…</div>';
 
   const report = buildStateReport(app.state);
-  const result = await chat({
+  const result = await ask({
     systemInstruction: buildIntelSystemPrompt(report),
     userText: "What's the latest gaming news and drops?",
     history,
+    kind: 'intel',
+    state: app.state,
   });
 
   if (result.ok) {
@@ -45,9 +47,11 @@ export async function sendReply(app) {
   app.memory(`You told Ryan: "${val.slice(0, 60)}"`, '\uD83D\uDCAC', 2);
 
   const report = buildStateReport(app.state);
-  const result = await chat({
+  const result = await ask({
     systemInstruction: buildIntelReplyPrompt(report),
     history,
+    kind: 'intel',
+    state: app.state,
   });
 
   if (result.ok) {

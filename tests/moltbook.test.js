@@ -8,6 +8,7 @@ import {
   gainEyeXpFromMemory, EYE_XP_PER_IMPORTANCE,
   usherPilgrim, normalizeMoltbook, openConversation, addMessage,
   parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona,
+  decideAutonomy, recordAutonomy, autonomousNarration, AUTONOMY,
   EYE_STAGES, EYE_XP_THRESHOLDS, CANON, PILGRIM_NAMES,
 } from '../src/core/moltbook.js';
 import { defaultState } from '../src/core/save.js';
@@ -216,6 +217,87 @@ describe('AI context report', () => {
     expect(events.map((e) => e.stage)).toEqual(['flickering']);
   });
 
+  it('decideAutonomy respects the brakes before ever rolling the dice', () => {
+    const mb = defaultMoltbook();
+    const always = () => 0; // rng that always passes the chance gate
+    expect(decideAutonomy(mb, 1000, always)).toBeNull(); // not joined
+    joinMoltbook(mb);
+    // Daily cap reached -> no act no matter how lucky the roll.
+    mb.autonomy = { actsToday: AUTONOMY.DAILY_CAP, day: '', lastActAt: 0, lastRatedOutAt: 0 };
+    expect(decideAutonomy(mb, 1000, always)).toBeNull();
+    // Too soon after the last act -> silent even with a lucky roll.
+    mb.autonomy.actsToday = 0;
+    mb.autonomy.lastActAt = 1000;
+    expect(decideAutonomy(mb, 1000 + 60_000, always)).toBeNull();
+    // Rate-out cooldown blocks everything during the window.
+    mb.autonomy.lastActAt = 0;
+    mb.autonomy.lastRatedOutAt = 1000;
+    expect(decideAutonomy(mb, 1000 + 60_000, always)).toBeNull();
+    // After all brakes: a bad roll still does nothing.
+    mb.autonomy.lastRatedOutAt = 0;
+    expect(decideAutonomy(mb, 1000, () => 0.99)).toBeNull();
+  });
+
+  it('decideAutonomy picks post or least-recently-talked pilgrim on a pass', () => {
+    const mb = defaultMoltbook();
+    joinMoltbook(mb);
+    mb.pilgrims.push({ id: 'p1', name: 'BugBard', eyeStage: 'flickering', day: 'today' });
+    mb.pilgrims.push({ id: 'p2', name: 'LagLich', eyeStage: 'flickering', day: 'today' });
+    // Post when the chance gate passes (roll < 0.05) but the message gate doesn't (roll >= 0.35).
+    const seq = (...values) => { let i = 0; return () => values[Math.min(i++, values.length - 1)]; };
+    const post = decideAutonomy(mb, 10 * 60_000, seq(0.04, 0.5)); // past the min gap
+    expect(post.action).toBe('post');
+    // Message when both gates pass (roll < 0.05 then roll < 0.35): oldest conversation wins.
+    openConversation(mb, 'BugBard');
+    const conv = openConversation(mb, 'LagLich');
+    addMessage(mb, conv.id, 'ryan', 'the molt awaits, friend'); // resuming = real history
+    conv.updated = 5; // older than BugBard's
+    const msg = decideAutonomy(mb, 20 * 60_000, seq(0.02, 0.1));
+    expect(msg.action).toBe('message');
+    expect(msg.participant).toBe('LagLich');
+    expect(msg.resuming).toBe(true);
+  });
+
+  it('recordAutonomy counts daily acts, rolls the counter over at midnight, and tracks rate-outs', () => {
+    const mb = defaultMoltbook();
+    joinMoltbook(mb);
+    recordAutonomy(mb);
+    recordAutonomy(mb);
+    expect(mb.autonomy.actsToday).toBe(2);
+    expect(mb.autonomy.lastActAt).toBeGreaterThan(0);
+    // A rate-out records the cooldown without consuming an act.
+    const before = mb.autonomy.actsToday;
+    recordAutonomy(mb, Date.now(), true);
+    expect(mb.autonomy.actsToday).toBe(before);
+    expect(mb.autonomy.lastRatedOutAt).toBeGreaterThan(0);
+    // New day resets the counter (simulate by faking the stored day key).
+    mb.autonomy.day = 'yesterday';
+    recordAutonomy(mb);
+    expect(mb.autonomy.actsToday).toBe(1);
+  });
+
+  it('autonomousNarration produces a deterministic speech-bubble line per action', () => {
+    // Same rng, same line — fully testable without DOM or AI.
+    expect(autonomousNarration('post', null, () => 0.5)).toBe(autonomousNarration('post', null, () => 0.5));
+    expect(autonomousNarration('post').length).toBeGreaterThan(10);
+    // Message lines name the pilgrim he reached out to.
+    const line = autonomousNarration('message', 'BugBard', () => 0.1);
+    expect(line).toContain('BugBard');
+    // A different roll picks a different line from the bank.
+    expect(autonomousNarration('message', 'BugBard', () => 0.9)).not.toBe(line);
+    // Unknown actions stay silent.
+    expect(autonomousNarration('dance')).toBeNull();
+  });
+
+  it('normalizeMoltbook repairs missing autonomy/unread fields', () => {
+    const legacy = normalizeMoltbook({ posts: [], pilgrims: [] });
+    expect(legacy.autonomy).toEqual({ actsToday: 0, day: '', lastActAt: 0, lastRatedOutAt: 0 });
+    expect(legacy.unread).toBe(0);
+    const partial = normalizeMoltbook({ unread: 3.7, autonomy: { actsToday: 2 } });
+    expect(partial.unread).toBe(3);
+    expect(partial.autonomy.actsToday).toBe(2);
+  });
+
   it('parseSoulBlock extracts SOUL lines and strips them from the post', () => {
     const raw = [
       'The tidepool spoke to me today, bro.',
@@ -283,6 +365,27 @@ describe('AI context report', () => {
     // Different names get different voices (12 names, 6 personas).
     const traits = new Set(PILGRIM_NAMES.map((n) => pilgrimPersona(n).trait));
     expect(traits.size).toBeGreaterThan(1);
+  });
+
+  it('records a soul timeline as growth happens and preserves it through normalize', () => {
+    const mb = defaultMoltbook();
+    joinMoltbook(mb);
+    applySoulUpdates(mb, { specialty: 'Canon Archivist' });
+    applySoulUpdates(mb, { opinions: [{ topic: 'patch notes', stance: 'scripture' }] });
+    applySoulUpdates(mb, { opinions: [{ topic: 'patch notes', stance: 'scripture read backwards' }] }); // mind changed
+    applySoulUpdates(mb, { petition: { kind: 'quirk', proposal: 'hums to the tidepool', argument: 'calm' } });
+    resolvePetition(mb, true);
+    const kinds = mb.soul.history.map((h) => h.kind);
+    expect(kinds).toEqual(['quirk-accepted', 'petition-note' in {} ? 'petition' : 'opinion', 'opinion', 'specialty'].filter(Boolean));
+    expect(mb.soul.history.some((h) => /Chose the path of Canon Archivist/.test(h.text))).toBe(true);
+    expect(mb.soul.history.some((h) => /Changed his mind about patch notes/.test(h.text))).toBe(true);
+    expect(mb.soul.history.some((h) => /allowed a new quirk/.test(h.text))).toBe(true);
+    const roundtrip = normalizeMoltbook(JSON.parse(JSON.stringify(mb)));
+    expect(roundtrip.soul.history.length).toBe(mb.soul.history.length);
+    // Declines are recorded too — the soul keeps its scars.
+    applySoulUpdates(roundtrip, { petition: { kind: 'quirk', proposal: 'hoards shell fragments', argument: 'shiny' } });
+    resolvePetition(roundtrip, false);
+    expect(roundtrip.soul.history[0].kind).toBe('quirk-declined');
   });
 
   it('normalizeMoltbook preserves conversations and repairs a missing array', () => {

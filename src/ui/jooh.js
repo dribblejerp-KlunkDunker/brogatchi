@@ -2,7 +2,7 @@
 // by default; the app can upgrade it with an AI banter line when a key exists.
 
 import { $ } from './hud.js';
-import { chat } from '../ai/client.js';
+import { ask } from '../ai/gateway.js';
 import { buildStateReport } from '../ai/context.js';
 import { buildRyanSystemPrompt } from '../ai/prompt.js';
 import { renderMarkdown } from './markdown.js';
@@ -49,9 +49,11 @@ export function refreshJoohFeed(state) {
 // Optional AI flavor: when a key exists, hitch one rogue transmission onto the feed.
 export async function appendAIIntercept(state, containerSelector) {
   const report = buildStateReport(state);
-  const result = await chat({
+  const result = await ask({
     systemInstruction: buildRyanSystemPrompt(report),
     userText: 'Drop one rogue one-liner about what the oligarchs are doing RIGHT NOW, in your voice, 1 sentence.',
+    kind: 'jooh',
+    state,
   });
   if (result.ok) {
     const feed = $(containerSelector);

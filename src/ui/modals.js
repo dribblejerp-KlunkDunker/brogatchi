@@ -65,9 +65,14 @@ export function renderDiary(state) {
     if (!state.memories.length) {
       mem.innerHTML = '<div class="text-gray-500 italic">No memories yet. Go live a little.</div>';
     } else {
-      state.memories.forEach((m) => {
-        mem.innerHTML += `<div class="text-[8px] bg-gray-100 p-1 border border-black">${m.icon} ${m.text} <span class="opacity-50">· ${m.day}</span></div>`;
-      });
+      const pinned = state.memories.filter((m) => m.pinned);
+      const rest = state.memories.filter((m) => !m.pinned);
+      if (pinned.length) {
+        mem.innerHTML += '<div class="text-[8px] font-bold text-amber-600 mb-0.5">📌 PINNED — these never fade</div>';
+        pinned.forEach((m) => { mem.innerHTML += memoryRow(m, true); });
+        if (rest.length) mem.innerHTML += '<div class="text-[8px] font-bold text-gray-500 mt-1 mb-0.5">RECENT</div>';
+      }
+      rest.forEach((m) => { mem.innerHTML += memoryRow(m, false); });
     }
   }
 
@@ -86,6 +91,14 @@ export function renderDiary(state) {
       });
     }
   }
+}
+
+// One row in the memory log: a pin/unpin toggle + the memory itself.
+function memoryRow(m, pinned) {
+  return `<div class="text-[8px] bg-gray-100 p-1 border border-black flex items-start gap-1">
+    <button type="button" class="mem-pin ${pinned ? 'text-amber-600' : 'text-gray-300 hover:text-amber-500'}" onclick="app.pinMemory('${m.id}')" title="${pinned ? 'Unpin' : 'Pin — keep forever'}" aria-label="${pinned ? 'Unpin memory' : 'Pin memory'}">📌</button>
+    <span class="flex-1">${m.icon} ${m.text} <span class="opacity-50">· ${m.day}</span></span>
+  </div>`;
 }
 
 function traitColor(key) {

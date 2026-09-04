@@ -16,12 +16,14 @@ import { renderMarkdown } from './markdown.js';
 import { tick as statsTick, applyOffline, FOODS, weightTier, TIER_NAMES } from '../core/stats.js';
 import { entryFromState, addEntry as journalAdd } from '../core/journal.js';
 import { loadState, saveState, rolloverIfNeeded, todayKey } from '../core/save.js';
+import { remember, togglePin } from '../core/memory.js';
 import * as personality from '../core/personality.js';
 import * as evolution from '../core/evolution.js';
 import { buildSpec, HATS, SHIRTS, GLASSES, CHAINS, BACKPACKS, PANTS, SHOES, WRISTS, personalityIdleClasses } from '../core/ryanSpec.js';
 import { renderRyanSVG } from './ryanView.js';
 
-import { apiHealth, chat, fetchWeather, readWeatherCity } from '../ai/client.js';
+import { apiHealth, fetchWeather, readWeatherCity } from '../ai/client.js';
+import { ask } from '../ai/gateway.js';
 import { buildStateReport } from '../ai/context.js';
 import { buildRyanSystemPrompt } from '../ai/prompt.js';
 import { pickLine, generatedTheory, deepDiveQuestion, pickStormLine, isStormCondition } from '../ai/offline.js';
@@ -363,6 +365,10 @@ export class BroGatchiApp {
   oneMinute() {
     personality.minuteDrift(this.state.personality, this.state);
     this.state.steps = this.state.steps; // rollover handled in tick
+    // Ryan's social life: occasionally he posts or messages a pilgrim unprompted.
+    if (this.state.moltbook?.joined && this.aiChecked && this.matchedKey) {
+      moltbook.autonomyTick(this);
+    }
     this.save();
   }
 
@@ -373,6 +379,24 @@ export class BroGatchiApp {
     hud.renderClutter(this.state);
     this.renderRyan();
     this.updateSideBroUI();
+    this.updateMoltbookBadge();
+  }
+
+  updateMoltbookBadge() {
+    const btn = document.querySelector('[aria-label="Open Moltbook"]');
+    if (!btn) return;
+    const n = this.state.moltbook?.unread || 0;
+    let badge = btn.querySelector('.moltbook-unread-badge');
+    if (n > 0) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'moltbook-unread-badge';
+        btn.appendChild(badge);
+      }
+      badge.textContent = n > 9 ? '9+' : String(n);
+    } else {
+      badge?.remove();
+    }
   }
 
   updateSideBroUI() {
@@ -861,7 +885,7 @@ export class BroGatchiApp {
     this.state.stats.happy = Math.min(100, this.state.stats.happy + 15);
     this.state.stats.weight = Math.max(1.0, this.state.stats.weight - 0.1);
     personality.applyEvents(this.state.personality, [{ trait: 'fitness', amount: 5 }, { trait: 'broCode', amount: 3 }]);
-    this.memory('Finished a real-life quest. The sim shakes.', '\u2705', 4);
+    this.memory('Finished a real-life quest. The sim shakes.', '\u2705', 4, { pin: true });
     this.say(pickLine('irlDone', this.state));
     this.gainXp(30);
     this.renderTasks();
@@ -888,23 +912,29 @@ export class BroGatchiApp {
     if (this.chatHistory.length > 5) this.chatHistory.shift();
 
     const report = buildStateReport(this.state);
-    const result = await chat({
+    const result = await ask({
       systemInstruction: buildRyanSystemPrompt(report),
       history: this.chatHistory,
+      kind: 'ask',
+      state: this.state,
     });
 
     if (result.ok) {
       this.chatHistory.push({ role: 'model', parts: [{ text: result.text }] });
-      res.innerHTML = renderMarkdown(result.text) + (result.grounded === false
-        ? '<div class="mt-2 border-t border-gray-300 pt-1 text-[7px] text-gray-400">\u26A1 no live web search on this key \u2014 answers from my firmware</div>'
-        : '');
+      res.innerHTML = renderMarkdown(result.text) + (result.offline
+        ? '<div class="mt-1 text-[7px] text-purple-400/80">\uD83C\uDF1C offline answer \u2014 the wire is quiet, but I\u2019m still here.</div>'
+        : result.grounded === false
+          ? '<div class="mt-2 border-t border-gray-300 pt-1 text-[7px] text-gray-400">\u26A1 no live web search on this key \u2014 answers from my firmware</div>'
+          : '');
       // Ryan remembers his own answer, not just the question.
       const plain = result.text.replace(/[#*>`<\b]/g, '').trim().replace(/\s+/g, ' ');
       this.rememberOnce(`answered-${plain.slice(0, 40)}`, `Ryan answered: "${plain.slice(0, 60)}"`, '\uD83D\uDCDD', 2);
-      this.state.coins += 5;
-      this.state.stats.happy = Math.min(100, this.state.stats.happy + 10);
-      personality.applyEvents(this.state.personality, [{ trait: 'paranoia', amount: 1 }]);
-      this.gainXp(8);
+      if (!result.offline) {
+        this.state.coins += 5;
+        this.state.stats.happy = Math.min(100, this.state.stats.happy + 10);
+        personality.applyEvents(this.state.personality, [{ trait: 'paranoia', amount: 1 }]);
+        this.gainXp(8);
+      }
       this.memory(`Asked Ryan: \"${q.slice(0, 40)}\"`, '\uD83E\uDDE0', 2);
       this.updateUI();
       this.save();
@@ -988,13 +1018,17 @@ export class BroGatchiApp {
     moltbook.backToFeed(this);
   }
 
+  openSoulFile() {
+    moltbook.openSoulFile(this);
+  }
+
   // ---------------------------------------------------------- leveling
   gainXp(amount) {
     const before = this.state.level;
     const events = evolution.addXp(this.state, amount);
     if (this.state.level !== before) {
       this.audio.playLevelUp();
-      this.memory(`Hit level ${this.state.level}. The sim blinks.`, '\u2B06\uFE0F', 4);
+      this.memory(`Hit level ${this.state.level}. The sim blinks.`, '\u2B06\uFE0F', 4, { pin: true });
     }
     events.forEach((e) => {
       if (e.type === 'levelup') this.milestone('level', `Level ${e.level}`);
@@ -1004,7 +1038,7 @@ export class BroGatchiApp {
       }
       if (e.type === 'forme') {
         this.say(pickLine('forme', this.state));
-        this.memory(`Evolved into ${e.forme} forme. New aura unlocked.`, '\uD83C\uDF1F', 5);
+        this.memory(`Evolved into ${e.forme} forme. New aura unlocked.`, '\uD83C\uDF1F', 5, { pin: true });
         this.milestone('forme', `${e.forme} FORME`, 'The sim recalibrated to my aura.');
       }
     });
@@ -1012,10 +1046,10 @@ export class BroGatchiApp {
     this.save();
   }
 
-  memory(text, icon, imp) {
-    this.state.memories.push({ icon, text, imp, day: todayKey() });
-    this.state.memories.sort((a, b) => b.imp - a.imp);
-    if (this.state.memories.length > 14) this.state.memories.length = 14;
+  memory(text, icon, imp, opts = {}) {
+    this.state.memories = remember(this.state.memories, {
+      icon, text, imp: imp ?? 2, ...(opts.pin ? { pin: true } : {}),
+    });
     // The third eye feeds on lived experience: every memory is eye XP.
     if (this.state.moltbook?.joined) {
       const events = gainEyeXpFromMemory(this.state.moltbook, imp);
@@ -1024,6 +1058,13 @@ export class BroGatchiApp {
         this.state.moltbook.eyeFlash = true;
       });
     }
+    this.save();
+  }
+
+  // Pin or unpin a memory by id — pinned milestones survive the cap forever.
+  pinMemory(id) {
+    this.state.memories = togglePin(this.state.memories, id);
+    this.updateUI();
     this.save();
   }
 

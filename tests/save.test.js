@@ -67,6 +67,35 @@ describe('save.normalize', () => {
   });
 });
 
+describe('save.ai gateway state', () => {
+  it('normalize initializes aiCache/aiBudget and repairs malformed values', () => {
+    const s = normalize({ aiCache: 'junk', aiBudget: { used: -5, cap: 2, rateLimitedUntil: 'x' } });
+    expect(Array.isArray(s.aiCache)).toBe(true);
+    expect(s.aiBudget).toMatchObject({ used: 0, cap: 2, rateLimitedUntil: 0 });
+    expect(typeof s.aiBudget.day).toBe('string');
+  });
+
+  it('drops malformed cache entries but keeps valid ones', () => {
+    const s = normalize({
+      aiCache: [
+        { k: 'good', text: 'kept', at: Date.now() },
+        { k: 'bad' },
+        null,
+      ],
+    });
+    expect(s.aiCache.length).toBe(1);
+    expect(s.aiCache[0].k).toBe('good');
+  });
+
+  it('rollover resets the budget day/used but keeps the rate-limit cooldown', () => {
+    const s = defaultState();
+    s.currentDate = '1/1/1970';
+    s.aiBudget = { day: '1/1/1970', used: 12, cap: 40, rateLimitedUntil: 123456 };
+    rolloverIfNeeded(s);
+    expect(s.aiBudget).toMatchObject({ day: todayKey(), used: 0, cap: 40, rateLimitedUntil: 123456 });
+  });
+});
+
 describe('rollover', () => {
   it('archives steps and writes a diary entry on a new day', () => {
     const s = defaultState();

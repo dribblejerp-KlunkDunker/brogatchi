@@ -803,3 +803,27 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   70% { transform: scale(0.9) rotate(-4deg); }
   100% { transform: scale(1) rotate(0deg); opacity: 1; }
 }
+
+/* ---- Moltbook unread badge (Ryan acted while you were away) ---- */
+[aria-label="Open Moltbook"] {
+  position: relative;
+}
+.moltbook-unread-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ef4444;
+  color: #fff;
+  font-family: "Press Start 2P", monospace;
+  font-size: 7px;
+  border: 2px solid #7f1d1d;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  z-index: 5;
+}

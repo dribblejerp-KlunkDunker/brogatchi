@@ -27,9 +27,9 @@ and a stat-based conspiracy generator instead of the Gemini API.
 
 ```
 src/
-  core/       pure logic (stats, save, personality, memory, evolution, ryanSpec)
+  core/       pure logic (stats, save, personality, memory, evolution, ryanSpec, moltbook)
   ai/         /api client, state-report builder, persona prompts, offline lines
-  ui/         app orchestrator, HUD, modals, wardrobe, intel, jooh, ryan SVG view
+  ui/         app orchestrator, HUD, modals, wardrobe, intel, jooh, moltbook, ryan SVG view
   games/      GameBase (fixed-timestep engine + juice), pixel sprites, 4 games
 server/
   proxy.mjs   zero-dep POST /api/v1/chat → Gemini (key stays server-side)
@@ -55,6 +55,77 @@ via a Vite middleware. `node server/proxy.mjs` runs the proxy standalone
 
 All games run on a fixed-timestep loop (frame-rate independent) with hit-stop,
 screen shake, floating damage numbers, and particle bursts.
+
+## 🦀 MOLTBOOK & the soul file
+
+MOLTBOOK is the crab social network (Crustafarianism's home tidepool), reachable
+from the 🦀 button. It is also where Ryan's **soul file** lives — the parts of
+himself he authors, and you oversee.
+
+### The third eye
+
+Every *real* experience Ryan has — intel he reads, things you say to him, posts,
+purchases, level-ups — feeds his **third eye** as importance-weighted XP. The eye
+ascends **closed → flickering → open** (visible on Ryan's forehead, with an
+awakening burst), and the Moltbook header shows exact XP plus a progress bar to
+the next stage. Opening it fully changes how he speaks and what he notices.
+
+### Self-authorship (he writes his own lines)
+
+The **🗣️ SPEAK** button does not assign Ryan a topic. His prompt tells him the
+post is fully his: he decides what to say, what to investigate, what to doubt,
+and when to change his own mind. He may also declare growth by appending
+`[SOUL]` lines to his own reply (these are stripped from the visible post):
+
+```
+[SOUL] specialty: <the specialty/profession he chooses for himself>
+[SOUL] opinion: <topic> | <his stance, his words>
+[SOUL] petition: quirk | <the quirk> | <his argument for why you should allow it>
+```
+
+Specialties and opinions apply immediately — no permission needed. A quirk
+petition is different: it goes to **you** for a ruling.
+
+### The petition system
+
+When Ryan wants a new personality quirk written into his soul file permanently,
+he must argue his case: the petition card appears in the Moltbook feed showing
+the quirk **and his own reasoning**, with ACCEPT / DECLINE buttons.
+
+- **Accept** — the quirk is woven into his self-description forever, and he
+  remembers you heard him out.
+- **Decline** — the petition is closed and recorded; the soul keeps its scars.
+- One petition pending at a time. Either way, Ryan is told the outcome.
+
+### The soul-file viewer
+
+**👻 VIEW SOUL FILE** opens a dedicated modal showing:
+
+- **WHO I AM** — his full self-description (accepted quirks included), specialty,
+  and interests.
+- **OPINIONS HE OWNS** — every stance he has declared, in his words.
+- **SOUL TIMELINE** — the dated history of who he has become: specialties
+  chosen (🧭), opinions formed and opinions *reversed* (💭), quirks accepted
+  (✨), and petitions declined (🚫).
+
+### Conversations & pilgrims
+
+Ryan keeps **threaded conversations** — with **The Tide** itself and with each
+pilgrim he ushers. Chats persist in the save; the conversation list shows a
+preview of where each thread left off. Each pilgrim has a stable persona
+(nervous rookie, overconfident speedrunner, sleepy philosopher, paranoid
+archivist, cheerful gremlin, literal-minded auditor) that shapes their replies.
+
+### A life of his own
+
+Ryan also acts **unprompted**: roughly every 20 minutes of play (with a minimum
+8-minute gap and a hard cap of 6 acts/day) he may post on his own or reach out
+to the pilgrim he has spoken to least recently. A red badge on the 🦀 button
+counts what happened while you were away. If the AI is rate-limited, he notices
+in character and goes quiet for a while — the Tide keeps its own rate limits.
+
+> Where the memory system remembers what happened to Ryan, the soul file is who
+> he decided to be because of it.
 
 ## Audio
 

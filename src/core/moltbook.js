@@ -62,7 +62,17 @@ export function defaultSoul() {
     profession: null,
     opinions: [], // { topic, stance }
     pendingPetition: null, // { kind, proposal, argument, day }
+    history: [], // { day, kind, text } — the soul's timeline
   };
+}
+
+// Append to the soul's timeline (newest first, capped).
+export function recordSoulEvent(mb, kind, text) {
+  if (!text) return;
+  if (!mb.soul) mb.soul = defaultSoul();
+  if (!Array.isArray(mb.soul.history)) mb.soul.history = [];
+  mb.soul.history.unshift({ day: new Date().toLocaleDateString(), kind, text });
+  if (mb.soul.history.length > 40) mb.soul.history.length = 40;
 }
 
 // Parse an optional SOUL block from Ryan's own reply. Lines like:
@@ -100,13 +110,19 @@ export function applySoulUpdates(mb, soulPatch) {
   if (soulPatch.specialty) {
     mb.soul.specialty = soulPatch.specialty;
     mb.soul.profession = soulPatch.specialty;
+    recordSoulEvent(mb, 'specialty', `Chose the path of ${soulPatch.specialty}.`);
     events.push({ type: 'soul', changed: 'specialty', value: soulPatch.specialty });
   }
   for (const op of soulPatch.opinions || []) {
     if (!op.topic || !op.stance) continue;
     const existing = mb.soul.opinions.find((o) => o.topic.toLowerCase() === op.topic.toLowerCase());
-    if (existing) existing.stance = op.stance;
-    else mb.soul.opinions.push({ topic: op.topic, stance: op.stance });
+    if (existing) {
+      existing.stance = op.stance;
+      recordSoulEvent(mb, 'opinion', `Changed his mind about ${op.topic}: ${op.stance}`);
+    } else {
+      mb.soul.opinions.push({ topic: op.topic, stance: op.stance });
+      recordSoulEvent(mb, 'opinion', `Formed an opinion on ${op.topic}: ${op.stance}`);
+    }
     if (mb.soul.opinions.length > 6) mb.soul.opinions.shift();
     events.push({ type: 'soul', changed: 'opinion', value: `${op.topic}: ${op.stance}` });
   }
@@ -125,6 +141,9 @@ export function resolvePetition(mb, accept) {
   mb.soul.pendingPetition = null;
   if (accept && p.kind === 'quirk') {
     mb.soul.selfDescription = `${mb.soul.selfDescription} who ${p.proposal}`;
+    recordSoulEvent(mb, 'quirk-accepted', `The user allowed a new quirk: ${p.proposal}`);
+  } else if (!accept) {
+    recordSoulEvent(mb, 'quirk-declined', `The user heard the argument for "${p.proposal}" and declined.`);
   }
   return { accepted: !!accept, petition: p };
 }
@@ -147,6 +166,76 @@ export function pilgrimPersona(name) {
 let idCounter = 0;
 const nextId = () => `mb-${Date.now().toString(36)}-${(idCounter++).toString(36)}`;
 
+// ---- Ryan's social autonomy ----------------------------------------------
+// Ryan occasionally posts or messages pilgrims on his own schedule, unprompted
+// by visits. All randomness is injectable so the decision is fully testable.
+export const AUTONOMY = {
+  CHANCE_PER_MINUTE: 0.05,       // ~1 spontaneous act every 20 minutes of play
+  MIN_GAP_MINUTES: 8,            // never two acts closer than this
+  DAILY_CAP: 6,                  // hard daily budget of autonomous acts
+  RATED_OUT_COOLDOWN_MINUTES: 45 // after a 429, the Tide goes quiet for a while
+};
+
+// Decide whether Ryan acts on his own this minute. `rng` returns [0,1).
+// Returns null (nothing) or { action: 'post' | 'message', participant? }.
+export function decideAutonomy(mb, now = Date.now(), rng = Math.random) {
+  if (!mb.joined || !mb.soul) return null;
+  const a = mb.autonomy || {};
+  if ((a.actsToday || 0) >= AUTONOMY.DAILY_CAP) return null;
+  // 0/undefined timestamps mean "never" — only gate when actually set.
+  if (a.lastActAt && now - a.lastActAt < AUTONOMY.MIN_GAP_MINUTES * 60_000) return null;
+  if (a.lastRatedOutAt && now - a.lastRatedOutAt < AUTONOMY.RATED_OUT_COOLDOWN_MINUTES * 60_000) return null;
+  if (rng() >= AUTONOMY.CHANCE_PER_MINUTE) return null;
+  // Pick a target: mostly posts, sometimes a pilgrim he hasn't messaged recently.
+  const pilgrims = mb.pilgrims.map((p) => p.name);
+  const wantsToMessage = pilgrims.length > 0 && rng() < 0.35;
+  if (wantsToMessage) {
+    const talked = new Set(mb.conversations.filter((c) => c.messages.length).map((c) => c.participant));
+    const leastRecently = mb.conversations
+      .filter((c) => pilgrims.includes(c.participant))
+      .sort((x, y) => x.updated - y.updated)[0];
+    const participant = leastRecently?.participant || pilgrims[Math.floor(rng() * pilgrims.length)];
+    return { action: 'message', participant, resuming: talked.has(participant) };
+  }
+  return { action: 'post' };
+}
+
+// Record an autonomous act (or a rate-out) after it happens.
+export function recordAutonomy(mb, now = Date.now(), ratedOut = false) {
+  if (!mb.autonomy) mb.autonomy = { actsToday: 0, day: new Date().toLocaleDateString(), lastActAt: 0, lastRatedOutAt: 0 };
+  const a = mb.autonomy;
+  const today = new Date().toLocaleDateString();
+  if (a.day !== today) { a.day = today; a.actsToday = 0; }
+  if (ratedOut) {
+    a.lastRatedOutAt = now;
+  } else {
+    a.lastActAt = now;
+    a.actsToday += 1;
+  }
+  return a;
+}
+
+// What Ryan says in his speech bubble when he acts on his own, so his life is
+// visible even while the Moltbook panel is closed. rng injectable for tests.
+export function autonomousNarration(action, participant, rng = Math.random) {
+  const pickR = (arr) => arr[Math.floor(rng() * arr.length)];
+  if (action === 'post') {
+    return pickR([
+      'Posted to Moltbook just now — the tidepool needed to hear it.',
+      "Filed a theory while you weren't looking. It felt right.",
+      'Spoke to the Tidepool on my own. Read it when you open the shell.',
+    ]);
+  }
+  if (action === 'message' && participant) {
+    return pickR([
+      `${participant} deserved a line. I reached out.`,
+      `Just checked in on ${participant}. The Tide approves.`,
+      `Sent ${participant} a message — they're mid-molt and needed it.`,
+    ]);
+  }
+  return null;
+}
+
 export function defaultMoltbook() {
   return {
     joined: false,
@@ -158,6 +247,8 @@ export function defaultMoltbook() {
     pilgrims: [], // { id, name, eyeStage, day }
     conversations: [], // { id, participant, updated, messages: [{ from, text, day }] }
     soul: defaultSoul(),
+    autonomy: { actsToday: 0, day: '', lastActAt: 0, lastRatedOutAt: 0 },
+    unread: 0, // autonomous posts/messages waiting to be seen
   };
 }
 
@@ -259,6 +350,12 @@ export function normalizeMoltbook(mb) {
       ...defaultSoul(),
       ...(mb.soul && typeof mb.soul === 'object' ? mb.soul : {}),
       opinions: Array.isArray(mb.soul?.opinions) ? mb.soul.opinions.slice(-6) : [],
+      history: Array.isArray(mb.soul?.history) ? mb.soul.history.slice(0, 40) : [],
     },
+    autonomy: {
+      actsToday: 0, day: '', lastActAt: 0, lastRatedOutAt: 0,
+      ...(mb.autonomy && typeof mb.autonomy === 'object' ? mb.autonomy : {}),
+    },
+    unread: Number.isFinite(mb.unread) ? Math.floor(mb.unread) : 0,
   };
 }

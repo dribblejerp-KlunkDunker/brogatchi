@@ -397,4 +397,33 @@ describe('BroGatchiApp integration', () => {
     expect(app.state.sideBro).toBeTruthy();
     expect(app.state.counters.pet).toBe(0); // still no Ryan pet
   });
+
+  it('pins milestone memories so the cap cannot churn them out; user pin toggle persists', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+
+    // a milestone memory arrives pinned (IRL quest completion)
+    app.completeIrl(0);
+    expect(app.state.memories.length).toBeGreaterThan(0);
+    expect(app.state.memories.some((m) => m.pinned && m.text.includes('real-life quest'))).toBe(true);
+
+    // importance-5 noise cannot evict it, even past the cap
+    for (let i = 0; i < 30; i++) app.memory(`noise flood ${i}`, '🪙', 5);
+    const pinned = app.state.memories.filter((m) => m.pinned);
+    expect(pinned.length).toBeGreaterThanOrEqual(1);
+    expect(pinned.some((m) => m.text.includes('real-life quest'))).toBe(true);
+
+    // the pin toggle works end to end (pin, then unpin restores)
+    const casual = app.state.memories.find((m) => !m.pinned);
+    app.pinMemory(casual.id);
+    expect(app.state.memories.find((m) => m.id === casual.id).pinned).toBe(true);
+    app.pinMemory(casual.id);
+    expect(app.state.memories.find((m) => m.id === casual.id).pinned).toBe(false);
+
+    // normalize (what a reload runs) preserves exactly the pinned milestones
+    const { normalize } = await import('../src/core/save.js');
+    const kept = normalize({ memories: app.state.memories });
+    expect(kept.memories.filter((m) => m.pinned).map((m) => m.id).sort())
+      .toEqual(pinned.map((m) => m.id).sort());
+  });
 });
