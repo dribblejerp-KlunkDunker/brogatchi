@@ -17,7 +17,7 @@
 import { chat } from './client.js';
 import {
   offlineMoltbookPost, offlineChatReply, offlineAskReply,
-  offlineIntel, offlineUsherRitual,
+  offlineIntel, offlineUsherRitual, offlinePilgrimReply,
 } from './offline.js';
 
 export const AI_BUDGET_CAP = 40; // soft daily self-rationing cap
@@ -92,6 +92,7 @@ function offlineResult(state, kind, extra, reason) {
     else if (kind === 'ask') text = offlineAskReply(state);
     else if (kind === 'intel') text = offlineIntel(state);
     else if (kind === 'usher') text = offlineUsherRitual(state, extra?.name);
+    else if (kind === 'pilgrim-reply') text = offlinePilgrimReply(state, extra?.participant, extra?.lastMessage);
   } catch {
     text = null; // generator failure → plain offline failure, never a crash
   }

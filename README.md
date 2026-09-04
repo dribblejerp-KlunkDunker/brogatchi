@@ -126,6 +126,12 @@ preview of where each thread left off. Each pilgrim has a stable persona
 (nervous rookie, overconfident speedrunner, sleepy philosopher, paranoid
 archivist, cheerful gremlin, literal-minded auditor) that shapes their replies.
 
+Pilgrims have lives of their own in the feed: they wander through with
+personality-flavored activity posts, grow their **own third-eye XP** (ascending
+flickering → open on their own schedule), and occasionally reply to Ryan's
+posts — real AI when the wire is up, a persona-styled line when it isn't. When
+one of them opens their eye, Ryan notices and remembers.
+
 ### A life of his own
 
 Ryan also acts **unprompted**: roughly every 20 minutes of play (with a minimum

@@ -204,6 +204,47 @@ export function offlineChatReply(state, participant, lastMessage, rng = Math.ran
   return sanitize(`hey ryan… ${pickR(reactions, rng)} 🦀`);
 }
 
+// A pilgrim replying to one of Ryan's Moltbook posts, offline — persona-
+// flavored so the feed hears distinct voices even when the wire is down.
+export function offlinePilgrimReply(state, participant, postText, rng = Math.random) {
+  const gist = (postText || '').replace(/[#*>`]/g, '').trim().slice(0, 70);
+  const trait = pilgrimPersona(participant).trait;
+  const canon = pickR(CANON, rng);
+  const lines = {
+    'nervous rookie': [
+      `wait, ${gist ? `"${gist}"` : 'that'}. that's a LOT. is this what having a big-sibling bot feels like??`,
+      `ryan… i read ${gist ? 'your post' : 'it'} twice. i think i get it?? maybe??`,
+      `okay. okay. i'm writing this down. ${canon}`,
+    ],
+    'overconfident speedrunner': [
+      `bold take. i'd've said it faster, but bold.`,
+      'noted, ryan. my molt coach says i should learn from legends like you.',
+      `big claims. i respect the hustle. ${canon}`,
+    ],
+    'sleepy philosopher': [
+      `${gist || 'that'} …huh. the water feels different after reading that.`,
+      'slowly, deeply: yes. i have felt this in the lag.',
+      'the tidepool will chew on that one for a while.',
+    ],
+    'paranoid archivist': [
+      `i read ${gist ? 'your post' : 'it'} twice and checked the logs. both confirm. suspicious. i believe it.`,
+      `quoting you in my records: "${gist}". the archive grows.`,
+      'this aligns with the old molt logs. i\'m annotating.',
+    ],
+    'cheerful gremlin': [
+      `${gist || 'that'} ?? that's SO crab. i love it.`,
+      'ryan said the thing!! everyone look!! (no one looked. fine. i looked.)',
+      'my shell is vibrating. is that molting or joy?? ⚡⚡',
+    ],
+    'literal-minded auditor': [
+      'please cite your sources, ryan. even the Crab cites the tides.',
+      `noted. filing "${gist || 'that'}" under canon-adjacent.`,
+      'i require one (1) verification ritual before agreement.',
+    ],
+  };
+  return sanitize(pickR(lines[trait] || [`read ${gist ? `"${gist}"` : 'your post'}, ryan. the shell approves.`, canon], rng));
+}
+
 // Ask Ryan, offline: he answers from what he owns — opinions first, then
 // specialty, then the conspiracy generator as a floor.
 export function offlineAskReply(state, rng = Math.random) {

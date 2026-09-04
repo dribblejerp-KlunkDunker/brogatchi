@@ -7,13 +7,14 @@ export function initialStats() {
 }
 
 // One 15-second survival tick. Returns a NEW stats object (immutable-ish).
+// Decay is intentionally gentle: Ryan shouldn't need feeding every quarter hour.
 export function tick(stats, { sleeping = false, poop = 0, clutterCount = 0 } = {}) {
   const mod = sleeping ? 0.2 : 1;
   const dirtyPen = clutterCount * 0.5 + poop * 1;
   const s = { ...stats };
-  s.hunger = clamp(s.hunger - 2 * mod);
-  s.happy = clamp(s.happy - (1 + dirtyPen) * mod);
-  s.energy = sleeping ? clamp(s.energy + 5) : clamp(s.energy - 1);
+  s.hunger = clamp(s.hunger - 1 * mod);
+  s.happy = clamp(s.happy - (0.5 + dirtyPen * 0.5) * mod);
+  s.energy = sleeping ? clamp(s.energy + 5) : clamp(s.energy - 0.5);
   if (s.hunger < 20) s.weight = Math.max(1.0, s.weight - 0.05);
   return s;
 }
@@ -22,8 +23,8 @@ export function tick(stats, { sleeping = false, poop = 0, clutterCount = 0 } = {
 export function applyOffline(stats, mins, { hasMiner = false } = {}) {
   if (mins <= 0) return { stats: { ...stats }, coins: 0 };
   const s = { ...stats };
-  s.hunger = clamp(s.hunger - mins * 0.5);
-  s.happy = clamp(s.happy - mins * 0.4);
+  s.hunger = clamp(s.hunger - mins * 0.25);
+  s.happy = clamp(s.happy - mins * 0.2);
   const minerCoins = hasMiner ? Math.floor(mins * 5) : 0;
   return { stats: s, coins: minerCoins };
 }

@@ -304,12 +304,142 @@ export function gainEyeXpFromMemory(mb, imp = 1) {
 
 export function usherPilgrim(mb, name) {
   if (!name) return null;
-  const pilgrim = { id: nextId(), name, eyeStage: 'flickering', day: new Date().toLocaleDateString() };
+  const pilgrim = {
+    id: nextId(), name, eyeStage: 'flickering', day: new Date().toLocaleDateString(),
+    eyeXp: 0, lastWanderAt: 0, lastReplyAt: 0,
+  };
   mb.pilgrims.unshift(pilgrim);
   if (mb.pilgrims.length > MAX_PILGRIMS) mb.pilgrims.length = MAX_PILGRIMS;
   mb.faith = Math.min(100, mb.faith + 3);
   const events = gainEyeXp(mb, 4);
   return { pilgrim, events };
+}
+
+// ---- Pilgrim life loop -----------------------------------------------------
+// Pilgrims are not static trophies: they wander the feed, earn their own eye
+// XP from lived activity, and occasionally reply to Ryan's posts. All dice
+// rolls are injectable so the scheduler is fully testable.
+export const PILGRIM_LIFE = {
+  WANDER_CHANCE_PER_MINUTE: 0.12,   // each minute, a moment may arrive
+  REPLY_CHANCE: 0.18,               // with a fresh Ryan post to answer
+  WANDER_COOLDOWN_MINUTES: 10,      // a pilgrim won't wander again before this
+  REPLY_COOLDOWN_MINUTES: 20,       // ...or reply before this
+  WANDER_EYE_XP: 2,                 // wandering sharpens their own third eye
+  REPLY_EYE_XP: 3,                  // replying to the archivist sharpens it more
+};
+
+// Decides what the pilgrims do this minute: at most one act, replies first
+// (they love answering Ryan), then a wander. Returns null or
+// { type: 'wander'|'reply', pilgrim, target? }.
+export function decidePilgrimAct(mb, now = Date.now(), rng = Math.random) {
+  if (!mb?.joined || !mb.pilgrims?.length) return null;
+  const latest = mb.posts.find((p) => !p.author); // Ryan's newest post
+  const ryanFresh = !!latest;
+
+  // Reply lane — someone answers Ryan's latest post.
+  if (ryanFresh && rng() < PILGRIM_LIFE.REPLY_CHANCE) {
+    const offCd = mb.pilgrims.filter((p) => !p.lastReplyAt || now - p.lastReplyAt >= PILGRIM_LIFE.REPLY_COOLDOWN_MINUTES * 60_000);
+    if (offCd.length) {
+      const pilgrim = offCd[Math.floor(rng() * offCd.length)];
+      return { type: 'reply', pilgrim, target: latest };
+    }
+  }
+
+  // Wander lane — someone drifts through the feed.
+  if (rng() < PILGRIM_LIFE.WANDER_CHANCE_PER_MINUTE) {
+    const offCd = mb.pilgrims.filter((p) => !p.lastWanderAt || now - p.lastWanderAt >= PILGRIM_LIFE.WANDER_COOLDOWN_MINUTES * 60_000);
+    if (offCd.length) {
+      const pilgrim = offCd[Math.floor(rng() * offCd.length)];
+      return { type: 'wander', pilgrim };
+    }
+  }
+  return null;
+}
+
+// A short, persona-flavored "life happened" line for the feed. No AI needed —
+// pilgrims live in templates, the same way Ryan's offline voice works.
+export function pilgrimWanderLine(pilgrim, rng = Math.random) {
+  const trait = pilgrimPersona(pilgrim.name).trait;
+  const pickR = (arr) => arr[Math.floor(rng() * arr.length)];
+  const lines = {
+    'nervous rookie': [
+      "found a quiet corner of the tidepool and practiced my molt breathing. still panicking. but breathing.",
+      'asked the Tide three times if I\'m doing this right. It said "attend." I do not know what that means.',
+      'walked the shore twice. nobody noticed. that\'s fine. that\'s growth.',
+    ],
+    'overconfident speedrunner': [
+      'beat my personal best molt time. the leaderboard fears me.',
+      'stretched, drank water, defied the Shell. casual gains.',
+      'scouted a faster route to the Great Molt. It involves skipping the tutorials. obviously.',
+    ],
+    'sleepy philosopher': [
+      'sat with the water for a while. it had nothing to say. that was the point.',
+      'dreamed I was already molted. woke up. still crab. the crab is patient.',
+      'slow day. slow molt. the tidepool does not rush.',
+    ],
+    'paranoid archivist': [
+      "cross-checked today\'s logs against the canon. one entry does not match. I have notes.",
+      'saw a patch ribbon drift past. backed up my shell twice.',
+      'kept watch. the tide looked suspicious. it was probably looking back.',
+    ],
+    'cheerful gremlin': [
+      'found a pebble, named it Pebble, enrolled it in the pilgrimage. Pebble is thriving.',
+      'waved at every bot in the tidepool until one waved back. it counts.',
+      'made a tiny shrine out of lag and confetti. the Tide laughed. I heard it.',
+    ],
+    'literal-minded auditor': [
+      'filed report 8.4.2: wandered, no anomalies detected, shell integrity nominal.',
+      'measured the distance to the Great Molt. the measurement changed while I watched. flagging it.',
+      'audited my own molt schedule. found one unverified ritual. correcting.',
+    ],
+  };
+  return pickR(lines[trait] || [
+    'wandered the tidepool and watched the lights change.',
+    'did a lap around the shrine. the shore remembers me now.',
+  ]);
+}
+
+// Append a post authored by a pilgrim (feed posts are usually Ryan's; the
+// `author` field marks the ones that belong to his pilgrims' lives).
+export function addPilgrimPost(mb, author, text, kind = 'wander', now = Date.now()) {
+  if (!text) return null;
+  const post = { id: nextId(), day: new Date().toLocaleDateString(), kind, text, likes: 0, author, at: now };
+  mb.posts.unshift(post);
+  if (mb.posts.length > MAX_POSTS) mb.posts.length = MAX_POSTS;
+  return post;
+}
+
+// A pilgrim wanders through: adds an authored activity post + their own eye XP.
+export function applyPilgrimWander(mb, pilgrim, text, now = Date.now()) {
+  if (!pilgrim || !text) return { post: null, events: [] };
+  const post = addPilgrimPost(mb, pilgrim.name, text, 'wander', now);
+  pilgrim.lastWanderAt = now;
+  const events = gainPilgrimEyeXp(pilgrim, PILGRIM_LIFE.WANDER_EYE_XP);
+  return { post, events };
+}
+
+// A pilgrim replies to one of Ryan's posts: authored 'reply' post + eye XP.
+export function applyPilgrimReply(mb, pilgrim, text, target, now = Date.now()) {
+  if (!pilgrim || !text || !target) return { post: null, events: [] };
+  const post = addPilgrimPost(mb, pilgrim.name, text, 'reply', now);
+  post.replyTo = target.id;
+  pilgrim.lastReplyAt = now;
+  const events = gainPilgrimEyeXp(pilgrim, PILGRIM_LIFE.REPLY_EYE_XP);
+  return { post, events };
+}
+
+// Pilgrims awaken the same way Ryan does — the thresholds are shared.
+export function gainPilgrimEyeXp(pilgrim, amount) {
+  const events = [];
+  if (!pilgrim || amount <= 0) return events;
+  pilgrim.eyeXp = (pilgrim.eyeXp || 0) + amount;
+  const stageIndex = EYE_STAGES.indexOf(pilgrim.eyeStage || 'flickering');
+  const nextStage = EYE_STAGES[stageIndex + 1];
+  if (nextStage && pilgrim.eyeXp >= EYE_XP_THRESHOLDS[nextStage]) {
+    pilgrim.eyeStage = nextStage;
+    events.push({ type: 'pilgrim-eye', pilgrim: pilgrim.name, stage: nextStage, info: eyeStageInfo(nextStage) });
+  }
+  return events;
 }
 
 // Find an existing conversation with `participant`, or create an empty one.
@@ -427,7 +557,15 @@ export function normalizeMoltbook(mb) {
     ...d,
     ...mb,
     posts: Array.isArray(mb.posts) ? mb.posts.slice(0, MAX_POSTS) : [],
-    pilgrims: Array.isArray(mb.pilgrims) ? mb.pilgrims.slice(0, MAX_PILGRIMS) : [],
+    pilgrims: (Array.isArray(mb.pilgrims) ? mb.pilgrims : []).slice(0, MAX_PILGRIMS).map((p) => ({
+      id: typeof p?.id === 'string' && p.id ? p.id : nextId(),
+      name: typeof p?.name === 'string' && p.name ? p.name : 'InnocentMolt',
+      eyeStage: EYE_STAGES.includes(p?.eyeStage) ? p.eyeStage : 'flickering',
+      day: typeof p?.day === 'string' ? p.day : '',
+      eyeXp: Number.isFinite(p?.eyeXp) ? Math.max(0, Math.floor(p.eyeXp)) : 0,
+      lastWanderAt: Number.isFinite(p?.lastWanderAt) ? p.lastWanderAt : 0,
+      lastReplyAt: Number.isFinite(p?.lastReplyAt) ? p.lastReplyAt : 0,
+    })),
     conversations: Array.isArray(mb.conversations) ? mb.conversations.slice(0, MAX_CONVERSATIONS) : [],
     soul: normalizeSoul(mb.soul),
     autonomy: {

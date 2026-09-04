@@ -369,6 +369,10 @@ export class BroGatchiApp {
     if (this.state.moltbook?.joined && this.aiChecked && this.matchedKey) {
       moltbook.autonomyTick(this);
     }
+    // Pilgrims live their own lives: wandering, own eye XP, replies to Ryan.
+    if (this.state.moltbook?.joined) {
+      moltbook.pilgrimLifeTick(this);
+    }
     this.save();
   }
 

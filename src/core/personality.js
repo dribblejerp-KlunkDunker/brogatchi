@@ -33,7 +33,7 @@ export function minuteDrift(personality, state) {
   if (state.stats.weight >= 2.0) adjust(personality, 'gluttony', 0.1);
   if (state.steps === 0 && state.stats.weight < 2.0) adjust(personality, 'fitness', -0.2);
   if (state.coins >= 100) adjust(personality, 'greed', 0.1);
-  if (state.coins < 30) adjust(personality, 'greed', -0.15);
+  if (state.coins < 30) adjust(personality, 'greed', -0.07);
 }
 
 export function dominant(state) {

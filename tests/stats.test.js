@@ -2,24 +2,24 @@ import { describe, it, expect } from 'vitest';
 import { tick, applyOffline, FOODS, weightTier, clamp, initialStats } from '../src/core/stats.js';
 
 describe('stats.tick', () => {
-  it('decays hunger and happy, drains energy', () => {
+  it('decays hunger and happy, drains energy (gently)', () => {
     const s = tick(initialStats(), {});
-    expect(s.hunger).toBe(73);
-    expect(s.happy).toBe(79);
-    expect(s.energy).toBe(99);
+    expect(s.hunger).toBe(74);
+    expect(s.happy).toBe(79.5);
+    expect(s.energy).toBe(99.5);
   });
 
   it('decays slower while sleeping and restores energy', () => {
     const s = tick(initialStats(), { sleeping: true });
-    expect(s.hunger).toBe(75 - 2 * 0.2);
+    expect(s.hunger).toBe(75 - 1 * 0.2);
     expect(s.energy).toBe(100 - 5 + 5);
     expect(s.energy).toBeLessThanOrEqual(100);
   });
 
-  it('dirty room hurts happiness', () => {
+  it('dirty room hurts happiness (halved penalty)', () => {
     const s = tick(initialStats(), { poop: 2, clutterCount: 2 });
-    // dirtyPen = 2*0.5 + 2*1 = 3
-    expect(s.happy).toBe(80 - 4);
+    // dirtyPen = 2*0.5 + 2*1 = 3; penalty halved to 0.5 + 3*0.5 = 2
+    expect(s.happy).toBe(80 - 2);
   });
 
   it('loses weight when starving', () => {
@@ -29,10 +29,10 @@ describe('stats.tick', () => {
 });
 
 describe('stats.applyOffline', () => {
-  it('decays for elapsed minutes', () => {
+  it('decays for elapsed minutes (gently)', () => {
     const r = applyOffline(initialStats(), 60, { hasMiner: false });
-    expect(r.stats.hunger).toBe(45); // 75 - 60*0.5
-    expect(r.stats.happy).toBe(56);  // 80 - 60*0.4
+    expect(r.stats.hunger).toBe(60); // 75 - 60*0.25
+    expect(r.stats.happy).toBe(68);  // 80 - 60*0.2
     expect(r.coins).toBe(0);
   });
   it('passive miner pays out', () => {

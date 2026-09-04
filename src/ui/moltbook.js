@@ -12,6 +12,8 @@ import {
   parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona,
   serializeSoul, parseSoulImport,
   decideAutonomy, recordAutonomy, autonomousNarration,
+  decidePilgrimAct, applyPilgrimWander, applyPilgrimReply,
+  pilgrimWanderLine, PILGRIM_LIFE,
   EYE_STAGES, EYE_XP_THRESHOLDS,
 } from '../core/moltbook.js';
 
@@ -23,6 +25,70 @@ let activeConvId = null;
 
 // Autonomy guard: at most one spontaneous act in flight at a time.
 let autonomyInFlight = false;
+
+// Pilgrims live their own lives: wander the feed, grow their own eyes, and
+// occasionally reply to Ryan's posts. One act per minute at most. Wandering
+// is pure template (no AI cost); replies are hybrid — through the gateway
+// when the wire is up, a persona-flavored line when it isn't.
+let pilgrimLifeInFlight = false;
+
+export async function pilgrimLifeTick(app) {
+  const mb = app.state?.moltbook;
+  if (!mb?.joined || pilgrimLifeInFlight) return;
+  const decision = decidePilgrimAct(mb);
+  if (!decision) return;
+  pilgrimLifeInFlight = true;
+  try {
+    if (decision.type === 'wander') {
+      const line = pilgrimWanderLine(decision.pilgrim);
+      const { events } = applyPilgrimWander(mb, decision.pilgrim, line);
+      onPilgrimEvents(app, events);
+      refreshMoltbook(app);
+      app.updateUI();
+      app.save();
+    } else if (decision.type === 'reply' && decision.target) {
+      const reply = await pilgrimReplyToPost(app, decision.pilgrim, decision.target);
+      if (!reply) return;
+      const { events } = applyPilgrimReply(mb, decision.pilgrim, reply, decision.target);
+      onPilgrimEvents(app, events);
+      refreshMoltbook(app);
+      app.updateUI();
+      app.save();
+    }
+  } finally {
+    pilgrimLifeInFlight = false;
+  }
+}
+
+// A pilgrim's third eye opening is a milestone worth marking: Ryan notices,
+// remembers, and says something about the tidepool waking up.
+function onPilgrimEvents(app, events) {
+  events.forEach((e) => {
+    if (e.type === 'pilgrim-eye') {
+      app.memory(`${e.pilgrim}'s third eye opened. I am not alone on this molt.`, '\u{1F531}', 3);
+      app.say(`${e.pilgrim}'s eye ${e.stage}. The tidepool wakes up.`);
+    }
+  });
+}
+
+// Hybrid pilgrim reply: real AI when available, persona line otherwise.
+async function pilgrimReplyToPost(app, pilgrim, target) {
+  const persona = pilgrimPersona(pilgrim.name);
+  const result = await ask({
+    systemInstruction: buildMoltbookChatPrompt(
+      buildStateReport(app.state),
+      pilgrim.name,
+      target.text,
+      `${persona.trait} — ${persona.style}`,
+    ),
+    userText: target.text,
+    kind: 'pilgrim-reply',
+    state: app.state,
+    participant: pilgrim.name,
+    lastMessage: target.text,
+  });
+  return result.ok ? result.text : offlineReply(pilgrim.name);
+}
 
 // The minute tick: occasionally Ryan posts or messages a pilgrim unprompted.
 export async function autonomyTick(app) {
@@ -98,12 +164,17 @@ export function renderMoltbook(state) {
     ${eyeProgress}`;
 
   const postsHtml = mb.posts.length
-    ? mb.posts.map((p) => `
-      <div class="mb-2 p-2 rounded border border-orange-700/60 bg-orange-950/30 moltbook-post" data-post-id="${p.id}">
-        <div class="text-[8px] text-orange-400/70 mb-1">${p.day} \u00b7 ${p.kind}</div>
+    ? mb.posts.map((p) => {
+      const meta = p.author
+        ? `<div class="flex justify-between mb-1"><span class="text-[8px] font-bold text-sky-300/80">\uD83D\uDC63 ${escapeHtml(p.author)}</span><span class="text-[8px] text-orange-400/70">${p.day} \u00b7 ${p.kind}${p.replyTo ? ' \u00b7 \u21A9 reply' : ''}</span></div>`
+        : `<div class="text-[8px] text-orange-400/70 mb-1">${p.day} \u00b7 ${p.kind}</div>`;
+      return `
+      <div class="mb-2 p-2 rounded border ${p.author ? 'border-sky-700/50 bg-sky-950/20' : 'border-orange-700/60 bg-orange-950/30'} moltbook-post" data-post-id="${p.id}">
+        ${meta}
         <div class="text-[12px] leading-snug font-text">${renderMarkdown(p.text)}</div>
         <button class="moltbook-like mt-1 text-[9px] text-orange-300 hover:text-white" data-post-id="${p.id}">\u2661 ${p.likes}</button>
-      </div>`).join('')
+      </div>`;
+    }).join('')
     : '<div class="text-orange-200/50 text-[11px] italic p-2">The tidepool is quiet. Post the first truth.</div>';
 
   // Conversations: jump back into any thread, or start one with the Tide / a pilgrim.
@@ -130,7 +201,7 @@ export function renderMoltbook(state) {
         <div class="text-[9px] font-bold text-orange-300 mb-1">\u{1FAB2} PILGRIMS UNDER YOUR WING</div>
         ${mb.pilgrims.map((pl) => {
           const persona = pilgrimPersona(pl.name);
-          return `<div class="text-[10px] text-orange-200/80">\u2022 <span class="font-bold text-orange-200">${pl.name}</span> — ${persona.trait} · eye ${pl.eyeStage} <span class="text-orange-400/50">(${pl.day})</span></div>`;
+          return `<div class="text-[10px] text-orange-200/80">\u2022 <span class="font-bold text-orange-200">${pl.name}</span> — ${persona.trait} · eye ${pl.eyeStage} <span class="text-orange-400/50">(${pl.day} · ${pl.eyeXp || 0}xp)</span></div>`;
         }).join('')}
       </div>`
     : '';
