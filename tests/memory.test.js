@@ -1,7 +1,9 @@
 // Tests for Ryan's pinning memory core: pinned milestones survive the cap,
 // sort first, and toggle cleanly; save normalization backfills legacy ids.
 import { describe, it, expect } from 'vitest';
-import { remember, togglePin, capMemories, MAX_MEMORIES } from '../src/core/memory.js';
+import {
+  remember, togglePin, capMemories, scrubPinnedMemories, mergePinnedMemories, MAX_MEMORIES,
+} from '../src/core/memory.js';
 import { normalize } from '../src/core/save.js';
 
 const mem = (id, imp, pinned) => ({ id, icon: '🪙', text: `m-${id}`, imp, ...(pinned ? { pinned: true } : {}) });
@@ -47,5 +49,34 @@ describe('memory pinning', () => {
     expect(out.memories[0].id).toBeTruthy();
     const again = normalize({ memories: out.memories });
     expect(again.memories[0].id).toBe(out.memories[0].id); // id stable across loads
+  });
+
+  it('scrubPinnedMemories sanitizes an external list and forces pinned', () => {
+    expect(scrubPinnedMemories('nope')).toEqual([]);
+    expect(scrubPinnedMemories(null)).toEqual([]);
+    expect(scrubPinnedMemories([{}])).toEqual([]);
+    const out = scrubPinnedMemories([
+      { text: 'good', imp: 9, junk: 'x' },
+      { text: '   ' },
+      42,
+      null,
+      { id: 'keep', text: 'with id', imp: 0 },
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out.every((m) => m.pinned)).toBe(true);
+    expect(out.find((m) => m.text === 'good').imp).toBe(5); // clamped to max
+    expect(out.find((m) => m.text === 'with id').id).toBe('keep');
+    expect(out.find((m) => m.text === 'good').id).toBeTruthy(); // id backfilled
+  });
+
+  it('mergePinnedMemories unions deduped by text, local slots win, all stay pinned', () => {
+    const local = scrubPinnedMemories([{ text: 'shared milestone', imp: 4 }, { text: 'local only', imp: 3 }]);
+    const incoming = scrubPinnedMemories([{ text: 'shared milestone', imp: 5 }, { text: 'imported only', imp: 4 }]);
+    const merged = mergePinnedMemories(local, incoming);
+    expect(merged).toHaveLength(3);
+    expect(merged.find((m) => m.text === 'shared milestone').imp).toBe(4); // local wins the slot
+    expect(merged.map((m) => m.text)).toEqual(expect.arrayContaining(['local only', 'imported only']));
+    expect(merged.every((m) => m.pinned)).toBe(true);
+    expect(mergePinnedMemories(null, 'bad')).toEqual([]);
   });
 });

@@ -47,6 +47,40 @@ export function togglePin(memories, id) {
   return sortMemories(memories);
 }
 
+// Scrub an external pinned-memory list (soul-bundle import) into the canonical
+// shape: known fields only, pinned forced on. Returns [] for anything that is
+// not an array, so callers can tell "carried none" from "carried nothing
+// usable". Pinned entries never evict by design, so no cap is applied here.
+export function scrubPinnedMemories(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((m) => m && typeof m === 'object' && typeof m.text === 'string' && m.text.trim())
+    .map((m) => ({
+      id: typeof m.id === 'string' && m.id ? m.id : memoryId(),
+      icon: typeof m.icon === 'string' && m.icon ? m.icon : '🪙',
+      text: m.text,
+      imp: Number.isFinite(m.imp) ? Math.max(1, Math.min(5, Math.floor(m.imp))) : 2,
+      day: typeof m.day === 'string' && m.day ? m.day : dayString(),
+      pinned: true,
+    }));
+}
+
+// Union two pinned-memory sets (local + imported identity bundle), deduped by
+// text so the same milestone carried from another device doesn't double up.
+// Local entries win the slot; imported ones that aren't already present are
+// appended. All stay pinned, so nothing churns under the cap.
+export function mergePinnedMemories(local, incoming) {
+  const base = Array.isArray(local) ? scrubPinnedMemories(local) : [];
+  const seen = new Set(base.map((m) => m.text));
+  for (const m of scrubPinnedMemories(incoming)) {
+    if (!seen.has(m.text)) {
+      base.push(m);
+      seen.add(m.text);
+    }
+  }
+  return base;
+}
+
 // Rule-based diary lines based on what actually happened today.
 export function buildDayLines(state) {
   const c = state.counters;

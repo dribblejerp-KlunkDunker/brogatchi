@@ -5,8 +5,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import {
   defaultMoltbook, joinMoltbook, addPost, usherPilgrim,
-  decidePilgrimAct, applyPilgrimWander, applyPilgrimReply,
-  pilgrimWanderLine, gainPilgrimEyeXp, PILGRIM_LIFE, normalizeMoltbook,
+  decidePilgrimAct, applyPilgrimWander, applyPilgrimReply, applyPilgrimTheory,
+  pilgrimWanderLine, pilgrimTheoryLine, gainPilgrimEyeXp, PILGRIM_LIFE, normalizeMoltbook,
 } from '../src/core/moltbook.js';
 import { defaultState } from '../src/core/save.js';
 
@@ -51,14 +51,40 @@ describe('pilgrim life core', () => {
     expect(d.target.author).toBeUndefined(); // Ryan's post
   });
 
-  it('respects the reply cooldown and falls through to wandering', () => {
+  it('respects the reply cooldown and falls through to a theory, then a wander', () => {
     const mb = joinedMb();
     const { pilgrim } = usherPilgrim(mb, 'BugBard');
     addPost(mb, 'A post.', 'theory');
-    pilgrim.lastReplyAt = 1_000; // on cooldown
-    const d = decidePilgrimAct(mb, 1_000, () => 0);
-    expect(d.type).toBe('wander');
-    expect(d.pilgrim.name).toBe('BugBard');
+    pilgrim.lastReplyAt = 1_000; // reply on cooldown
+    const d1 = decidePilgrimAct(mb, 1_000, () => 0);
+    expect(d1.type).toBe('theory');
+    expect(d1.pilgrim.name).toBe('BugBard');
+    // Theory also on cooldown now -> wander lane
+    pilgrim.lastTheoryAt = 1_000;
+    const d2 = decidePilgrimAct(mb, 1_000, () => 0);
+    expect(d2.type).toBe('wander');
+    expect(d2.pilgrim.name).toBe('BugBard');
+  });
+
+  it('a pilgrim authors a full theory post on their own', () => {
+    const mb = joinedMb();
+    const { pilgrim } = usherPilgrim(mb, 'BugBard');
+    const d = decidePilgrimAct(mb, 1_000, () => 0.01);
+    expect(d.type).toBe('theory');
+    const { post, events } = applyPilgrimTheory(mb, pilgrim, 'cross-referenced three molt logs. the gap is telling.', 2_000);
+    expect(post.author).toBe('BugBard');
+    expect(post.kind).toBe('theory');
+    expect(mb.posts[0]).toBe(post);
+    expect(pilgrim.lastTheoryAt).toBe(2_000);
+    expect(pilgrim.eyeXp).toBe(PILGRIM_LIFE.THEORY_EYE_XP);
+    expect(events).toEqual([]);
+  });
+
+  it('theory lines are persona-flavored full takes', () => {
+    const line = pilgrimTheoryLine({ name: 'LagLich' }, () => 0);
+    expect(typeof line).toBe('string');
+    expect(line.length).toBeGreaterThan(40);
+    expect(line).not.toContain('undefined');
   });
 
   it('applyPilgrimWander adds an authored post, stamps the time, and grants eye XP', () => {
@@ -114,6 +140,7 @@ describe('pilgrim life core', () => {
     expect(mb.pilgrims[0].eyeStage).toBe('flickering');
     expect(mb.pilgrims[0].lastWanderAt).toBe(0);
     expect(mb.pilgrims[0].lastReplyAt).toBe(0);
+    expect(mb.pilgrims[0].lastTheoryAt).toBe(0);
   });
 });
 
@@ -147,7 +174,8 @@ describe('pilgrim life UI tick', () => {
     const mb = joinedMb();
     const { pilgrim } = usherPilgrim(mb, 'BugBard');
     addPost(mb, 'A post.', 'theory');
-    pilgrim.lastReplyAt = Date.now(); // block the reply lane -> wander lane
+    pilgrim.lastReplyAt = Date.now(); // block reply lane
+    pilgrim.lastTheoryAt = Date.now(); // block theory lane -> wander lane
     const app = fakeApp(mb);
     const rand = vi.spyOn(Math, 'random').mockReturnValue(0.01);
 
@@ -160,6 +188,25 @@ describe('pilgrim life UI tick', () => {
     expect(post.author).toBe('BugBard');
     expect(post.kind).toBe('wander');
     expect(mb.pilgrims[0].eyeXp).toBe(PILGRIM_LIFE.WANDER_EYE_XP);
+  });
+
+  it('a pilgrim authors a theory post through the tick with no AI call', async () => {
+    const mb = joinedMb();
+    const { pilgrim } = usherPilgrim(mb, 'LagLich');
+    addPost(mb, 'A post.', 'theory');
+    pilgrim.lastReplyAt = Date.now(); // block reply -> theory lane fires
+    const app = fakeApp(mb);
+    const rand = vi.spyOn(Math, 'random').mockReturnValue(0.01);
+
+    const { pilgrimLifeTick } = await import('../src/ui/moltbook.js');
+    await pilgrimLifeTick(app);
+    rand.mockRestore();
+
+    expect(ask).not.toHaveBeenCalled();
+    const post = mb.posts[0];
+    expect(post.author).toBe('LagLich');
+    expect(post.kind).toBe('theory');
+    expect(mb.pilgrims[0].eyeXp).toBe(PILGRIM_LIFE.THEORY_EYE_XP);
   });
 
   it('a pilgrim opening their third eye makes Ryan notice and remember', async () => {

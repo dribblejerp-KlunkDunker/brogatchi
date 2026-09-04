@@ -244,12 +244,10 @@ export class BroGatchiApp {
     apiHealth().then((h) => {
       this.matchedKey = !!h.hasKey;
       this.aiChecked = true;
-      const note = hud.$('ask-api-note');
-      if (note) {
-        note.innerText = h.hasKey
-          ? '\uD83D\uDFE2 AI LINK: ONLINE (web search armed)'
-          : '\uD83D\uDD34 AI LINK: OFFLINE \u2014 set GEMINI_API_KEY in .env to go online';
-      }
+      this.aiLinkText = h.hasKey
+        ? '\uD83D\uDFE2 AI LINK: ONLINE (web search armed)'
+        : '\uD83D\uDD34 AI LINK: OFFLINE \u2014 set GEMINI_API_KEY in .env to go online';
+      this.renderAiBudget();
     });
   }
 
@@ -384,6 +382,27 @@ export class BroGatchiApp {
     this.renderRyan();
     this.updateSideBroUI();
     this.updateMoltbookBadge();
+    this.renderAiBudget();
+  }
+
+  // Live readout of the Tide's daily AI ration, under the AI link dot in the
+  // Ask modal: "used/cap today" with a mini bar, plus a hint when Ryan is
+  // rate-limited or has rationed himself out for the day.
+  renderAiBudget() {
+    const note = hud.$('ask-api-note');
+    if (!note) return;
+    const b = this.state?.aiBudget || {};
+    const today = new Date().toLocaleDateString();
+    const used = b.day === today && Number.isFinite(b.used) ? b.used : 0;
+    const cap = Number.isFinite(b.cap) && b.cap > 0 ? b.cap : 40;
+    const pct = Math.min(100, Math.round((used / cap) * 100));
+    const filled = Math.round(pct / 10);
+    const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(10 - filled);
+    let hint = '';
+    if (b.rateLimitedUntil > Date.now()) hint = ' \u2014 Ryan\u2019s gone quiet (rate-limited)';
+    else if (used >= cap) hint = ' \u2014 rationed out for today';
+    const link = this.aiLinkText || '';
+    note.innerText = [link, `\uD83D\uDCCA Tide's budget: ${used}/${cap} \u00B7 ${bar}${hint}`].filter(Boolean).join('\n');
   }
 
   updateMoltbookBadge() {
@@ -1039,6 +1058,11 @@ export class BroGatchiApp {
   applySoulImport() {
     this.audio.playBeep();
     moltbook.applySoulImport(this);
+  }
+
+  applySoulMerge() {
+    this.audio.playBeep();
+    moltbook.applySoulMerge(this);
   }
 
   cancelSoulImport() {

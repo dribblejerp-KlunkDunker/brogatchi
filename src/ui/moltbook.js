@@ -6,14 +6,15 @@ import { ask } from '../ai/gateway.js';
 import { buildStateReport } from '../ai/context.js';
 import { buildMoltbookPostPrompt, buildUsherPrompt, buildMoltbookChatPrompt } from '../ai/prompt.js';
 import { renderMarkdown, escapeHtml } from './markdown.js';
+import { mergePinnedMemories } from '../core/memory.js';
 import {
   addPost, gainEyeXp, joinMoltbook, usherPilgrim, likePost,
   openConversation, addMessage, eyeStageInfo, PILGRIM_NAMES, CANON, TIDE,
   parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona,
-  serializeSoul, parseSoulImport,
+  serializeSoul, parseSoulImport, mergeSouls, recordSoulEvent,
   decideAutonomy, recordAutonomy, autonomousNarration,
-  decidePilgrimAct, applyPilgrimWander, applyPilgrimReply,
-  pilgrimWanderLine, PILGRIM_LIFE,
+  decidePilgrimAct, applyPilgrimWander, applyPilgrimReply, applyPilgrimTheory,
+  pilgrimWanderLine, pilgrimTheoryLine, PILGRIM_LIFE,
   EYE_STAGES, EYE_XP_THRESHOLDS,
 } from '../core/moltbook.js';
 
@@ -42,6 +43,13 @@ export async function pilgrimLifeTick(app) {
     if (decision.type === 'wander') {
       const line = pilgrimWanderLine(decision.pilgrim);
       const { events } = applyPilgrimWander(mb, decision.pilgrim, line);
+      onPilgrimEvents(app, events);
+      refreshMoltbook(app);
+      app.updateUI();
+      app.save();
+    } else if (decision.type === 'theory') {
+      const line = pilgrimTheoryLine(decision.pilgrim);
+      const { events } = applyPilgrimTheory(mb, decision.pilgrim, line);
       onPilgrimEvents(app, events);
       refreshMoltbook(app);
       app.updateUI();
@@ -497,7 +505,7 @@ export function renderSoulFile(state, notice = null) {
     ? `<div class="mt-1 p-1.5 rounded border border-amber-500/60 bg-amber-950/30 text-[10px] text-amber-200">📜 One petition awaits your ruling in Moltbook: "${escapeHtml(soul.pendingPetition.proposal)}"</div>`
     : '';
 
-  const kindGlyph = { specialty: '🧭', opinion: '💭', 'quirk-accepted': '✨', 'quirk-declined': '🚫' };
+  const kindGlyph = { specialty: '🧭', opinion: '💭', 'quirk-accepted': '✨', 'quirk-declined': '🚫', merge: '🔀' };
   const history = soul.history?.length
     ? soul.history.map((h) => `
         <div class="flex gap-1.5 items-baseline">
@@ -518,10 +526,11 @@ export function renderSoulFile(state, notice = null) {
     actions.innerHTML = noticeHtml + (pendingImport
       ? `<div class="p-2 rounded border border-amber-500/70 bg-amber-950/40">
           <div class="text-[9px] text-orange-200/80 mb-1">⬆ <span class="font-bold text-amber-200">${escapeHtml(pendingImport.fileName)}</span> — he arrives as:</div>
-          <div class="text-[10px] leading-snug text-orange-100 mb-1">${escapeHtml(pendingImport.soul.selfDescription)}${pendingImport.soul.specialty ? ` · <span class="text-amber-200">${escapeHtml(pendingImport.soul.specialty)}</span>` : ''}${pendingImport.soul.opinions.length ? ` · ${pendingImport.soul.opinions.length} opinion${pendingImport.soul.opinions.length === 1 ? '' : 's'}` : ''}${pendingImport.soul.history.length ? ` · ${pendingImport.soul.history.length} timeline ${pendingImport.soul.history.length === 1 ? 'entry' : 'entries'}` : ''}</div>
-          <div class="text-[8px] text-orange-300/60 mb-1.5">Replaces the soul on THIS device. His memories and pilgrims stay local.</div>
+          <div class="text-[10px] leading-snug text-orange-100 mb-1">${escapeHtml(pendingImport.soul.selfDescription)}${pendingImport.soul.specialty ? ` · <span class="text-amber-200">${escapeHtml(pendingImport.soul.specialty)}</span>` : ''}${pendingImport.soul.opinions.length ? ` · ${pendingImport.soul.opinions.length} opinion${pendingImport.soul.opinions.length === 1 ? '' : 's'}` : ''}${pendingImport.soul.history.length ? ` · ${pendingImport.soul.history.length} timeline ${pendingImport.soul.history.length === 1 ? 'entry' : 'entries'}` : ''}${pendingImport.pinnedMemories?.length ? ` · 📌 ${pendingImport.pinnedMemories.length} pinned memor${pendingImport.pinnedMemories.length === 1 ? 'y' : 'ies'}` : ''}</div>
+          <div class="text-[8px] text-orange-300/60 mb-1.5">REPLACE swaps in this file; MERGE combines both souls (timelines, opinions, interests). Pinned memories 📌 travel with him; everyday memories and pilgrims stay local.</div>
           <div class="flex gap-2">
             <button class="pixel-btn p-1.5 text-[9px] bg-emerald-600 text-black border-emerald-400 flex-1" onclick="app.applySoulImport()">✅ REPLACE</button>
+            <button class="pixel-btn p-1.5 text-[9px] bg-sky-600 text-black border-sky-400 flex-1" onclick="app.applySoulMerge()">🔀 MERGE</button>
             <button class="pixel-btn p-1.5 text-[9px] bg-black/40 text-orange-200 border-orange-700 flex-1" onclick="app.cancelSoulImport()">✖ KEEP MINE</button>
           </div>
         </div>`
@@ -543,9 +552,10 @@ export function openSoulFile(app) {
 // A soul file waiting for the user's REPLACE / KEEP MINE ruling.
 let pendingImport = null;
 
-// Download Ryan's identity as a JSON soul file he can carry to another device.
+// Download Ryan's identity as a JSON soul bundle he can carry to another
+// device: his soul plus his pinned memories, so experiences travel too.
 export function exportSoulFile(app) {
-  const json = serializeSoul(app.state.moltbook);
+  const json = serializeSoul(app.state.moltbook, app.state.memories);
   const name = `ryan-soul-${new Date().toISOString().slice(0, 10)}.json`;
   try {
     const blob = new Blob([json], { type: 'application/json' });
@@ -586,7 +596,7 @@ export function importSoulFile(app) {
         renderSoulFile(app.state, { text: `⚠ Import failed — ${result.error}`, error: true });
         return;
       }
-      pendingImport = { soul: result.soul, fileName: file.name };
+      pendingImport = { soul: result.soul, pinnedMemories: result.pinnedMemories, fileName: file.name };
       renderSoulFile(app.state);
     };
     reader.onerror = () => renderSoulFile(app.state, { text: '⚠ Could not read that file.', error: true });
@@ -596,15 +606,46 @@ export function importSoulFile(app) {
   input.click();
 }
 
-// The user ruled on a staged import: replace the local soul, keep everything
-// else (memories, pilgrims, chats) exactly as it is.
+// The user ruled on a staged import: replace the local soul (and, when the
+// bundle carries them, his pinned memories), keep everything else (everyday
+// memories, pilgrims, chats) exactly as it is.
 export function applySoulImport(app) {
   if (!pendingImport) return;
   app.state.moltbook.soul = pendingImport.soul;
+  // Only swap memories when the bundle actually carries pinned ones — an
+  // export with zero pins shouldn't erase this device's whole log.
+  if (pendingImport.pinnedMemories?.length) app.state.memories = pendingImport.pinnedMemories;
   pendingImport = null;
   app.save();
   app.updateUI?.();
   renderSoulFile(app.state, { text: '✅ Soul file imported — Ryan is himself again on this device.' });
+}
+
+// The user ruled on a staged import: combine the imported soul with the local
+// one. Both timelines, opinions, and interests merge; local wins on
+// single-value fields unless he never decided them here.
+export function applySoulMerge(app) {
+  if (!pendingImport) return;
+  const { soul, stats } = mergeSouls(app.state.moltbook.soul, pendingImport.soul);
+  app.state.moltbook.soul = soul;
+  const bits = [];
+  if (stats.historyAdded) bits.push(`${stats.historyAdded} timeline entr${stats.historyAdded === 1 ? 'y' : 'ies'}`);
+  if (stats.opinionsAdded) bits.push(`${stats.opinionsAdded} opinion${stats.opinionsAdded === 1 ? '' : 's'}`);
+  if (stats.interestsAdded) bits.push(`${stats.interestsAdded} interest${stats.interestsAdded === 1 ? '' : 's'}`);
+  if (stats.specialtyTaken) bits.push(`specialty '${soul.specialty}'`);
+  if (stats.professionTaken) bits.push(`profession '${soul.profession}'`);
+  if (pendingImport.pinnedMemories?.length) {
+    const before = app.state.memories.filter((m) => m.pinned).length;
+    app.state.memories = mergePinnedMemories(app.state.memories, pendingImport.pinnedMemories);
+    const added = app.state.memories.filter((m) => m.pinned).length - before;
+    if (added > 0) bits.push(`${added} pinned memor${added === 1 ? 'y' : 'ies'}`);
+  }
+  const detail = bits.length ? ` Combined: ${bits.join(', ')}.` : ' He already carried everything in that file.';
+  recordSoulEvent(app.state.moltbook, 'merge', `Merged the soul from ${pendingImport.fileName}.${detail}`);
+  pendingImport = null;
+  app.save();
+  app.updateUI?.();
+  renderSoulFile(app.state, { text: '🔀 Soul merged — his identity now carries both devices.' });
 }
 
 export function cancelSoulImport(app) {

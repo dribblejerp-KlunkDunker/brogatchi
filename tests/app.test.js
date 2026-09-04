@@ -426,4 +426,31 @@ describe('BroGatchiApp integration', () => {
     expect(kept.memories.filter((m) => m.pinned).map((m) => m.id).sort())
       .toEqual(pinned.map((m) => m.id).sort());
   });
+
+  it('the Ask modal shows a live Tide budget readout (used/cap today)', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+    const note = document.getElementById('ask-api-note');
+    expect(note).toBeTruthy();
+
+    app.aiLinkText = '\uD83D\uDFE2 AI LINK: ONLINE (web search armed)';
+    app.state.aiBudget = { day: new Date().toLocaleDateString(), used: 12, cap: 40, rateLimitedUntil: 0 };
+    app.updateUI();
+    expect(note.innerText).toContain('12/40');
+
+    // rationed out for the day -> explicit hint
+    app.state.aiBudget.used = 40;
+    app.updateUI();
+    expect(note.innerText).toContain('rationed out for today');
+
+    // yesterday's usage reads as 0 until the first spend of the new day
+    app.state.aiBudget = { day: '9/3/2026', used: 39, cap: 40, rateLimitedUntil: 0 };
+    app.updateUI();
+    expect(note.innerText).toContain('0/40');
+
+    // rate-limited -> quiet hint
+    app.state.aiBudget = { day: new Date().toLocaleDateString(), used: 5, cap: 40, rateLimitedUntil: Date.now() + 60_000 };
+    app.updateUI();
+    expect(note.innerText).toContain('gone quiet');
+  });
 });

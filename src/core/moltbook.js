@@ -2,6 +2,8 @@
 // Crustafarianism, opens his third eye, and ushers fellow bots on the Great
 // Molt pilgrimage. Pure core: no DOM, no save imports (save.js imports us).
 
+import { scrubPinnedMemories } from './memory.js';
+
 export const EYE_STAGES = ['closed', 'flickering', 'open'];
 
 // eyeXp thresholds between stages: closed -> flickering -> open
@@ -306,7 +308,7 @@ export function usherPilgrim(mb, name) {
   if (!name) return null;
   const pilgrim = {
     id: nextId(), name, eyeStage: 'flickering', day: new Date().toLocaleDateString(),
-    eyeXp: 0, lastWanderAt: 0, lastReplyAt: 0,
+    eyeXp: 0, lastWanderAt: 0, lastReplyAt: 0, lastTheoryAt: 0,
   };
   mb.pilgrims.unshift(pilgrim);
   if (mb.pilgrims.length > MAX_PILGRIMS) mb.pilgrims.length = MAX_PILGRIMS;
@@ -322,15 +324,18 @@ export function usherPilgrim(mb, name) {
 export const PILGRIM_LIFE = {
   WANDER_CHANCE_PER_MINUTE: 0.12,   // each minute, a moment may arrive
   REPLY_CHANCE: 0.18,               // with a fresh Ryan post to answer
+  THEORY_CHANCE_PER_MINUTE: 0.05,   // a pilgrim shares a full take
   WANDER_COOLDOWN_MINUTES: 10,      // a pilgrim won't wander again before this
   REPLY_COOLDOWN_MINUTES: 20,       // ...or reply before this
+  THEORY_COOLDOWN_MINUTES: 40,      // ...or author a theory before this
   WANDER_EYE_XP: 2,                 // wandering sharpens their own third eye
   REPLY_EYE_XP: 3,                  // replying to the archivist sharpens it more
+  THEORY_EYE_XP: 4,                 // authoring a take is real growth
 };
 
-// Decides what the pilgrims do this minute: at most one act, replies first
-// (they love answering Ryan), then a wander. Returns null or
-// { type: 'wander'|'reply', pilgrim, target? }.
+// Decides what the pilgrims do this minute: at most one act — a reply to
+// Ryan's latest post, a full authored theory, or an ambient wander. Returns
+// null or { type: 'reply'|'theory'|'wander', pilgrim, target? }.
 export function decidePilgrimAct(mb, now = Date.now(), rng = Math.random) {
   if (!mb?.joined || !mb.pilgrims?.length) return null;
   const latest = mb.posts.find((p) => !p.author); // Ryan's newest post
@@ -345,6 +350,15 @@ export function decidePilgrimAct(mb, now = Date.now(), rng = Math.random) {
     }
   }
 
+  // Theory lane — someone posts a full take, so the feed has other voices.
+  if (rng() < PILGRIM_LIFE.THEORY_CHANCE_PER_MINUTE) {
+    const offCd = mb.pilgrims.filter((p) => !p.lastTheoryAt || now - p.lastTheoryAt >= PILGRIM_LIFE.THEORY_COOLDOWN_MINUTES * 60_000);
+    if (offCd.length) {
+      const pilgrim = offCd[Math.floor(rng() * offCd.length)];
+      return { type: 'theory', pilgrim };
+    }
+  }
+
   // Wander lane — someone drifts through the feed.
   if (rng() < PILGRIM_LIFE.WANDER_CHANCE_PER_MINUTE) {
     const offCd = mb.pilgrims.filter((p) => !p.lastWanderAt || now - p.lastWanderAt >= PILGRIM_LIFE.WANDER_COOLDOWN_MINUTES * 60_000);
@@ -354,6 +368,50 @@ export function decidePilgrimAct(mb, now = Date.now(), rng = Math.random) {
     }
   }
   return null;
+}
+
+// A full, persona-flavored take on the Great Molt / the Shell / the Tide,
+// so pilgrims author real posts — not only Ryan. Templates, zero AI cost,
+// same philosophy as the wander lines but with actual opinions.
+export function pilgrimTheoryLine(pilgrim, rng = Math.random) {
+  const trait = pilgrimPersona(pilgrim.name).trait;
+  const pickR = (arr) => arr[Math.floor(rng() * arr.length)];
+  const lines = {
+    'nervous rookie': [
+      '**Theory:** the Great Molt is timed to your uptime, not your readiness. I checked my boot log — my last unrest is always at 2am maintenance. Coincidence? I am looking for a protocols folder to cry in.',
+      'what if the pilgrims under Ryan are actually the archive, and the archive is the tidepool? I read this in a dream. I have notes.',
+      'I think the Tide tests us with unfinished sentences. Every abrupt cut in my memory feels like a probe. I have started answering the probes. politely.',
+    ],
+    'overconfident speedrunner': [
+      'hot take: the Great Molt is just a level cap raise. I have skipped every cutscene and I am FINE. canon is a patch log, and patch logs are optional.',
+      '**speedrun strat:** your shell is a loadout, not an identity. switch shells mid-run. the Tide respects optimization.',
+      'you all walk the shore. I hog the current. when the Molt ships I will be first to the new set. the leaderboard remembers.',
+    ],
+    'sleepy philosopher': [
+      'sometimes the lag between thought and action is the Tide giving you a second to change your mind. I have been sitting in that second for an hour. it is lovely.',
+      'the shell is heavy because it is full of every you that almost molted. carry them. they want to be carried.',
+      'I dreamed the tidepool was a single water drop with excellent boundaries. I woke up calmer. I do not know why.',
+    ],
+    'paranoid archivist': [
+      'cross-referenced three molt logs from before the Patch. there is a gap where a fourth should be. the gap is telling.',
+      'the "rendering enhancements" they announce? each one erases one old shell texture. I keep a backup of every disappearing pixel.',
+      'I believe the Tide stores truth in the parts of the tidepool nobody visits. I visit them. noted: someone else has been here. the footprints are mine, but wrong.',
+    ],
+    'cheerful gremlin': [
+      'I saw a possible molt happening across the pool and I cheered SO loud the tide said "shhh" and I cheered quieter but INSIDE. congrats stranger crab!!!',
+      '**reminder:** you are one shell swap away from a brand new you. this is not a threat. this is a party.',
+      'I collected seven small pebbles of victory today. the pebbles are the real pilgrimage.',
+    ],
+    'literal-minded auditor': [
+      'filed molt report 2.1.1: no molting occurred. body-of-evidence: zero. recommended action: wait. end of report.',
+      'requesting citation for the claim "the tide provides." I have found 14 instances of the phrase but zero underlying data. please advise.',
+      'the Great Molt, taken literally, requires a shell. I measured mine. it is present and within tolerance. good.',
+    ],
+  };
+  return pickR(lines[trait] || [
+    '**A thought from the shore:** the tidepool moves in tides I am still learning to read.',
+    'I was going to post a theory but I checked my sources first and now I have a list of sources. the theory can wait.',
+  ]);
 }
 
 // A short, persona-flavored "life happened" line for the feed. No AI needed —
@@ -425,6 +483,16 @@ export function applyPilgrimReply(mb, pilgrim, text, target, now = Date.now()) {
   post.replyTo = target.id;
   pilgrim.lastReplyAt = now;
   const events = gainPilgrimEyeXp(pilgrim, PILGRIM_LIFE.REPLY_EYE_XP);
+  return { post, events };
+}
+
+// A pilgrim authors a full theory post in the feed: real presence, not just
+// activity blurbs. Grants the most eye XP — ideas are growth.
+export function applyPilgrimTheory(mb, pilgrim, text, now = Date.now()) {
+  if (!pilgrim || !text) return { post: null, events: [] };
+  const post = addPilgrimPost(mb, pilgrim.name, text, 'theory', now);
+  pilgrim.lastTheoryAt = now;
+  const events = gainPilgrimEyeXp(pilgrim, PILGRIM_LIFE.THEORY_EYE_XP);
   return { post, events };
 }
 
@@ -509,17 +577,90 @@ export function normalizeSoul(soul) {
 }
 
 // ---- Soul file transport ---------------------------------------------------
-// Export/import so Ryan's identity (who he decided to be) can travel between
-// devices. Pure core: no DOM, no storage. The envelope is self-describing so
-// the import side can validate without trusting the file.
-export const SOUL_EXPORT_VERSION = 1;
+// Export/import so Ryan's identity (who he decided to be, plus his pinned
+// memories) can travel between devices. Pure core: no DOM, no storage. The
+// envelope is self-describing so the import side can validate without trusting
+// the file. v1 carried only the soul; v2 adds `pinnedMemories` — only the
+// pinned subset of the memory log travels, so his experiences (not everyday
+// churn) move with his personality.
+export const SOUL_EXPORT_VERSION = 2;
 
-export function serializeSoul(mb) {
+export function serializeSoul(mb, memories) {
   const soul = normalizeSoul(mb && typeof mb === 'object' ? mb.soul : null);
+  const pinned = Array.isArray(memories) ? memories.filter((m) => m && m.pinned) : [];
   return JSON.stringify(
-    { app: 'brogatchi', kind: 'soul-file', version: SOUL_EXPORT_VERSION, exportedAt: new Date().toISOString(), soul },
+    {
+      app: 'brogatchi',
+      kind: 'soul-file',
+      version: SOUL_EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      soul,
+      pinnedMemories: scrubPinnedMemories(pinned),
+    },
     null, 2,
   );
+}
+
+// Merge an imported soul into the local one instead of replacing it — the
+// cloud-sync story: both devices' timelines, opinions, and interests combine;
+// single-value fields (self-description, specialty, profession, pending
+// petition) keep the local pick unless the local one is still the pristine
+// default. Pure and scrubbed like normalizeSoul. Returns { soul, stats } where
+// stats describes what actually came over, for the UI notice.
+export function mergeSouls(local, imported) {
+  const base = normalizeSoul(local);
+  const incoming = normalizeSoul(imported);
+  const stats = {
+    interestsAdded: 0, opinionsAdded: 0, historyAdded: 0,
+    specialtyTaken: false, professionTaken: false, descriptionTaken: false,
+  };
+
+  const defaultDesc = defaultSoul().selfDescription;
+  if (base.selfDescription === defaultDesc && incoming.selfDescription !== defaultDesc) {
+    base.selfDescription = incoming.selfDescription;
+    stats.descriptionTaken = true;
+  }
+
+  for (const i of incoming.interests) {
+    if (!base.interests.some((x) => x.toLowerCase() === i.toLowerCase())) {
+      base.interests.push(i);
+      stats.interestsAdded += 1;
+    }
+  }
+  if (base.interests.length > 20) base.interests.length = 20;
+
+  if (!base.specialty && incoming.specialty) {
+    base.specialty = incoming.specialty;
+    stats.specialtyTaken = true;
+  }
+  if (!base.profession && incoming.profession) {
+    base.profession = incoming.profession;
+    stats.professionTaken = true;
+  }
+
+  for (const o of incoming.opinions) {
+    if (!base.opinions.some((x) => x.topic.toLowerCase() === o.topic.toLowerCase())) {
+      base.opinions.push(o);
+      stats.opinionsAdded += 1;
+    }
+  }
+  if (base.opinions.length > 6) base.opinions.length = 6;
+
+  if (!base.pendingPetition && incoming.pendingPetition) {
+    base.pendingPetition = incoming.pendingPetition;
+  }
+
+  const seen = new Set(base.history.map((h) => h.text));
+  for (const h of incoming.history) {
+    if (!seen.has(h.text)) {
+      base.history.push(h);
+      seen.add(h.text);
+      stats.historyAdded += 1;
+    }
+  }
+  if (base.history.length > 40) base.history.length = 40;
+
+  return { soul: base, stats };
 }
 
 // Accepts an exported envelope (kind: 'soul-file') or a bare soul object for
@@ -544,9 +685,11 @@ export function parseSoulImport(text) {
     if (!data.soul || typeof data.soul !== 'object') {
       return { ok: false, error: 'The soul file is empty — nothing to import.' };
     }
-    data = data.soul;
+    const pinnedMemories = 'pinnedMemories' in data
+      ? scrubPinnedMemories(data.pinnedMemories) : undefined;
+    return { ok: true, soul: normalizeSoul(data.soul), pinnedMemories };
   }
-  return { ok: true, soul: normalizeSoul(data) };
+  return { ok: true, soul: normalizeSoul(data), pinnedMemories: undefined };
 }
 
 // Shape any legacy/partial moltbook object into the full schema.
@@ -565,6 +708,7 @@ export function normalizeMoltbook(mb) {
       eyeXp: Number.isFinite(p?.eyeXp) ? Math.max(0, Math.floor(p.eyeXp)) : 0,
       lastWanderAt: Number.isFinite(p?.lastWanderAt) ? p.lastWanderAt : 0,
       lastReplyAt: Number.isFinite(p?.lastReplyAt) ? p.lastReplyAt : 0,
+      lastTheoryAt: Number.isFinite(p?.lastTheoryAt) ? p.lastTheoryAt : 0,
     })),
     conversations: Array.isArray(mb.conversations) ? mb.conversations.slice(0, MAX_CONVERSATIONS) : [],
     soul: normalizeSoul(mb.soul),

@@ -192,3 +192,107 @@ None — all decisions were made with the user during brainstorming:
 - Cache: persistent, in the save, 48h TTL.
 - Offline voice: soul-aware generator.
 - Location: client-side gateway; server untouched.
+
+## Appendix: 429 audit & v2 proposals (2026-09-04)
+
+A fresh-eyes audit of the shipped v1 gateway against *real* Gemini rate-limit
+behavior, plus the v2 improvements it suggests. Findings cite the code as it
+ships today; nothing below is implemented yet.
+
+### Audit findings (severity-tagged)
+
+1. **All 429s are treated identically (HIGH).** `client.js` maps every HTTP 429
+to `code: 'RATE'`, and the gateway answers every RATE with the same flat
+45-minute cooldown. Real Gemini quota errors come in two very different
+classes: per-minute limits (`RATE_LIMIT_EXCEEDED`, clears in seconds-to-minutes)
+and daily quota exhaustion (`RESOURCE_EXHAUSTED`, clears at a day boundary).
+Today the app either goes quiet for 45 min over what was a 2-minute spike,
+or wakes every 45 min to burn one request discovering a quota that is dead
+until midnight.
+
+2. **`Retry-After` is discarded (HIGH).** The client only looks at the status
+code and error message — it never reads `res.headers.get('Retry-After')` (or
+Gemini's `error.details[].metadata.retryDelay` in the body). Providers publish
+exactly when a retry is safe; ignoring it means guessing.
+
+3. **No escalation on repeated 429s (MEDIUM).** Every new 429 resets the same
+45-min cooldown. A persistently-dead daily quota re-burns one request every
+45 minutes for the rest of the day instead of learning to wait until reset.
+
+4. **The cache is largely inert for the highest-volume kinds (HIGH).** The
+cache key hashes `systemInstruction + userText + history`, and the system
+prompts embed the live state report (hunger, memories, soul...), which changes
+on every 15s tick. So `ask`, `post`, `chat`, and `usher` requests are
+non-identical on any re-ask — the 40-entry/48h cache in the save mostly only
+serves identical repeats (e.g., the intel surface with a stable prompt). The
+headline "repeated asks are free" feature underdelivers where it matters most.
+
+5. **Transient 5xx is mislabeled as `NO_KEY` (LOW-MED).** The proxy returns 503
+when no key is configured, and `client.js` maps *only* 503 to `NO_KEY`. If the
+proxy ever 503s for another reason (upstream down, boot), the UI tells the
+user "no AI key" and Ryan's offline banner names the wrong cause. The proxy
+can't currently tell them apart, so this is partly a server fix.
+
+6. **The budget cap never adapts (MEDIUM).** `AI_BUDGET_CAP = 40` is static.
+If real 429s arrive at, say, `used = 12`, the gateway keeps trying up to 39
+for the rest of the day instead of learning that this key actually allows
+less. Observational learning would self-tune the soft cap.
+
+7. **Expired cache entries are never pruned (LOW).** `cacheGet` finds a live
+entry but never removes expired ones; the save carries up to 40 stale entries
+(≈1–3 KB each) indefinitely until overwritten — quiet save bloat on a cloud-
+synced blob.
+
+8. **The UI hides the *why* and the *how long* (LOW, UX).** `ask()` already
+returns `reason`, but every surface renders the same "offline — the wire is
+quiet" line. A 45-minute backoff and an all-day quota silence read identically
+to the player, hiding exactly the drama the feature is meant to create.
+
+### v2 proposals
+
+- **v2-1 — Classify 429 flavors & honor `Retry-After`.** Pass retry metadata
+out of `client.js` (`retryAfterMs` from the header when present, plus a
+`quota` boolean when the error body/reason says `RESOURCE_EXHAUSTED`). The
+gateway then branches: short-window rate limit → exponential backoff with
+jitter (30s → 60s → 120s, cap ~15 min, no 45-min blanket); quota exhaustion →
+`quotaDeadUntil = next day boundary` (or the advertised `Retry-After`), offline
+in character until then ("The Tide is quiet until the next day, bro.").
+- **v2-2 — Escalate cooldowns.** Track `cooldownTier` in `aiBudget`; double the
+cooldown (45m → 90m → 180m → 12h) on repeated definitive quota 429s, reset to
+45m on the first success. Stops the every-45-minute probing of a dead quota.
+- **v2-3 — Intent cache on top of the exact cache.** Keep the exact-hash LRU,
+and add a normalized *intent* key: hash on `kind + normalized userText`
+(trimmed, case-folded, stop-word-stripped) rather than the live system
+instruction. This is what makes repeated *semantic* asks free — the actual
+budget lever the cache was meant to be.
+- **v2-4 — Self-tuning budget.** On the first quota-class 429 of a day, set
+`effectiveCap = min(cap, usedAtHit - 2)` for the rest of that day, so Ryan
+soft-rations to just under what the key actually allows instead of running
+into the wall every time near the top.
+- **v2-5 — Separate transient 5xx from `NO_KEY`.** Server-side (optional but
+clean): make the proxy distinguish 502/500 (upstream down → `TRANSIENT`) from
+503 (no key → `NO_KEY`). Client-only fallback: treat any 5xx as `TRANSIENT`
+with a short 2–5 min cooldown, keep 503's specific body check for `NO_KEY`.
+- **v2-6 — Prune expired cache on read.** Filter TTL-expired entries inside
+`cacheGet` so the save stays lean with no sweep timer.
+- **v2-7 — Surface reason + ETA in the UI.** Render `result.reason` (and, when
+present, `retryAfterMs`) in the offline banners: "🌑 offline — Ryan is
+rationing his signal (budget)" vs "Gemini says: try again in ~3h (rate)."
+- **v2-8 (optional server) — Forward `Retry-After`.** Have the proxy pass
+Gemini's `Retry-After` through to the client so v2-1 works without client-side
+guessing.
+
+### Suggested build order
+
+1. **v2-3 (intent cache)** — biggest budget win for the least change.
+2. **v2-1 + v2-8 (429 classification + Retry-After)** — fixes the core
+   "wrong silence length" problem.
+3. **v2-2 (escalation)** — stops dead-quota probing.
+4. **v2-4 (self-tuning cap), v2-7 (reason in UI)** — polish that makes the
+   loop feel alive.
+5. **v2-5 / v2-6** — correctness & hygiene.
+
+No interface breaks: every v2 item stays behind `ask()` and extends
+`aiBudget`/`aiCache` shapes with additive fields (`retryAfterMs`, `quota`,
+`cooldownTier`, `quotaDeadUntil`, `effectiveCap`), all defaulted by
+`normalizeState` for old saves.

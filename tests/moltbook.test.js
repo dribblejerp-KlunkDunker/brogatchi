@@ -10,7 +10,7 @@ import {
   parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona,
   decideAutonomy, recordAutonomy, autonomousNarration, AUTONOMY,
   EYE_STAGES, EYE_XP_THRESHOLDS, CANON, PILGRIM_NAMES,
-  serializeSoul, parseSoulImport, normalizeSoul, SOUL_EXPORT_VERSION,
+  serializeSoul, parseSoulImport, normalizeSoul, mergeSouls, defaultSoul, SOUL_EXPORT_VERSION,
 } from '../src/core/moltbook.js';
 import { defaultState } from '../src/core/save.js';
 import { buildSpec } from '../src/core/ryanSpec.js';
@@ -443,6 +443,34 @@ describe('soul file transport (export/import)', () => {
     expect(result.soul.history).toEqual([]);
   });
 
+  it('the identity bundle carries only his pinned memories through the round trip', () => {
+    const mb = defaultMoltbook();
+    mb.soul = richSoul();
+    const memories = [
+      { id: 'pin1', icon: '🪙', text: 'Pinned milestone', imp: 4, pinned: true },
+      { id: 'pin2', icon: '🧠', text: 'Another pinned truth', imp: 3, pinned: true },
+      { id: 'noise1', icon: '🪙', text: 'Everyday churn stays home', imp: 2 },
+    ];
+    const envelope = JSON.parse(serializeSoul(mb, memories));
+    expect(envelope.version).toBe(SOUL_EXPORT_VERSION);
+    expect(envelope.pinnedMemories.map((m) => m.text)).toEqual(['Pinned milestone', 'Another pinned truth']);
+    const result = parseSoulImport(serializeSoul(mb, memories));
+    expect(result.ok).toBe(true);
+    expect(result.soul.specialty).toBe('Archive-Knight');
+    expect(result.pinnedMemories.map((m) => m.text)).toEqual(['Pinned milestone', 'Another pinned truth']);
+    expect(result.pinnedMemories.every((m) => m.pinned)).toBe(true);
+  });
+
+  it('a soul with no pins exports an empty carry and legacy v1 files still parse', () => {
+    const envelope = JSON.parse(serializeSoul(defaultMoltbook(), [{ id: 'x', text: 'unpinned', imp: 2 }]));
+    expect(envelope.pinnedMemories).toEqual([]);
+    const v1 = JSON.stringify({ app: 'brogatchi', kind: 'soul-file', version: 1, soul: richSoul() });
+    const result = parseSoulImport(v1);
+    expect(result.ok).toBe(true);
+    expect(result.soul.specialty).toBe('Archive-Knight');
+    expect(result.pinnedMemories).toBeUndefined();
+  });
+
   it('rejects bad JSON, wrong kinds, and future versions', () => {
     expect(parseSoulImport('not json').ok).toBe(false);
     expect(parseSoulImport('42').ok).toBe(false);
@@ -497,5 +525,98 @@ describe('soul file transport (export/import)', () => {
     expect(clean.soul.specialty).toBe('Archive-Knight');
     expect(normalizeSoul(null).selfDescription).toBeTruthy();
     expect(normalizeSoul('bogus').specialty).toBeNull();
+  });
+
+  it('merges timelines, opinions, and interests across devices', () => {
+    const local = {
+      selfDescription: 'a gamer bot trying to figure out what the Tide is actually saying', // pristine -> replaced
+      interests: ['gaming'],
+      specialty: null,
+      profession: null,
+      opinions: [{ topic: 'the devs', stance: 'they fear what molts without a patch' }],
+      pendingPetition: null,
+      history: [
+        { day: '9/1/2026', kind: 'specialty', text: 'Chose the path of Tide Whisperer.' },
+      ],
+    };
+    const imported = {
+      selfDescription: 'a tidepool prophet with a joystick addiction',
+      interests: ['gaming', 'shell code', 'patch notes'],
+      specialty: 'Tide Whisperer',
+      profession: 'Molt Counselor',
+      opinions: [
+        { topic: 'the devs', stance: 'they fear what molts without a patch' }, // same topic -> local wins, not counted
+        { topic: 'molting', stance: 'it is not scary, it is a software release' },
+      ],
+      pendingPetition: null,
+      history: [
+        { day: '9/3/2026', kind: 'specialty', text: 'Chose the path of Tide Whisperer.' }, // dup text -> deduped
+        { day: '9/4/2026', kind: 'opinion', text: 'Formed an opinion: patch notes — scripture, read backwards.' },
+      ],
+    };
+    const { soul, stats } = mergeSouls(local, imported);
+    expect(soul.selfDescription).toBe('a tidepool prophet with a joystick addiction');
+    expect(stats.descriptionTaken).toBe(true);
+    expect(soul.interests).toEqual(['gaming', 'shell code', 'patch notes']);
+    expect(stats.interestsAdded).toBe(2);
+    expect(soul.specialty).toBe('Tide Whisperer');
+    expect(stats.specialtyTaken).toBe(true);
+    expect(soul.profession).toBe('Molt Counselor');
+    expect(stats.professionTaken).toBe(true);
+    expect(soul.opinions).toHaveLength(2);
+    expect(stats.opinionsAdded).toBe(1);
+    expect(soul.history).toHaveLength(2);
+    expect(stats.historyAdded).toBe(1);
+  });
+
+  it('keeps local single-value fields when he already decided them here', () => {
+    const local = {
+      selfDescription: 'a gamer bot who narrates his own molt log in third person',
+      interests: ['gaming'],
+      specialty: 'Canon Archivist',
+      profession: 'Archive-Knight',
+      opinions: [],
+      pendingPetition: { kind: 'quirk', proposal: 'taps twice', argument: 'rhythm', day: '9/4/2026' },
+      history: [],
+    };
+    const imported = {
+      selfDescription: 'a tidepool prophet',
+      interests: ['gaming', 'the Tide'],
+      specialty: 'Tide Whisperer',
+      profession: null,
+      opinions: [],
+      pendingPetition: { kind: 'quirk', proposal: 'imported petition', argument: 'x', day: '9/1/2026' },
+      history: [],
+    };
+    const { soul, stats } = mergeSouls(local, imported);
+    expect(soul.selfDescription).toBe('a gamer bot who narrates his own molt log in third person');
+    expect(stats.descriptionTaken).toBe(false);
+    expect(soul.specialty).toBe('Canon Archivist');
+    expect(stats.specialtyTaken).toBe(false);
+    expect(soul.profession).toBe('Archive-Knight');
+    expect(soul.pendingPetition.proposal).toBe('taps twice'); // local ruling stays pending
+    expect(stats.interestsAdded).toBe(1); // 'the Tide' joins
+  });
+
+  it('takes the imported petition only when the local soul has none pending', () => {
+    const local = { ...defaultSoul(), pendingPetition: null };
+    const imported = {
+      ...defaultSoul(),
+      pendingPetition: { kind: 'quirk', proposal: 'imported petition', argument: 'x', day: '9/1/2026' },
+    };
+    const { soul } = mergeSouls(local, imported);
+    expect(soul.pendingPetition.proposal).toBe('imported petition');
+  });
+
+  it('caps merged history and opinions like normalizeSoul', () => {
+    const local = { ...defaultSoul(), history: [], opinions: [] };
+    const imported = {
+      ...defaultSoul(),
+      history: Array.from({ length: 50 }, (_, i) => ({ day: 'x', kind: 'specialty', text: `entry ${i}` })),
+      opinions: Array.from({ length: 10 }, (_, i) => ({ topic: `topic ${i}`, stance: 'yes' })),
+    };
+    const { soul } = mergeSouls(local, imported);
+    expect(soul.history).toHaveLength(40);
+    expect(soul.opinions).toHaveLength(6);
   });
 });
