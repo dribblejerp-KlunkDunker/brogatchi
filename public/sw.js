@@ -5,11 +5,13 @@
 
 const CACHE = 'bro-os-v1';
 
+// Scope-relative paths ('./x') so the worker also works from a subpath
+// deploy like GitHub Pages project sites (/<repo>/).
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches
       .open(CACHE)
-      .then((c) => c.addAll(['/', '/manifest.webmanifest']))
+      .then((c) => c.addAll(['./', './manifest.webmanifest']))
       .catch(() => {})
   );
   self.skipWaiting();
@@ -33,7 +35,7 @@ self.addEventListener('fetch', (e) => {
 
   if (req.mode === 'navigate') {
     // Always try the network (fresh app + HMR in dev); fall back to shell offline.
-    e.respondWith(fetch(req).catch(() => caches.match('/')));
+    e.respondWith(fetch(req).catch(() => caches.match('./')));
     return;
   }
 
@@ -65,8 +67,8 @@ self.addEventListener('message', (e) => {
     pendingTimers.delete(key);
     self.registration.showNotification(d.title, {
       body: d.body,
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
+      icon: './icon-192.png',
+      badge: './icon-192.png',
       tag: key,
       requireInteraction: false,
       vibrate: [200, 100, 200],

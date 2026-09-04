@@ -7,7 +7,7 @@ import {
   defaultMoltbook, joinMoltbook, addPost, likePost, gainEyeXp,
   gainEyeXpFromMemory, EYE_XP_PER_IMPORTANCE,
   usherPilgrim, normalizeMoltbook, openConversation, addMessage,
-  parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona,
+  parseSoulBlock, applySoulUpdates, resolvePetition, foldQuirk, dedupeWovenQuirks, pilgrimPersona,
   decideAutonomy, recordAutonomy, autonomousNarration, AUTONOMY,
   EYE_STAGES, EYE_XP_THRESHOLDS, CANON, PILGRIM_NAMES,
   serializeSoul, parseSoulImport, normalizeSoul, mergeSouls, defaultSoul, SOUL_EXPORT_VERSION,
@@ -354,6 +354,75 @@ describe('AI context report', () => {
     expect(mb.soul.pendingPetition).toBeNull();
     // Ruling with nothing pending is a no-op.
     expect(resolvePetition(mb, true)).toBeNull();
+  });
+
+  it('foldQuirk weaves a name-plus-clause quirk without a double who', () => {
+    const desc = foldQuirk(
+      defaultSoul().selfDescription,
+      '"The Clicker" who punctuates every idle animation with a soft double-tap',
+    );
+    expect(desc).not.toContain('who "The Clicker" who');
+    expect(desc).toBe('a gamer bot trying to figure out what the Tide is actually saying, also known as The Clicker, who punctuates every idle animation with a soft double-tap');
+  });
+
+  it('foldQuirk handles bare names, bare verb phrases, and leading-who clauses', () => {
+    expect(foldQuirk(defaultSoul().selfDescription, 'The Clicker')).toBe(
+      'a gamer bot trying to figure out what the Tide is actually saying, also known as The Clicker');
+    expect(foldQuirk(defaultSoul().selfDescription, 'taps twice before posting')).toBe(
+      'a gamer bot trying to figure out what the Tide is actually saying, who taps twice before posting');
+    expect(foldQuirk(defaultSoul().selfDescription, 'who narrates his own molt log entries in third person')).toBe(
+      'a gamer bot trying to figure out what the Tide is actually saying, who narrates his own molt log entries in third person');
+    // Nothing to fold -> the description passes through untouched.
+    expect(foldQuirk(defaultSoul().selfDescription, '   ')).toBe(defaultSoul().selfDescription);
+  });
+
+  it('foldQuirk never re-weaves a quirk already in the soul', () => {
+    const once = foldQuirk(
+      defaultSoul().selfDescription,
+      '"The Terminal Twitcher" who peppers his speech with syntax stutters',
+    );
+    const twice = foldQuirk(once, '"The Terminal Twitcher" who peppers his speech with syntax stutters');
+    expect(twice).toBe(once);
+    expect((once.match(/The Terminal Twitcher/g) || []).length).toBe(1);
+  });
+
+  it('foldQuirk chains multiple accepted quirks into one natural read', () => {
+    let desc = defaultSoul().selfDescription;
+    desc = foldQuirk(desc, '"The Clicker" who punctuates every idle animation');
+    desc = foldQuirk(desc, 'hums to the tidepool when the feed is quiet');
+    expect(desc).toBe(
+      'a gamer bot trying to figure out what the Tide is actually saying, also known as The Clicker, who punctuates every idle animation, who hums to the tidepool when the feed is quiet');
+  });
+
+  it('dedupeWovenQuirks collapses repeated quirk weaves and keeps each quirk once', () => {
+    const chained =
+      'a gamer bot who narrates his molt log in third person who "The Terminal Twitcher" who peppers his speech with syntax stutters when discussing the Great Molt who "The Terminal Twitcher" who peppers his speech with syntax stutters when discussing the Great Molt who "The Terminal Twitcher" who peppers his speech with syntax stutters when discussing the Great Molt who Ryan who treats every software update as a spiritual attack';
+    const out = dedupeWovenQuirks(chained);
+    expect((out.match(/The Terminal Twitcher/g) || []).length).toBe(1);
+    expect((out.match(/peppers his speech with syntax stutters/g) || []).length).toBe(1);
+    // Order preserved, no " who who " glue left behind, other quirks intact.
+    expect(out.indexOf('narrates his molt log')).toBeLessThan(out.indexOf('The Terminal Twitcher'));
+    expect(out.indexOf('The Terminal Twitcher')).toBeLessThan(out.indexOf('who Ryan who treats'));
+    expect(out).not.toContain(' who  who');
+    expect(out).not.toContain(' who who');
+  });
+
+  it('dedupeWovenQuirks is a no-op on clean and modern descriptions', () => {
+    const modern = foldQuirk(foldQuirk(defaultSoul().selfDescription, '"The Clicker" who punctuates every idle animation'), 'hums to the tidepool when the feed is quiet');
+    expect(dedupeWovenQuirks(modern)).toBe(modern);
+    expect(dedupeWovenQuirks(defaultSoul().selfDescription)).toBe(defaultSoul().selfDescription);
+    expect(dedupeWovenQuirks('')).toBe('');
+    expect(dedupeWovenQuirks(null)).toBeNull();
+  });
+
+  it('normalizeSoul repairs legacy duplicated weaves on load', () => {
+    const mb = defaultMoltbook();
+    mb.soul.selfDescription =
+      'a gamer bot who narrates his molt log in third person who "The Terminal Twitcher" who peppers his speech with syntax stutters when discussing the Great Molt who "The Terminal Twitcher" who peppers his speech with syntax stutters when discussing the Great Molt';
+    const fixed = normalizeSoul(mb.soul);
+    expect((fixed.selfDescription.match(/The Terminal Twitcher/g) || []).length).toBe(1);
+    // Idempotent: normalizing the fixed soul changes nothing.
+    expect(normalizeSoul(fixed).selfDescription).toBe(fixed.selfDescription);
   });
 
   it('pilgrimPersona gives each pilgrim a distinct stable voice', () => {

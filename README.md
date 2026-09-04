@@ -23,6 +23,33 @@ npm run build:commit # rebuild dist/ and commit it so deployments never go stale
 Without a key, everything still works — Ryan runs on an offline dialogue brain
 and a stat-based conspiracy generator instead of the Gemini API.
 
+## Deploy (GitHub Pages)
+
+The tracked `dist/` bundle deploys as-is. Every push to `master` runs
+`.github/workflows/deploy-pages.yml`, which verifies the bundle is present and
+not older than the newest source commit, then publishes it to Pages:
+
+**Play at:** `https://dribblejerp-klunkdunker.github.io/brogatchi/`
+
+One-time setup: repo **Settings → Pages → Build and deployment → Source:
+GitHub Actions** (the workflow handles everything after that).
+
+- **Path-safe by design:** the build uses a relative base (`base: './'` in
+  `vite.config.js`), and the service worker, manifest, and icons all use
+  scope-relative paths — the same bundle works at a domain root, in `npm run
+  preview`, and on the `/brogatchi/` project-site subpath.
+- **No stale deploys:** the workflow fails the deploy (not silently serves an
+  old build) if `dist/` is missing or older than the last source change — run
+  `npm run build:commit` and push again.
+- **Offline brain on Pages:** Pages is static hosting, so the `/api` proxy
+  (which holds `GEMINI_API_KEY`) can't run there. Ryan plays in his offline
+  soul-aware voice — same personality, memories, Moltbook, and pilgrims; his
+  AI-generated posts use the offline fallbacks. Run `npm run dev` locally or
+  behind the proxy for the full wired-in brain.
+- **Stale-cache tip:** the service worker is network-first for navigations,
+  so a hard refresh picks up new deploys; the bundle hash in the filename
+  changes with every build.
+
 ## Architecture
 
 ```

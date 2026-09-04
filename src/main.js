@@ -7,6 +7,6 @@ window.app = new BroGatchiApp();
 // localhost). Insecure http://LAN stays a normal mobile web app — no install.
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => { /* non-fatal */ });
+    navigator.serviceWorker.register('./sw.js').catch(() => { /* non-fatal */ });
   });
 }

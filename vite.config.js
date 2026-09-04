@@ -31,6 +31,9 @@ export default defineConfig(({ mode }) => {
   if (lanMode === '2') plugins.push(basicSsl());
 
   return {
+    // Relative base so the tracked dist/ deploys anywhere — GitHub Pages
+    // project sites serve it from /<repo>/, where absolute /assets/ would 404.
+    base: './',
     plugins,
     server: {
       host: lan ? true : '127.0.0.1',

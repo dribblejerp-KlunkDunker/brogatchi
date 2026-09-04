@@ -135,6 +135,95 @@ export function applySoulUpdates(mb, soulPatch) {
   return events;
 }
 
+// Fold an accepted quirk into the self-description with natural grammar.
+// Proposals arrive in three shapes from Ryan's [SOUL] lines:
+//   "taps twice before posting"                     -> ", who taps twice..."
+//   "The Clicker"                                   -> ", also known as The Clicker"
+//   "\"The Clicker\" who punctuates every sentence" -> ", also known as The Clicker, who punctuates..."
+// Legacy chains ("...who The Clicker who...") stay as-is — the past is the
+// past — but new acceptances read naturally, and re-accepting a quirk that is
+// already woven in is a no-op instead of a second, duplicate weave.
+export function foldQuirk(desc, proposal) {
+  const base = typeof desc === 'string' && desc.trim() ? desc.trim() : '';
+  if (!proposal) return base;
+  let p = String(proposal).trim();
+  if (!p) return base;
+  if (/^(["'\u201C\u201D\u2018\u2019])(.*)\1$/.test(p)) p = p.slice(1, -1); // strip wrapping quotes
+  p = p.replace(/\.\s*$/, '').trim();
+  if (!p) return base;
+
+  const unquote = (s) => {
+    let t = s.trim();
+    if (/^(["'\u201C\u201D\u2018\u2019])(.*)\1$/.test(t)) t = t.slice(1, -1).trim();
+    return t.replace(/[,\s]+$/, '');
+  };
+
+  // Split off an embedded "who ..." relative clause when the proposal carries
+  // one ("The Clicker who punctuates every idle animation").
+  const whoIdx = p.search(/\bwho\b/i);
+  let name = '';
+  let clause = '';
+  if (whoIdx > 0) {
+    name = unquote(p.slice(0, whoIdx));
+    clause = p.slice(whoIdx).trim();
+  } else if (whoIdx === 0) {
+    clause = p.trim(); // already starts with "who ..."
+  } else {
+    name = unquote(p);
+  }
+
+  const lowerBase = base.toLowerCase();
+  if (name && name.length >= 4 && lowerBase.includes(name.toLowerCase())) return base;
+  if (clause && clause.length >= 10 && lowerBase.includes(clause.toLowerCase())) return base;
+
+  const parts = [base];
+  if (name && /^[A-Z]/.test(name)) {
+    // A capitalized bare phrase reads as a name ("The Clicker") — present it
+    // as an appositive, with any embedded "who" clause following it.
+    parts.push(`also known as ${name}`);
+    if (clause) parts.push(clause);
+  } else if (name) {
+    // Lowercase bare phrase -> a verb clause, folded as a relative clause.
+    parts.push(`who ${name}${clause ? ` ${clause}` : ''}`);
+  } else if (clause) {
+    parts.push(clause); // already starts with "who ..."
+  }
+  return parts.join(', ');
+}
+
+// Collapse duplicate quirk weaves left by the pre-fix appender, which stacked
+// " who X" blindly — so a quirk re-accepted twice or three times ("The
+// Terminal Twitcher") wove once per acceptance. Each legacy weave unit is a
+// chunk glued after " who ". Only exact repeated units are dropped (first
+// occurrence wins, order preserved); singletons and free-form prose pass
+// through untouched, so this is safe on any description and idempotent.
+export function dedupeWovenQuirks(desc) {
+  if (typeof desc !== 'string' || !desc.trim()) return desc;
+  // A weave unit is " who <text>" running to the next " who ", a modern
+  // appositive (", also known as"), or the end. The match includes its glue
+  // so dropping a duplicate never leaves a stray " who who ".
+  const re = / who (.*?)(?= who |, also known as|$)/g;
+  const seen = new Set();
+  const drop = [];
+  let m;
+  while ((m = re.exec(desc))) {
+    const key = m[1].replace(/\s+/g, ' ').trim().toLowerCase();
+    if (key.length >= 8) {
+      if (seen.has(key)) drop.push([m.index, m[0].length]);
+      else seen.add(key);
+    }
+  }
+  if (!drop.length) return desc;
+  let out = '';
+  let cursor = 0;
+  for (const [start, len] of drop) {
+    out += desc.slice(cursor, start);
+    cursor = start + len;
+  }
+  out += desc.slice(cursor);
+  return out.replace(/ {2,}/g, ' ').trim() || desc;
+}
+
 // The user's ruling on a quirk petition. Accept folds it into selfDescription;
 // decline closes it. Either way Ryan sees the outcome in his next prompt.
 export function resolvePetition(mb, accept) {
@@ -142,7 +231,7 @@ export function resolvePetition(mb, accept) {
   if (!p) return null;
   mb.soul.pendingPetition = null;
   if (accept && p.kind === 'quirk') {
-    mb.soul.selfDescription = `${mb.soul.selfDescription} who ${p.proposal}`;
+    mb.soul.selfDescription = foldQuirk(mb.soul.selfDescription, p.proposal);
     recordSoulEvent(mb, 'quirk-accepted', `The user allowed a new quirk: ${p.proposal}`);
   } else if (!accept) {
     recordSoulEvent(mb, 'quirk-declined', `The user heard the argument for "${p.proposal}" and declined.`);
@@ -542,7 +631,7 @@ export function normalizeSoul(soul) {
   if (!soul || typeof soul !== 'object' || Array.isArray(soul)) return d;
   const clean = {
     selfDescription: typeof soul.selfDescription === 'string' && soul.selfDescription.trim()
-      ? soul.selfDescription : d.selfDescription,
+      ? dedupeWovenQuirks(soul.selfDescription) : d.selfDescription,
     interests: Array.isArray(soul.interests)
       ? soul.interests.filter((i) => typeof i === 'string').slice(0, 20) : d.interests,
     specialty: typeof soul.specialty === 'string' && soul.specialty.trim() ? soul.specialty : null,

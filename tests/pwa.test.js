@@ -1,5 +1,7 @@
 // @vitest-environment node
 // PWA plumbing: the shipped files must exist, be valid, and behave.
+// Paths are relative ('./x') everywhere so the tracked bundle deploys from a
+// subpath (GitHub Pages project sites), not just a domain root.
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -14,9 +16,9 @@ describe('PWA assets', () => {
     const m = JSON.parse(raw);
     expect(m.name).toBeTruthy();
     expect(m.display).toBe('standalone');
-    expect(m.start_url).toBe('/');
+    expect(m.start_url).toBe('./');
     for (const icon of m.icons) {
-      const file = join(publicDir, icon.src.replace(/^\//, ''));
+      const file = join(publicDir, icon.src.replace(/^\.\//, ''));
       const buf = readFileSync(file);
       expect(buf.slice(1, 4).toString(), `${icon.src} PNG signature`).toBe('PNG');
       const [w, h] = icon.sizes.split('x').map(Number);
@@ -48,10 +50,10 @@ describe('PWA assets', () => {
     expect(html).toContain('/src/styles/mobile.css');
   });
 
-  it('main.js registers the service worker on secure contexts only', () => {
+  it('main.js registers the service worker with a scope-relative path', () => {
     const main = readFileSync(join(root, 'src', 'main.js'), 'utf8');
     expect(main).toContain("'serviceWorker' in navigator");
     expect(main).toContain('window.isSecureContext');
-    expect(main).toContain("register('/sw.js')");
+    expect(main).toContain("register('./sw.js')");
   });
 });
