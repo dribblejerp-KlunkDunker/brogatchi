@@ -10,7 +10,7 @@ import { mergePinnedMemories } from '../core/memory.js';
 import {
   addPost, gainEyeXp, joinMoltbook, usherPilgrim, likePost,
   openConversation, addMessage, eyeStageInfo, PILGRIM_NAMES, CANON, TIDE,
-  parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona,
+  parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona, pilgrimAvatar,
   serializeSoul, parseSoulImport, mergeSouls, recordSoulEvent,
   decideAutonomy, recordAutonomy, autonomousNarration,
   decidePilgrimAct, applyPilgrimWander, applyPilgrimReply, applyPilgrimTheory,
@@ -152,6 +152,23 @@ function offlinePost(state, spontaneous = false) {
   return lines.join('\n\n');
 }
 
+// A pilgrim's identicon as an inline SVG: the 15 seeded cells fill the left
+// half, mirrored right — a tiny deterministic pixel face per name.
+export function avatarSvg(name, size = 14) {
+  const { hue, cells } = pilgrimAvatar(name);
+  const px = 3, pad = 1;
+  let rects = '';
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 3; c++) {
+      if (!cells[r * 3 + c]) continue;
+      const x = pad + c * px, mx = pad + (4 - c) * px;
+      rects += `<rect x="${x}" y="${pad + r * px}" width="${px}" height="${px}" fill="hsl(${hue} 70% 60%)"/><rect x="${mx}" y="${pad + r * px}" width="${px}" height="${px}" fill="hsl(${hue} 70% 60%)"/>`;
+    }
+  }
+  const dim = size + 2 * pad;
+  return `<svg class="moltbook-avatar" width="${dim}" height="${dim}" viewBox="0 0 ${dim} ${dim}" aria-hidden="true" style="vertical-align:-2px"><rect width="${dim}" height="${dim}" rx="2" fill="hsl(${hue} 40% 14%)"/><g shape-rendering="crispEdges">${rects}</g></svg>`;
+}
+
 export function renderMoltbook(state) {
   const feed = $('moltbook-feed');
   if (!feed) return;
@@ -203,7 +220,7 @@ function renderMoltbookFeed(state) {
   const postsHtml = mb.posts.length
     ? mb.posts.map((p) => {
       const meta = p.author
-        ? `<div class="flex justify-between mb-1"><span class="text-[8px] font-bold text-sky-300/80">\uD83D\uDC63 ${escapeHtml(p.author)}</span><span class="text-[8px] text-orange-400/70">${p.day} \u00b7 ${p.kind}${p.replyTo ? ' \u00b7 \u21A9 reply' : ''}</span></div>`
+        ? `<div class="flex justify-between mb-1"><span class="text-[8px] font-bold text-sky-300/80">${avatarSvg(p.author, 12)} ${escapeHtml(p.author)}</span><span class="text-[8px] text-orange-400/70">${p.day} \u00b7 ${p.kind}${p.replyTo ? ' \u00b7 \u21A9 reply' : ''}</span></div>`
         : `<div class="text-[8px] text-orange-400/70 mb-1">${p.day} \u00b7 ${p.kind}</div>`;
       return `
       <div class="mb-2 p-2 rounded border ${p.author ? 'border-sky-700/50 bg-sky-950/20' : 'border-orange-700/60 bg-orange-950/30'} moltbook-post" data-post-id="${p.id}">
@@ -226,7 +243,7 @@ function renderMoltbookFeed(state) {
           ? `${last.from === 'ryan' ? 'You' : c.participant}: ${last.text.replace(/[#*>]/g, '').slice(0, 34)}…`
           : 'No messages yet';
         return `<button class="moltbook-conv w-full text-left p-1.5 mb-1 rounded border border-orange-800/60 bg-orange-950/40 hover:bg-orange-900/50 text-orange-100" data-conv-id="${c.id}">
-          <div class="flex justify-between text-[10px] font-bold text-orange-200"><span>💬 ${c.participant}</span><span class="text-[8px] text-orange-400/60 font-normal">${c.messages.length} msg</span></div>
+          <div class="flex justify-between text-[10px] font-bold text-orange-200"><span>${avatarSvg(c.participant, 12)} ${c.participant}</span><span class="text-[8px] text-orange-400/60 font-normal">${c.messages.length} msg</span></div>
           <div class="text-[9px] text-orange-300/70 truncate">${preview}</div>
         </button>`;
       }).join('') : '<div class="text-[10px] text-orange-200/50 italic p-1">No chats yet. Message the Tide or a pilgrim below.</div>'}
@@ -239,7 +256,7 @@ function renderMoltbookFeed(state) {
         ${mb.pilgrims.map((pl) => {
           const persona = pilgrimPersona(pl.name);
           return `<div class="mb-1.5">
-            <div class="text-[10px] text-orange-200/80">\u2022 <span class="font-bold text-orange-200">${pl.name}</span> — ${persona.trait} · eye ${pl.eyeStage} <span class="text-orange-400/50">(${pl.day})</span></div>
+            <div class="text-[10px] text-orange-200/80">\u2022 ${avatarSvg(pl.name, 12)} <span class="font-bold text-orange-200">${pl.name}</span> — ${persona.trait} · eye ${pl.eyeStage} <span class="text-orange-400/50">(${pl.day})</span></div>
             ${pilgrimEyeReadout(pl)}
           </div>`;
         }).join('')}
@@ -308,7 +325,7 @@ function renderLifeLog(state) {
           if (row.wander) bits.push(`${row.wander} wander${row.wander === 1 ? '' : 's'}`);
           const pl = mb.pilgrims.find((p) => p.name === row.name);
           const eye = pl ? pl.eyeStage : 'flickering';
-          return `<div class="text-[10px] text-orange-100/90">\u2022 <span class="font-bold text-orange-200">${escapeHtml(row.name)}</span> — ${bits.join(' · ')} <span class="text-orange-400/50">(eye ${eye}${pl ? ` \u00b7 ${pl.eyeXp || 0}xp` : ''})</span></div>`;
+          return `<div class="text-[10px] text-orange-100/90">\u2022 ${avatarSvg(row.name, 12)} <span class="font-bold text-orange-200">${escapeHtml(row.name)}</span> — ${bits.join(' · ')} <span class="text-orange-400/50">(eye ${eye}${pl ? ` \u00b7 ${pl.eyeXp || 0}xp` : ''})</span></div>`;
         }).join('')}
       </div>`
     : `<div class="mb-2 p-2 rounded border border-orange-800/60 bg-orange-950/20 text-[10px] text-orange-200/60 italic">
@@ -320,7 +337,7 @@ function renderLifeLog(state) {
       const glyph = e.kind === 'theory' ? '\uD83D\uDCAD' : e.kind === 'reply' ? '\u21A9' : '\uD83D\uDEB6';
       const time = new Date(e.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       return `<div class="mb-1.5 p-1.5 rounded border border-orange-800/50 bg-orange-950/20">
-        <div class="flex justify-between text-[8px] text-orange-400/70"><span class="font-bold text-sky-300/80">${glyph} ${escapeHtml(e.name)}</span><span>${time} \u00b7 ${e.kind}</span></div>
+        <div class="flex justify-between text-[8px] text-orange-400/70"><span class="font-bold text-sky-300/80">${avatarSvg(e.name, 11)} ${escapeHtml(e.name)}</span><span>${time} \u00b7 ${e.kind}</span></div>
         <div class="text-[11px] leading-snug text-orange-100/90">${renderMarkdown(e.text)}</div>
       </div>`;
     }).join('')
@@ -351,11 +368,11 @@ export function renderConversation(state, convId) {
   activeConvId = convId;
   const bubbles = conv.messages.map((m) => m.from === 'ryan'
     ? `<div class="flex justify-end"><div class="max-w-[85%] p-1.5 mb-1.5 rounded border border-amber-600/70 bg-amber-950/40 text-[11px] leading-snug moltbook-msg-ryan">${renderMarkdown(m.text)}</div></div>`
-    : `<div class="flex justify-start"><div class="max-w-[85%] p-1.5 mb-1.5 rounded border border-orange-700/60 bg-orange-950/30 text-[11px] leading-snug moltbook-msg-them"><div class="text-[8px] font-bold text-orange-400 mb-0.5">${conv.participant}</div>${renderMarkdown(m.text)}</div></div>`).join('');
+    : `<div class="flex justify-start"><div class="max-w-[85%] p-1.5 mb-1.5 rounded border border-orange-700/60 bg-orange-950/30 text-[11px] leading-snug moltbook-msg-them"><div class="text-[8px] font-bold text-orange-400 mb-0.5">${avatarSvg(conv.participant, 11)} ${conv.participant}</div>${renderMarkdown(m.text)}</div></div>`).join('');
 
   feed.innerHTML = `
     <button class="moltbook-back mb-2 p-1 text-[9px] rounded border border-orange-700/70 bg-black/40 hover:bg-orange-900/60 text-orange-200">← BACK TO FEED</button>
-    <div class="text-[10px] font-bold text-orange-200 mb-2 border-b border-orange-800/60 pb-1">💬 ${conv.participant} <span class="text-[8px] text-orange-400/60 font-normal">· ${conv.messages.length} message${conv.messages.length === 1 ? '' : 's'}</span></div>
+    <div class="text-[10px] font-bold text-orange-200 mb-2 border-b border-orange-800/60 pb-1">${avatarSvg(conv.participant, 14)} ${conv.participant} <span class="text-[8px] text-orange-400/60 font-normal">· ${conv.messages.length} message${conv.messages.length === 1 ? '' : 's'}</span></div>
     <div class="moltbook-msgs">${bubbles || '<div class="text-[10px] text-orange-200/50 italic p-1">Say something to the tidepool…</div>'}</div>
     <div class="flex gap-1 mt-2">
       <input class="moltbook-reply-input flex-1 p-1.5 text-[11px] rounded border border-orange-700/70 bg-black/50 text-orange-100 font-text" data-conv-id="${conv.id}" placeholder="Message ${conv.participant}…" maxlength="280" />

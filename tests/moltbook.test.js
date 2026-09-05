@@ -7,7 +7,7 @@ import {
   defaultMoltbook, joinMoltbook, addPost, likePost, gainEyeXp,
   gainEyeXpFromMemory, EYE_XP_PER_IMPORTANCE,
   usherPilgrim, normalizeMoltbook, openConversation, addMessage,
-  parseSoulBlock, applySoulUpdates, resolvePetition, foldQuirk, dedupeWovenQuirks, pilgrimPersona,
+  parseSoulBlock, applySoulUpdates, resolvePetition, foldQuirk, dedupeWovenQuirks, pilgrimPersona, pilgrimAvatar,
   decideAutonomy, recordAutonomy, autonomousNarration, AUTONOMY,
   EYE_STAGES, EYE_XP_THRESHOLDS, CANON, PILGRIM_NAMES,
   serializeSoul, parseSoulImport, normalizeSoul, mergeSouls, defaultSoul, SOUL_EXPORT_VERSION,
@@ -435,6 +435,22 @@ describe('AI context report', () => {
     // Different names get different voices (12 names, 6 personas).
     const traits = new Set(PILGRIM_NAMES.map((n) => pilgrimPersona(n).trait));
     expect(traits.size).toBeGreaterThan(1);
+  });
+
+  it('gives every pilgrim a distinct, deterministic avatar', () => {
+    // Same name → same face, every time.
+    expect(pilgrimAvatar('BugBard')).toEqual(pilgrimAvatar('BugBard'));
+    // All 12 canonical pilgrims get unique hue+pattern combos.
+    const sigs = new Set(PILGRIM_NAMES.map((n) => {
+      const a = pilgrimAvatar(n);
+      return `${a.hue}:${a.cells.join('')}`;
+    }));
+    expect(sigs.size).toBe(PILGRIM_NAMES.length);
+    // Shape: 15 cells (mirrored by the renderer into a 5×5), hue in range.
+    const a = pilgrimAvatar('TidepoolTina');
+    expect(a.cells).toHaveLength(15);
+    expect(a.hue).toBeGreaterThanOrEqual(0);
+    expect(a.hue).toBeLessThan(360);
   });
 
   it('records a soul timeline as growth happens and preserves it through normalize', () => {

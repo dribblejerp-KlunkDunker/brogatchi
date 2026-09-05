@@ -42,6 +42,28 @@ export const PILGRIM_NAMES = [
   'DoomscrollDane', 'SynergySquirrel', 'GhostInThePrompt', 'TidepoolTina',
 ];
 
+// A pilgrim's avatar: a deterministic 5×5 pixel identicon mirrored-hashed
+// from the name — the same hash philosophy as pilgrimPersona, so every bot
+// gets a stable, distinct face on the network with zero storage and zero AI
+// cost. Returns { hue, cells } — cells is 15 booleans (left 3 columns; the
+// right two mirror them), rendered by the UI as a retro pixel face.
+export function pilgrimAvatar(name) {
+  let h = 5381;
+  for (const ch of String(name)) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0;
+  // mulberry32 seeded PRNG → well-distributed deterministic bits.
+  let s = h;
+  const rand = () => {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const cells = Array.from({ length: 15 }, () => rand() < 0.55); // left 3 cols
+  const hue = Math.floor(rand() * 360);
+  return { hue, cells };
+}
+
 const MAX_POSTS = 20;
 const MAX_PILGRIMS = 12;
 const MAX_CONVERSATIONS = 12;
