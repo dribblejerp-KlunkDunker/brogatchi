@@ -87,6 +87,26 @@ describe('save.ai gateway state', () => {
     expect(s.aiCache[0].k).toBe('good');
   });
 
+  it('normalizes askLog: repairs shape, sorts newest-first, caps at 30', () => {
+    const t = Date.now();
+    const s = normalize({
+      askLog: [
+        { q: 'old', a: 'b', at: t - 1000 },
+        { q: 'new', a: 'a', at: t },
+        { q: 'bad' }, // missing answer
+        { q: 42, a: 'x', at: t }, // junk question
+        null,
+      ],
+    });
+    expect(s.askLog).toHaveLength(2);
+    expect(s.askLog[0].q).toBe('new'); // newest first
+    const filled = normalize({ coins: 5 });
+    expect(Array.isArray(filled.askLog)).toBe(true); // legacy saves get []
+    const cap = normalize({ askLog: Array.from({ length: 40 }, (_, i) => ({ q: `q${i}`, a: 'a', at: t - i })) });
+    expect(cap.askLog).toHaveLength(30);
+    expect(cap.askLog[0].q).toBe('q0');
+  });
+
   it('rollover resets the budget day/used but keeps the rate-limit cooldown', () => {
     const s = defaultState();
     s.currentDate = '1/1/1970';

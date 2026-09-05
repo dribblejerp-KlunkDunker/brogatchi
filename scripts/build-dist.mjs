@@ -13,6 +13,7 @@
 // - Safe to run alongside other uncommitted work: only dist/ is staged.
 //   Commit the source changes separately, then re-run to keep them paired.
 import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
@@ -36,6 +37,12 @@ try {
   // 1. Fresh production build.
   console.log('▶ Building production bundle…');
   run(process.execPath, [viteBin, 'build']);
+
+  // 1b. Vite empties outDir on build, wiping the tracked dist/.nojekyll —
+  // the marker that tells GitHub Pages NOT to run Jekyll (its default
+  // processor chokes on or mangles asset folders). Restore it so a rebuild
+  // can never silently break the Pages deploy.
+  writeFileSync(join(root, 'dist', '.nojekyll'), '');
 
   // 2. If dist is gitignored in this checkout (e.g. the backup copy), skip.
   try {

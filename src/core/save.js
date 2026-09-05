@@ -74,6 +74,9 @@ export function defaultState() {
     // the gateway treats any missing/odd cap as its own constant).
     aiCache: [],
     aiBudget: { day: todayKey(), used: 0, cap: 40, rateLimitedUntil: 0 },
+    // Durable Ask-Ryan transcript: [{ q, a, at, offline }] — survives reloads
+    // (unlike the in-memory chatHistory, which only feeds the AI context).
+    askLog: [],
   };
 }
 
@@ -176,6 +179,12 @@ export function normalize(s) {
   out.aiCache = out.aiCache
     .filter((e) => e && typeof e === 'object' && typeof e.k === 'string' && typeof e.text === 'string' && Number.isFinite(e.at))
     .slice(0, 40);
+  // Ask-Ryan transcript: repair shape, keep newest 30 exchanges.
+  if (!Array.isArray(out.askLog)) out.askLog = [];
+  out.askLog = out.askLog
+    .filter((e) => e && typeof e === 'object' && typeof e.q === 'string' && typeof e.a === 'string' && Number.isFinite(e.at))
+    .sort((x, y) => y.at - x.at)
+    .slice(0, 30);
   const b = out.aiBudget || {};
   out.aiBudget = {
     day: typeof b.day === 'string' && b.day ? b.day : todayKey(),

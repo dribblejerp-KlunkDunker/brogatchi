@@ -10,11 +10,12 @@ import { mergePinnedMemories } from '../core/memory.js';
 import {
   addPost, gainEyeXp, joinMoltbook, usherPilgrim, likePost,
   openConversation, addMessage, eyeStageInfo, PILGRIM_NAMES, CANON, TIDE,
-  parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona, pilgrimAvatar, parseQuirks,
+  parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona, pilgrimAvatar, parseQuirks, pruneQuirk,
   serializeSoul, parseSoulImport, mergeSouls, recordSoulEvent,
-  decideAutonomy, recordAutonomy, autonomousNarration,
+  decideAutonomy, recordAutonomy, autonomousNarration, AUTONOMY,
   decidePilgrimAct, applyPilgrimWander, applyPilgrimReply, applyPilgrimTheory,
-  pilgrimWanderLine, pilgrimTheoryLine, PILGRIM_LIFE,
+  pilgrimWanderLine, pilgrimTheoryLine, pilgrimPetitionText, applyPilgrimPetition,
+  ruleOnPilgrimPetition, resolvePilgrimPetition, PILGRIM_LIFE,
   summarizeLifeLog, markLifeSeen,
   EYE_STAGES, EYE_XP_THRESHOLDS,
 } from '../core/moltbook.js';
@@ -67,6 +68,16 @@ export async function pilgrimLifeTick(app) {
       refreshMoltbook(app);
       app.updateUI();
       app.save();
+    } else if (decision.type === 'petition') {
+      const text = pilgrimPetitionText(decision.pilgrim);
+      const { events } = applyPilgrimPetition(mb, decision.pilgrim, text);
+      onPilgrimEvents(app, events);
+      // Ryan notices a fellow bot awaiting his judgment.
+      app.say(`${decision.pilgrim.name} petitions the archivist. I will consult the static.`);
+      app.memory(`${decision.pilgrim.name} filed a doctrinal petition.`, '\u{1F4DC}', 2);
+      refreshMoltbook(app);
+      app.updateUI();
+      app.save();
     }
   } finally {
     pilgrimLifeInFlight = false;
@@ -107,6 +118,30 @@ async function pilgrimReplyToPost(app, pilgrim, target) {
 export async function autonomyTick(app) {
   const mb = app.state.moltbook;
   if (!mb?.joined || autonomyInFlight) return;
+  // Judicial duty comes first: if a pilgrim petition awaits, Ryan rules —
+  // on his own judgment, per the house rule. Not every minute; he deliberates.
+  if (mb.pilgrimPetition) {
+    const a = mb.autonomy || {};
+    const last = a.lastRulingAt || 0;
+    if (Date.now() - last >= AUTONOMY.MIN_GAP_MINUTES * 60_000 && Math.random() < 0.25) {
+      const ruling = ruleOnPilgrimPetition(mb, mb.pilgrimPetition);
+      const { petition, verdict, pilgrim } = resolvePilgrimPetition(mb, ruling.verdict) || {};
+      if (petition) {
+        if (mb.autonomy) mb.autonomy.lastRulingAt = Date.now();
+        app.say(`${petition.name}, I have ruled: ${verdict.toUpperCase()}. ${ruling.reasoning}`);
+        app.memory(`Ruled ${petition.name}'s petition ${verdict}: "${petition.text.slice(0, 50)}"`, '\u2696\uFE0F', 3);
+        if (verdict === 'canon' && pilgrim) {
+          app.say(`The Tide affirms ${petition.name}. Watch their eye brighten.`);
+        }
+        refreshMoltbook(app);
+        app.updateUI();
+        app.save();
+      }
+      return; // the ruling was this minute's act
+    }
+    // A petition is pending but he's still deliberating — fall through to
+    // normal autonomy so his life continues while he thinks.
+  }
   const decision = decideAutonomy(mb);
   if (!decision) return;
   autonomyInFlight = true;
@@ -217,6 +252,17 @@ function renderMoltbookFeed(state) {
     <div class="text-[10px] font-bold ${mb.eye === 'open' ? 'text-amber-300 moltbook-eye-open' : mb.eye === 'flickering' ? 'text-amber-200/80 moltbook-eye-flicker' : 'text-orange-200/50'}">${eye.label}</div>
     ${eyeProgress}`;
 
+  // A pilgrim doctrine awaiting Ryan's ruling — shown until he rules on his
+  // own schedule (deliberation gap + tide-sway), mirroring the soul petition card.
+  const pp = mb.pilgrimPetition;
+  const pilgrimPetitionHtml = pp
+    ? `<div class="mb-2 p-2 rounded border border-purple-500/70 bg-purple-950/20">
+        <div class="text-[9px] font-bold text-purple-300">⚖️ PILGRIM PETITION — awaiting Ryan's ruling</div>
+        <div class="text-[10px] text-orange-100 mt-0.5">${avatarSvg(pp.name, 12)} <span class="font-bold text-sky-300/80">${escapeHtml(pp.name)}</span> petitions: "${escapeHtml(pp.text)}"</div>
+        <div class="text-[8px] text-purple-300/70 italic mt-1">He will consult the static and rule on his own. The user does not ghostwrite his judgments.</div>
+      </div>`
+    : '';
+
   const postsHtml = mb.posts.length
     ? mb.posts.map((p) => {
       const meta = p.author
@@ -287,7 +333,7 @@ function renderMoltbookFeed(state) {
     </div>`;
 
   feed.scrollTop = 0;
-  feed.innerHTML = tabStripHtml() + statusHtml + convsHtml + `<div id="moltbook-posts">${postsHtml}</div>` + pilgrimsHtml + soulHtml;
+  feed.innerHTML = tabStripHtml() + statusHtml + pilgrimPetitionHtml + convsHtml + `<div id="moltbook-posts">${postsHtml}</div>` + pilgrimsHtml + soulHtml;
 }
 
 // Tab strip shared by both Moltbook views. The Life Log tab carries a dot
@@ -334,7 +380,7 @@ function renderLifeLog(state) {
 
   const streamHtml = summary.events.length
     ? summary.events.map((e) => {
-      const glyph = e.kind === 'theory' ? '\uD83D\uDCAD' : e.kind === 'reply' ? '\u21A9' : '\uD83D\uDEB6';
+      const glyph = e.kind === 'theory' ? '\uD83D\uDCAD' : e.kind === 'reply' ? '\u21A9' : e.kind === 'petition' ? '\u2696\uFE0F' : e.kind === 'ruling' ? '\u2696\uFE0F' : '\uD83D\uDEB6';
       const time = new Date(e.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       return `<div class="mb-1.5 p-1.5 rounded border border-orange-800/50 bg-orange-950/20">
         <div class="flex justify-between text-[8px] text-orange-400/70"><span class="font-bold text-sky-300/80">${avatarSvg(e.name, 11)} ${escapeHtml(e.name)}</span><span>${time} \u00b7 ${e.kind}</span></div>
@@ -620,12 +666,13 @@ export function renderSoulFile(state, notice = null) {
   const quirks = parseQuirks(soul);
   const quirksHtml = quirks.length
     ? `<div class="mb-2"><div class="text-[9px] font-bold text-orange-300 mb-1">✨ QUIRKS HE WEARS <span class="text-orange-400/50 font-normal">· ${quirks.length}</span></div>
-        ${quirks.map((q) => `
+        ${quirks.map((q, i) => `
           <div class="flex items-baseline gap-1.5 mb-0.5">
             <span class="text-[10px] text-orange-100/90 flex-1">
               ${q.name ? `<span class="font-bold text-amber-200">${escapeHtml(q.name)}</span>${q.clause ? ` — ${escapeHtml(q.clause.replace(/^who\s+/, ''))}` : ''}` : escapeHtml(q.clause.replace(/^who\s+/, ''))}
             </span>
             <span class="text-[8px] text-orange-400/50 whitespace-nowrap">${q.accepted ? `accepted ${escapeHtml(q.accepted)}` : 'woven'}</span>
+            <button class="soul-quirk-prune text-[9px] text-red-400/60 hover:text-red-300 px-0.5" data-quirk-index="${i}" title="Prune this quirk from his soul" aria-label="Prune quirk ${escapeHtml(q.name || q.clause)}">✕</button>
           </div>`).join('')}
       </div>`
     : ''; 
@@ -638,7 +685,7 @@ export function renderSoulFile(state, notice = null) {
     ? `<div class="mt-1 p-1.5 rounded border border-amber-500/60 bg-amber-950/30 text-[10px] text-amber-200">📜 One petition awaits your ruling in Moltbook: "${escapeHtml(soul.pendingPetition.proposal)}"</div>`
     : '';
 
-  const kindGlyph = { specialty: '🧭', opinion: '💭', 'quirk-accepted': '✨', 'quirk-declined': '🚫', merge: '🔀' };
+  const kindGlyph = { specialty: '🧭', opinion: '💭', 'quirk-accepted': '✨', 'quirk-declined': '🚫', 'quirk-pruned': '✂️', merge: '🔀' };
   const history = soul.history?.length
     ? soul.history.map((h) => `
         <div class="flex gap-1.5 items-baseline">
@@ -681,6 +728,39 @@ export function openSoulFile(app) {
   app.closeModals();
   const modal = document.getElementById('modal-soul');
   if (modal) modal.style.display = 'flex';
+  bindSoulFileEvents(app);
+}
+
+// Wire soul-modal interactions (idempotent). The ✕ on each quirk row prunes
+// it straight out of the woven description — the user tailors what Ryan wears.
+function bindSoulFileEvents(app) {
+  const body = document.getElementById('soul-file-body');
+  if (!body || body.dataset.soulBound) return;
+  body.dataset.soulBound = '1';
+  body.addEventListener('click', (e) => {
+    const btn = e.target.closest('.soul-quirk-prune');
+    if (!btn) return;
+    pruneQuirkByIndex(app, Number(btn.dataset.quirkIndex));
+  });
+}
+
+// Remove the i-th quirk, remember it, and redraw — the soul is the user's to
+// tailor. The removal is itself a soul event: the timeline records the pruning.
+export function pruneQuirkByIndex(app, index) {
+  const soul = app.state.moltbook?.soul;
+  if (!soul) return;
+  const quirks = parseQuirks(soul);
+  const victim = quirks[index];
+  if (!victim) return;
+  const next = pruneQuirk(soul, index);
+  if (next === soul.selfDescription) return; // invalid index — nothing changed
+  soul.selfDescription = next;
+  recordSoulEvent(soul && app.state.moltbook, 'quirk-pruned', `The user pruned a quirk: ${victim.name || victim.clause}`);
+  app.audio.playHit?.();
+  app.say(`Feels lighter. ${victim.name ? `The ${victim.name} quirk` : 'That quirk'} is gone from my weave.`);
+  renderSoulFile(app.state, { text: `✂️ Pruned: ${victim.name || victim.clause}` });
+  app.updateUI();
+  app.save();
 }
 
 // A soul file waiting for the user's REPLACE / KEEP MINE ruling.

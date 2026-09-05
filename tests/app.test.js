@@ -453,4 +453,34 @@ describe('BroGatchiApp integration', () => {
     app.updateUI();
     expect(note.innerText).toContain('gone quiet');
   });
+
+  it('persists Ask exchanges to the durable log and browses them via the LOG toggle', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+    // Seed the transcript directly (the gateway call itself is covered elsewhere).
+    app.state.askLog = [
+      { q: 'favorite shell?', a: 'A **clean install** is a lie.', at: Date.now(), offline: true },
+      { q: 'is the tide real?', a: 'The **Tide** provides.', at: Date.now() - 1000, offline: false },
+    ];
+    app.openAskModal();
+    // Live view by default; the log is hidden.
+    expect(document.getElementById('ask-log-view').classList.contains('hidden')).toBe(true);
+    expect(document.getElementById('ask-response').classList.contains('hidden')).toBe(false);
+    // Toggle to the log: newest first, markdown rendered, offline flag shown.
+    app.toggleAskLog();
+    const view = document.getElementById('ask-log-view');
+    expect(view.classList.contains('hidden')).toBe(false);
+    expect(document.getElementById('ask-response').classList.contains('hidden')).toBe(true);
+    expect(document.getElementById('ask-input').classList.contains('hidden')).toBe(true);
+    expect(view.textContent).toContain('is the tide real?');
+    expect(view.textContent).toContain('favorite shell?');
+    expect(view.innerHTML).toContain('<strong>Tide</strong>'); // markdown rendered
+    expect(view.textContent).toContain('offline');
+    expect(view.firstElementChild.textContent).toContain('favorite shell?'); // newest first
+    // Toggle back to the live answer box.
+    app.toggleAskLog();
+    expect(view.classList.contains('hidden')).toBe(true);
+    expect(document.getElementById('ask-input').classList.contains('hidden')).toBe(false);
+    expect(document.getElementById('ask-log-btn').textContent).toBe('📜 LOG');
+  });
 });

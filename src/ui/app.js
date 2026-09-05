@@ -11,7 +11,7 @@ import { gainEyeXpFromMemory } from '../core/moltbook.js';
 import * as moltbook from './moltbook.js';
 import { renderJournal } from './journal.js';
 import * as composer from './composer.js';
-import { renderMarkdown } from './markdown.js';
+import { renderMarkdown, escapeHtml as escapeHtmlAsk } from './markdown.js';
 
 import { tick as statsTick, applyOffline, FOODS, weightTier, TIER_NAMES } from '../core/stats.js';
 import { entryFromState, addEntry as journalAdd } from '../core/journal.js';
@@ -923,6 +923,45 @@ export class BroGatchiApp {
   openAskModal() {
     this.audio.playBeep();
     modals.openModal('modal-ask');
+    // Leaving the log view resets to the live answer box.
+    this.renderAskLog(false);
+  }
+
+  // 📜 LOG toggle: swap the live answer box for the durable transcript.
+  toggleAskLog() {
+    this.audio.playBeep();
+    this.renderAskLog();
+  }
+
+  renderAskLog(show) {
+    const view = hud.$('ask-log-view');
+    const box = hud.$('ask-response');
+    const input = hud.$('ask-input');
+    const btn = hud.$('ask-log-btn');
+    if (!view || !box) return;
+    // show === true/false forces a view; undefined toggles.
+    const willShow = show === true ? true : show === false ? false : view.classList.contains('hidden');
+    view.classList.toggle('hidden', !willShow);
+    box.classList.toggle('hidden', willShow);
+    if (input) input.classList.toggle('hidden', willShow);
+    if (btn) {
+      btn.textContent = willShow ? '💬 ASK' : '📜 LOG';
+      btn.classList.toggle('bg-purple-500', willShow);
+      btn.classList.toggle('text-white', willShow);
+      btn.classList.toggle('bg-gray-300', !willShow);
+      btn.classList.toggle('text-black', !willShow);
+    }
+    if (!willShow) return;
+    const log = Array.isArray(this.state.askLog) ? this.state.askLog : [];
+    view.innerHTML = log.length
+      ? log.map((e) => `
+        <div class="border-b border-gray-300 pb-1.5 mb-1.5 last:mb-0">
+          <div class="flex justify-between text-[8px] text-gray-500 mb-0.5"><span class="font-bold text-blue-600">YOU</span><span>${new Date(e.at).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}${e.offline ? ' · 🌙 offline' : ''}</span></div>
+          <div class="text-[11px] font-bold">${escapeHtmlAsk(e.q)}</div>
+          <div class="text-[11px] mt-0.5">${renderMarkdown(e.a)}</div>
+        </div>`).join('')
+      : '<div class="text-[10px] text-gray-400 italic">No conversations yet — ask me something and it will be remembered here.</div>';
+    view.scrollTop = 0;
   }
 
   async submitAsk(override) {
@@ -955,6 +994,10 @@ export class BroGatchiApp {
       // Ryan remembers his own answer, not just the question.
       const plain = result.text.replace(/[#*>`<\b]/g, '').trim().replace(/\s+/g, ' ');
       this.rememberOnce(`answered-${plain.slice(0, 40)}`, `Ryan answered: "${plain.slice(0, 60)}"`, '\uD83D\uDCDD', 2);
+      // Durable transcript: both sides of the exchange survive reloads.
+      if (!Array.isArray(this.state.askLog)) this.state.askLog = [];
+      this.state.askLog.unshift({ q, a: result.text, at: Date.now(), offline: !!result.offline });
+      if (this.state.askLog.length > 30) this.state.askLog.length = 30;
       if (!result.offline) {
         this.state.coins += 5;
         this.state.stats.happy = Math.min(100, this.state.stats.happy + 10);

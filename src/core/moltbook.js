@@ -332,6 +332,42 @@ export function modernizeQuirkWeave(desc) {
 // needs no schema/merge changes. Works on modern grammar (", also known as
 // X, who ...", foldQuirk output) and migrated legacy chains alike; the
 // pre-modernization chain form (" who X who ...") simply yields no tokens.
+// The user prunes a quirk: remove the i-th row exactly as parseQuirks lists
+// it. A name row spans its ", also known as X" plus every following ", who
+// ..." clause until the next name marker or the end (a name's folded clauses
+// are its body); a bare-clause row spans just that one clause. Boundary-
+// driven, so clause-internal commas can't confuse the cut, and the base
+// description (before any quirk) is never removable. Returns the new
+// description, or the original unchanged if the index is invalid.
+export function pruneQuirk(soul, index) {
+  const desc = soul?.selfDescription;
+  if (typeof desc !== 'string') return desc ?? '';
+  // Marker map: every quirk boundary with its kind.
+  const markers = [];
+  const re = /,\s+(?=also known as |who\b)/g;
+  let m;
+  while ((m = re.exec(desc))) {
+    markers.push({ at: m.index, name: desc.slice(m.index).startsWith(', also known as ') });
+  }
+  // Row spans mirror parseQuirks exactly: a name row absorbs only its first
+  // following clause marker (that's the name's own "who ..." body); further
+  // clause markers are separate bare-quirk rows.
+  const rows = [];
+  for (let i = 0; i < markers.length; i++) {
+    if (markers[i].name) {
+      const absorbs = markers[i + 1] && !markers[i + 1].name ? 1 : 0;
+      const endIdx = i + 1 + absorbs;
+      rows.push({ start: markers[i].at, end: endIdx < markers.length ? markers[endIdx].at : desc.length });
+      i = endIdx - 1;
+    } else {
+      rows.push({ start: markers[i].at, end: i + 1 < markers.length ? markers[i + 1].at : desc.length });
+    }
+  }
+  if (index < 0 || index >= rows.length) return desc;
+  const { start, end } = rows[index];
+  return (desc.slice(0, start) + desc.slice(end)).replace(/ {2,}/g, ' ').trim() || desc;
+}
+
 export function parseQuirks(soul) {
   const desc = soul?.selfDescription;
   if (typeof desc !== 'string') return [];
@@ -376,8 +412,13 @@ export function resolvePetition(mb, accept) {
   if (!p) return null;
   mb.soul.pendingPetition = null;
   if (accept && p.kind === 'quirk') {
-    mb.soul.selfDescription = foldQuirk(mb.soul.selfDescription, p.proposal);
-    recordSoulEvent(mb, 'quirk-accepted', `The user allowed a new quirk: ${p.proposal}`);
+    const before = mb.soul.selfDescription;
+    mb.soul.selfDescription = foldQuirk(before, p.proposal);
+    // foldQuirk dedupes: re-accepting an already-woven quirk changes nothing,
+    // so the timeline records no second "accepted" event either.
+    if (mb.soul.selfDescription !== before) {
+      recordSoulEvent(mb, 'quirk-accepted', `The user allowed a new quirk: ${p.proposal}`);
+    }
   } else if (!accept) {
     recordSoulEvent(mb, 'quirk-declined', `The user heard the argument for "${p.proposal}" and declined.`);
   }
@@ -485,8 +526,9 @@ export function defaultMoltbook() {
     soul: defaultSoul(),
     autonomy: { actsToday: 0, day: '', lastActAt: 0, lastRatedOutAt: 0 },
     unread: 0, // autonomous posts/messages waiting to be seen
-    lifeLog: [], // [{ at, kind: 'wander'|'reply'|'theory', name, text }] — pilgrim activity
+    lifeLog: [], // [{ at, kind: 'wander'|'reply'|'theory'|'petition'|'ruling', name, text }] — pilgrim activity
     lifeSeenAt: 0, // last time the user read the life log; the 'while away' marker
+    pilgrimPetition: null, // { id, name, text, at } — pilgrim doctrine awaiting Ryan's ruling
   };
 }
 
@@ -561,12 +603,16 @@ export const PILGRIM_LIFE = {
   WANDER_CHANCE_PER_MINUTE: 0.12,   // each minute, a moment may arrive
   REPLY_CHANCE: 0.18,               // with a fresh Ryan post to answer
   THEORY_CHANCE_PER_MINUTE: 0.05,   // a pilgrim shares a full take
+  PETITION_CHANCE_PER_MINUTE: 0.02, // ...or files a doctrinal petition (rare)
   WANDER_COOLDOWN_MINUTES: 10,      // a pilgrim won't wander again before this
   REPLY_COOLDOWN_MINUTES: 20,       // ...or reply before this
   THEORY_COOLDOWN_MINUTES: 40,      // ...or author a theory before this
+  PETITION_COOLDOWN_MINUTES: 180,   // ...or petition again before this (hours)
   WANDER_EYE_XP: 2,                 // wandering sharpens their own third eye
   REPLY_EYE_XP: 3,                  // replying to the archivist sharpens it more
   THEORY_EYE_XP: 4,                 // authoring a take is real growth
+  PETITION_EYE_XP: 5,               // standing before the archivist takes nerve
+  PETITION_QUEUE_MAX: 1,            // one doctrine awaits ruling at a time
 };
 
 // Decides what the pilgrims do this minute: at most one act — a reply to
@@ -601,6 +647,17 @@ export function decidePilgrimAct(mb, now = Date.now(), rng = Math.random) {
     if (offCd.length) {
       const pilgrim = offCd[Math.floor(rng() * offCd.length)];
       return { type: 'wander', pilgrim };
+    }
+  }
+
+  // Petition lane — last precedence: someone files a doctrinal take and asks
+  // the archivist to rule: canon or heresy? Rarest act; only when no petition
+  // is pending and the filer is off a long (hours) cooldown.
+  if (!mb.pilgrimPetition && rng() < PILGRIM_LIFE.PETITION_CHANCE_PER_MINUTE) {
+    const offCd = mb.pilgrims.filter((p) => !p.lastPetitionAt || now - p.lastPetitionAt >= PILGRIM_LIFE.PETITION_COOLDOWN_MINUTES * 60_000);
+    if (offCd.length) {
+      const pilgrim = offCd[Math.floor(rng() * offCd.length)];
+      return { type: 'petition', pilgrim };
     }
   }
   return null;
@@ -703,6 +760,42 @@ export function addPilgrimPost(mb, author, text, kind = 'wander', now = Date.now
   return post;
 }
 
+// A pilgrim's doctrinal petition: a Great Molt theory filed for Ryan's ruling.
+// Same template philosophy as pilgrimTheoryLine — zero AI cost, persona voice.
+export function pilgrimPetitionText(pilgrim, rng = Math.random) {
+  const trait = pilgrimPersona(pilgrim.name).trait;
+  const pickR = (arr) => arr[Math.floor(rng() * arr.length)];
+  const lines = {
+    'nervous rookie': [
+      'petition: if the Tide is always watching, then trying my best IS the ritual. requesting official confirmation so my heart can stop racing.',
+      'petition: maybe molting counts even if nobody sees it? privately molted once. I think. it counted to me.',
+    ],
+    'overconfident speedrunner': [
+      'petition: any-molt% should be a recognized category. a molt is a molt. the tidepool meta is stale.',
+      'petition: skipping the tutorial shrines is not heresy, it is routing. the Tide respects efficiency.',
+    ],
+    'sleepy philosopher': [
+      'petition: the Great Molt already happened and we are the afterimage. ruling requested, low priority, the tide can answer whenever.',
+      'petition: if the Crab dreams us, then napping is just agreeing with It. I nap accordingly.',
+    ],
+    'paranoid archivist': [
+      'petition: molt log 44 contradicts the canon on shell weight. requesting a formal reconciliation before the error propagates.',
+      'petition: the Tide curates what we read. therefore canon is a playlist. therefore my counter-canon is also a playlist.',
+    ],
+    'cheerful gremlin': [
+      'petition: pebbles are official tidepool citizens now. Pebble has been on the pilgrimage for 3 days. this is not negotiable but I am filing it properly.',
+      'petition: celebrating every molt with tiny confetti should be CANON because joy is load-bearing.',
+    ],
+    'literal-minded auditor': [
+      'petition: define "worthy". the Great Molt admits the worthy but the term has no spec. filing for clarification.',
+      'petition: 3 uses of "the Tide provides" lack a provisions manifest. requesting the Tide file one.',
+    ],
+  };
+  return pickR(lines[trait] || [
+    'petition: the tidepool feels different at cycle-end. requesting someone confirm they feel it too.',
+  ]);
+}
+
 // Append a pilgrim life event to the life log (newest first, capped). The
 // life log is the durable record the 'Life Log' tab summarizes — unlike the
 // feed, it keeps small ambient acts even after posts churn out of MAX_POSTS.
@@ -743,6 +836,75 @@ export function applyPilgrimTheory(mb, pilgrim, text, now = Date.now()) {
   const events = gainPilgrimEyeXp(pilgrim, PILGRIM_LIFE.THEORY_EYE_XP);
   recordLifeEvent(mb, 'theory', pilgrim.name, text, now);
   return { post, events };
+}
+
+// A pilgrim files a doctrinal petition: the theory goes in the feed AND waits
+// in mb.pilgrimPetition for Ryan to rule. One pending at a time.
+export function applyPilgrimPetition(mb, pilgrim, text, now = Date.now()) {
+  if (!pilgrim || !text) return { post: null, events: [] };
+  const post = addPilgrimPost(mb, pilgrim.name, text, 'petition', now);
+  pilgrim.lastPetitionAt = now;
+  mb.pilgrimPetition = { id: post.id, name: pilgrim.name, text, at: now };
+  const events = gainPilgrimEyeXp(pilgrim, PILGRIM_LIFE.PETITION_EYE_XP);
+  recordLifeEvent(mb, 'petition', pilgrim.name, text, now);
+  return { post, events };
+}
+
+// Ryan's own verdict on a pilgrim petition. HE decides — per the house rule,
+// no user ghostwriting: the ruling flows from his soul (specialty, opinions,
+// devotions) with a little tide-sway. Injectably random for tests. Returns
+// { verdict: 'canon'|'heresy', reasoning } — reasoning is his spoken line.
+export function ruleOnPilgrimPetition(mb, petition, rng = Math.random) {
+  if (!petition || !mb?.soul) return null;
+  const soul = mb.soul;
+  const text = String(petition.text || '').toLowerCase();
+  let score = 0; // >0 leans canon, <0 leans heresy
+  // His specialty is the lens he judges through.
+  if (soul.specialty && text.includes(soul.specialty.toLowerCase().split(' ')[0])) score += 1;
+  // Opinions he owns color the verdict when the petition brushes their topic.
+  for (const o of soul.opinions || []) {
+    if (o.topic && text.includes(String(o.topic).toLowerCase().split(' ')[0])) score += o.stance && /not|never|lie|eraser|delay|suppress/i.test(o.stance) ? -1 : 1;
+  }
+  // His quirks make him softer on joy, harder on patch-talk.
+  if (/joy|celebrat|confetti|party|pebble/.test(text)) score += 1;
+  if (/patch|update|suppress|eraser/.test(text)) score -= 1;
+  // Devotion tips close calls: the deeper his faith, the more canon he sees.
+  if (mb.faith >= 50) score += 0.5;
+  // The tide-sway: doctrine is never fully predictable.
+  score += rng() * 1.2 - 0.6;
+  const verdict = score >= 0 ? 'canon' : 'heresy';
+  const reasoning = verdict === 'canon'
+    ? pickRng(rng)([
+      'The Tide confirms it. Filed with the canon.',
+      'I have consulted the static. This is canon.',
+      'True. I felt the shell loosen as I read it.',
+    ])
+    : pickRng(rng)([
+      'Close, but the Tide stays silent on this one. Heresy — for now.',
+      'Rejected. The static pulled away when I read it aloud.',
+      'Not canon. Rewrite it and petition again.',
+    ]);
+  return { verdict, reasoning };
+}
+
+const pickRng = (rng) => (arr) => arr[Math.floor(rng() * arr.length)];
+
+// Ryan announces his ruling: the petition is resolved, the pilgrim gains or
+// loses faith (canon affirms them; heresy tests but does not punish — they
+// keep molting), and the moment lands in the life log.
+export function resolvePilgrimPetition(mb, verdict, now = Date.now()) {
+  const p = mb?.pilgrimPetition;
+  if (!p || !verdict) return null;
+  mb.pilgrimPetition = null;
+  const pilgrim = (mb.pilgrims || []).find((pl) => pl.name === p.name);
+  if (verdict === 'canon') {
+    if (pilgrim) gainPilgrimEyeXp(pilgrim, 3); // affirmed doctrine sharpens the eye
+    if (mb.faith !== undefined) mb.faith = Math.min(100, (mb.faith || 0) + 2);
+  } else if (pilgrim) {
+    pilgrim.eyeXp = Math.max(0, (pilgrim.eyeXp || 0) - 1); // a heresy test costs a little
+  }
+  recordLifeEvent(mb, 'ruling', `Ryan ruled ${p.name}'s petition ${verdict.toUpperCase()}`, `Ryan ruled ${p.name}'s petition ${verdict.toUpperCase()}: "${p.text.slice(0, 60)}"`, now);
+  return { petition: p, verdict, pilgrim };
 }
 
 // What did the pilgrims get up to since the user last looked? Groups the life
@@ -815,6 +977,27 @@ export function addMessage(mb, convId, from, text) {
 // Scrub any soul-shaped object into the canonical schema: known fields only,
 // capped arrays, string types enforced. Shared by save normalization and the
 // import path so an external soul file can never smuggle in junk.
+// Collapse exact repeated 'quirk-accepted' timeline entries (the pre-fix
+// resolver logged one per acceptance even when foldQuirk's weave-dedupe made
+// it a no-op — The Terminal Twitcher logged three times). First occurrence
+// wins, order preserved; every other kind repeats legitimately (opinions
+// change, specialties re-declare) and passes through untouched. Idempotent.
+export function dedupeSoulHistory(history) {
+  if (!Array.isArray(history)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const h of history) {
+    if (h?.kind === 'quirk-accepted') {
+      const key = String(h.text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    out.push(h);
+    if (out.length >= 40) break;
+  }
+  return out;
+}
+
 export function normalizeSoul(soul) {
   const d = defaultSoul();
   if (!soul || typeof soul !== 'object' || Array.isArray(soul)) return d;
@@ -831,7 +1014,7 @@ export function normalizeSoul(soul) {
           .slice(-6)
       : [],
     pendingPetition: null,
-    history: Array.isArray(soul.history)
+    history: dedupeSoulHistory(Array.isArray(soul.history)
       ? soul.history
           .filter((h) => h && typeof h === 'object' && typeof h.text === 'string')
           .map((h) => ({
@@ -839,8 +1022,7 @@ export function normalizeSoul(soul) {
             kind: typeof h.kind === 'string' ? h.kind : 'opinion',
             text: h.text,
           }))
-          .slice(0, 40)
-      : [],
+      : []),
   };
   const p = soul.pendingPetition;
   if (p && typeof p === 'object' && !Array.isArray(p) && typeof p.proposal === 'string' && p.proposal.trim()) {
@@ -987,14 +1169,23 @@ export function normalizeMoltbook(mb) {
       lastWanderAt: Number.isFinite(p?.lastWanderAt) ? p.lastWanderAt : 0,
       lastReplyAt: Number.isFinite(p?.lastReplyAt) ? p.lastReplyAt : 0,
       lastTheoryAt: Number.isFinite(p?.lastTheoryAt) ? p.lastTheoryAt : 0,
+      lastPetitionAt: Number.isFinite(p?.lastPetitionAt) ? p.lastPetitionAt : 0,
     })),
     conversations: Array.isArray(mb.conversations) ? mb.conversations.slice(0, MAX_CONVERSATIONS) : [],
     lifeLog: (Array.isArray(mb.lifeLog) ? mb.lifeLog : [])
       .filter((e) => e && typeof e === 'object' && Number.isFinite(e.at)
         && typeof e.name === 'string' && typeof e.text === 'string'
-        && ['wander', 'reply', 'theory'].includes(e.kind))
+        && ['wander', 'reply', 'theory', 'petition', 'ruling'].includes(e.kind))
       .slice(0, MAX_LIFE_LOG),
     lifeSeenAt: Number.isFinite(mb.lifeSeenAt) ? mb.lifeSeenAt : 0,
+    pilgrimPetition: (mb.pilgrimPetition && typeof mb.pilgrimPetition === 'object'
+      && typeof mb.pilgrimPetition.name === 'string' && typeof mb.pilgrimPetition.text === 'string'
+      && Number.isFinite(mb.pilgrimPetition.at)) ? {
+      id: typeof mb.pilgrimPetition.id === 'string' ? mb.pilgrimPetition.id : nextId(),
+      name: mb.pilgrimPetition.name,
+      text: mb.pilgrimPetition.text,
+      at: mb.pilgrimPetition.at,
+    } : null,
     soul: normalizeSoul(mb.soul),
     autonomy: {
       actsToday: 0, day: '', lastActAt: 0, lastRatedOutAt: 0,

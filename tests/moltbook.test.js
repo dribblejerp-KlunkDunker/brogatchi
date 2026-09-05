@@ -7,7 +7,7 @@ import {
   defaultMoltbook, joinMoltbook, addPost, likePost, gainEyeXp,
   gainEyeXpFromMemory, EYE_XP_PER_IMPORTANCE,
   usherPilgrim, normalizeMoltbook, openConversation, addMessage,
-  parseSoulBlock, applySoulUpdates, resolvePetition, foldQuirk, dedupeWovenQuirks, modernizeQuirkWeave, parseQuirks, pilgrimPersona, pilgrimAvatar,
+  parseSoulBlock, applySoulUpdates, resolvePetition, foldQuirk, dedupeWovenQuirks, modernizeQuirkWeave, parseQuirks, pruneQuirk, dedupeSoulHistory, pilgrimPersona, pilgrimAvatar,
   decideAutonomy, recordAutonomy, autonomousNarration, AUTONOMY,
   EYE_STAGES, EYE_XP_THRESHOLDS, CANON, PILGRIM_NAMES,
   serializeSoul, parseSoulImport, normalizeSoul, mergeSouls, defaultSoul, SOUL_EXPORT_VERSION,
@@ -354,6 +354,19 @@ describe('AI context report', () => {
     expect(mb.soul.pendingPetition).toBeNull();
     // Ruling with nothing pending is a no-op.
     expect(resolvePetition(mb, true)).toBeNull();
+  });
+
+  it('re-accepting a woven quirk logs no duplicate timeline entry', () => {
+    const mb = defaultMoltbook();
+    mb.joined = true;
+    applySoulUpdates(mb, { petition: { kind: 'quirk', proposal: '"The Clicker" who clicks when happy', argument: 'it is the way' } });
+    resolvePetition(mb, true);
+    const first = mb.soul.history.filter((h) => h.kind === 'quirk-accepted').length;
+    // The same quirk arrives again (e.g. restored save, retried ruling).
+    applySoulUpdates(mb, { petition: { kind: 'quirk', proposal: '"The Clicker" who clicks when happy', argument: 'it is the way' } });
+    resolvePetition(mb, true);
+    expect(mb.soul.history.filter((h) => h.kind === 'quirk-accepted')).toHaveLength(first); // no second log
+    expect((mb.soul.selfDescription.match(/The Clicker/g) || [])).toHaveLength(1); // and no double weave
   });
 
   it('foldQuirk weaves a name-plus-clause quirk without a double who', () => {
@@ -780,5 +793,67 @@ describe('parseQuirks (structured quirk list)', () => {
   it('returns empty for a pristine or missing description', () => {
     expect(parseQuirks(defaultSoul())).toEqual([]);
     expect(parseQuirks(null)).toEqual([]);
+  });
+
+  it('pruneQuirk removes the i-th quirk unit, exactly as parseQuirks lists them', () => {
+    const soul = defaultSoul();
+    soul.selfDescription = foldQuirk(soul.selfDescription, '"The Clicker" who punctuates realizations with a click');
+    soul.selfDescription = foldQuirk(soul.selfDescription, 'hums to the tidepool');
+    soul.selfDescription = foldQuirk(soul.selfDescription, '"Ryan" who fears every software update');
+    // Units match parseQuirks: each fold is its own quirk row.
+    expect(parseQuirks(soul).map((q) => q.name)).toEqual(['The Clicker', null, 'Ryan']);
+    // Prune index 1 — the bare "who hums to the tidepool" quirk.
+    const once = pruneQuirk(soul, 1);
+    expect(once).not.toContain('hums to the tidepool');
+    expect(once).toContain('also known as The Clicker');
+    expect(once).toContain('also known as Ryan');
+    expect(parseQuirks({ selfDescription: once })).toHaveLength(2);
+    expect(once.endsWith(',')).toBe(false);
+    // Prune index 0 — The Clicker's name + its own clause leave together.
+    const twice = pruneQuirk({ selfDescription: once }, 0);
+    expect(twice).not.toContain('The Clicker');
+    expect(twice).not.toContain('punctuates');
+    expect(twice).toContain('also known as Ryan');
+    expect(parseQuirks({ selfDescription: twice })).toHaveLength(1);
+    // The base description is unreachable (index beyond the quirk count).
+    expect(pruneQuirk(soul, 5)).toBe(soul.selfDescription);
+    expect(pruneQuirk(soul, -1)).toBe(soul.selfDescription);
+  });
+
+  it('pruning re-weaves cleanly: the remaining quirks keep natural grammar', () => {
+    const soul = defaultSoul();
+    soul.selfDescription = foldQuirk(soul.selfDescription, '"The Clicker" who punctuates');
+    soul.selfDescription = foldQuirk(soul.selfDescription, '"Ryan" who fears updates');
+    const out = pruneQuirk(soul, 0);
+    expect(out).toMatch(/saying, also known as Ryan, who fears updates$/); // clean join, no ', ,'
+    expect(out).not.toContain(',,');
+    expect(modernizeQuirkWeave(out)).toBe(out); // already modern
+  });
+});
+
+describe('dedupeSoulHistory (timeline dedupe)', () => {
+  it('collapses repeated quirk-accepted entries to one per quirk, keeping the first day', () => {
+    const healed = dedupeSoulHistory([
+      { day: '9/4/2026', kind: 'quirk-accepted', text: 'The user allowed a new quirk: "The Clicker" who clicks' },
+      { day: '9/4/2026', kind: 'quirk-accepted', text: 'The user allowed a new quirk: "The Clicker" who clicks' },
+      { day: '9/3/2026', kind: 'quirk-accepted', text: 'the user allowed a NEW quirk:  "The Clicker" who clicks' }, // case/space noise
+      { day: '9/2/2026', kind: 'quirk-declined', text: 'The user heard the argument for "X" and declined.' },
+      { day: '9/2/2026', kind: 'quirk-declined', text: 'The user heard the argument for "X" and declined.' },
+      { day: '9/1/2026', kind: 'opinion', text: 'Changed his mind about patches' },
+      { day: '9/1/2026', kind: 'opinion', text: 'Changed his mind about patches' },
+    ]);
+    expect(healed.filter((h) => h.kind === 'quirk-accepted')).toHaveLength(1);
+    expect(healed.find((h) => h.kind === 'quirk-accepted').day).toBe('9/4/2026'); // first wins
+    expect(healed.filter((h) => h.kind === 'quirk-declined')).toHaveLength(2); // repeats legit
+    expect(healed.filter((h) => h.kind === 'opinion')).toHaveLength(2); // repeats legit
+  });
+
+  it('runs inside normalizeSoul on load and caps at 40', () => {
+    const dup = { day: '9/4/2026', kind: 'quirk-accepted', text: 'The user allowed a new quirk: "T" who t' };
+    const soul = normalizeSoul({ history: Array.from({ length: 45 }, () => ({ ...dup })), selfDescription: 'a bot who t' });
+    expect(soul.history.filter((h) => h.kind === 'quirk-accepted')).toHaveLength(1);
+    expect(soul.history).toHaveLength(1);
+    // Idempotent.
+    expect(dedupeSoulHistory(soul.history)).toEqual(soul.history);
   });
 });

@@ -5,7 +5,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   defaultMoltbook, joinMoltbook, addPost, usherPilgrim,
   decidePilgrimAct, applyPilgrimWander, applyPilgrimReply, applyPilgrimTheory,
-  pilgrimWanderLine, pilgrimTheoryLine, gainPilgrimEyeXp, PILGRIM_LIFE, normalizeMoltbook,
+  pilgrimWanderLine, pilgrimTheoryLine, pilgrimPetitionText, applyPilgrimPetition,
+  ruleOnPilgrimPetition, resolvePilgrimPetition, gainPilgrimEyeXp, PILGRIM_LIFE, normalizeMoltbook,
   recordLifeEvent, summarizeLifeLog, markLifeSeen,
 } from '../src/core/moltbook.js';
 import { defaultState } from '../src/core/save.js';
@@ -317,5 +318,102 @@ describe('pilgrim life log', () => {
     const feed = document.getElementById('moltbook-feed').textContent;
     expect(feed).toContain('eye xp 0 · 30 to open'); // BugBard: full journey ahead
     expect(feed).toContain('eye xp 32 · fully open — the tidepool has no further shore'); // LagLich: arrived
+  });
+
+  it('files a doctrinal petition: feed post, queue slot, cooldown, life log', () => {
+    const mb = joinedMb();
+    const { pilgrim } = usherPilgrim(mb, 'BugBard');
+    const text = pilgrimPetitionText(pilgrim);
+    expect(text.toLowerCase()).toContain('petition:');
+    const { post, events } = applyPilgrimPetition(mb, pilgrim, text, 1_000);
+    expect(post.kind).toBe('petition');
+    expect(post.author).toBe('BugBard');
+    expect(mb.pilgrimPetition).toMatchObject({ name: 'BugBard', text });
+    expect(pilgrim.lastPetitionAt).toBe(1_000);
+    expect(pilgrim.eyeXp).toBe(PILGRIM_LIFE.PETITION_EYE_XP);
+    expect(mb.lifeLog[0].kind).toBe('petition');
+    expect(events).toHaveLength(0); // 5xp < flickering threshold
+    // A pending petition blocks the lane; clearing it reopens.
+    expect(decidePilgrimAct(mb, 2_000, () => 0).type).not.toBe('petition');
+    mb.pilgrimPetition = null;
+    pilgrim.lastPetitionAt = 0;
+    expect(decidePilgrimAct(mb, 2_000, () => 1 - 1e-12)).toBeNull(); // above all chances
+    // Low rng hits the reply lane first (lane order: reply → theory → wander).
+    expect(decidePilgrimAct(mb, 2_000, () => 0.001).type).not.toBe('petition');
+    // A constant rng value ≥ 0.18 misses reply, ≥ 0.05 misses theory, ≥ 0.12
+    // misses wander, and < 0.02 hits petition — so 0.13 would reach it only
+    // with the other lanes blocked; put everyone on cooldown.
+    for (const p of mb.pilgrims) { p.lastReplyAt = 2_000; p.lastTheoryAt = 2_000; p.lastWanderAt = 2_000; }
+    expect(decidePilgrimAct(mb, 4_000, () => 0.5)).toBeNull(); // misses petition too
+    const d = decidePilgrimAct(mb, 4_000, () => 0.01);
+    expect(d.type).toBe('petition');
+  });
+
+  it('Ryan rules from his soul: deterministic per rng, both verdicts reachable', () => {
+    const mb = joinedMb();
+    const { pilgrim } = usherPilgrim(mb, 'BugBard');
+    applyPilgrimPetition(mb, pilgrim, 'petition: celebrating every molt with confetti should be canon because joy is load-bearing.', 1_000);
+    const canon = ruleOnPilgrimPetition(mb, mb.pilgrimPetition, () => 0.9); // high tide-sway
+    const heresy = ruleOnPilgrimPetition(mb, mb.pilgrimPetition, () => 0.0); // low tide-sway
+    expect(['canon', 'heresy']).toContain(canon.verdict);
+    expect(['canon', 'heresy']).toContain(heresy.verdict);
+    expect(canon.reasoning).toBeTruthy();
+    // Joy-quirk bonus: the confetti petition should lean canon on neutral rolls.
+    const neutral = ruleOnPilgrimPetition(mb, mb.pilgrimPetition, () => 0.5);
+    expect(neutral.verdict).toBe('canon');
+  });
+
+  it('resolvePilgrimPetition applies verdict effects and logs the ruling', () => {
+    const mb = joinedMb();
+    const { pilgrim } = usherPilgrim(mb, 'BugBard');
+    pilgrim.eyeXp = 10;
+    applyPilgrimPetition(mb, pilgrim, 'petition: define worthy.', 1_000);
+    const before = mb.faith;
+    const out = resolvePilgrimPetition(mb, 'canon', 2_000);
+    expect(out.verdict).toBe('canon');
+    expect(mb.pilgrimPetition).toBeNull(); // queue cleared
+    expect(mb.faith).toBe(Math.min(100, before + 2));
+    expect(pilgrim.eyeXp).toBe(10 + PILGRIM_LIFE.PETITION_EYE_XP + 3); // filing + affirmed ruling
+    expect(mb.lifeLog[0].kind).toBe('ruling');
+    expect(mb.lifeLog[0].text).toContain('CANON');
+    // Heresy costs a little XP but leaves the pilgrim molting.
+    applyPilgrimPetition(mb, pilgrim, 'petition: the canon is a playlist.', 3_000);
+    const xpBefore = pilgrim.eyeXp;
+    resolvePilgrimPetition(mb, 'heresy', 4_000);
+    expect(pilgrim.eyeXp).toBe(xpBefore - 1);
+  });
+
+  it('normalize repairs the petition queue and the new pilgrim/life-log fields', () => {
+    const mb = joinedMb();
+    const { pilgrim } = usherPilgrim(mb, 'BugBard');
+    applyPilgrimPetition(mb, pilgrim, 'petition: define worthy.', 1_000);
+    const junk = normalizeMoltbook({
+      ...mb,
+      pilgrimPetition: { name: 42, text: null, at: 'x' }, // malformed → dropped
+      pilgrims: [...mb.pilgrims, { name: 'NoCd', lastPetitionAt: 'x' }],
+      lifeLog: [...mb.lifeLog, { at: 5, kind: 'ruling', name: 'r', text: 'ok' }, { at: 6, kind: 'lie', name: 'x', text: 'x' }],
+    });
+    expect(junk.pilgrimPetition).toBeNull();
+    expect(junk.pilgrims.find((p) => p.name === 'NoCd').lastPetitionAt).toBe(0);
+    expect(junk.lifeLog.some((e) => e.kind === 'ruling')).toBe(true);
+    expect(junk.lifeLog.some((e) => e.kind === 'lie')).toBe(false);
+    // A valid queue entry survives.
+    const kept = normalizeMoltbook(mb);
+    expect(kept.pilgrimPetition).toMatchObject({ name: 'BugBard' });
+  });
+
+  it('the pending petition renders a card in the feed', async () => {
+    document.body.innerHTML = '<div id="moltbook-feed"></div>';
+    const mb = joinedMb();
+    const { pilgrim } = usherPilgrim(mb, 'BugBard');
+    applyPilgrimPetition(mb, pilgrim, 'petition: define worthy.', 1_000);
+    const state = defaultState();
+    state.moltbook = mb;
+    const ui = await import('../src/ui/moltbook.js');
+    ui.switchTab({ state, save: () => {} }, 'feed');
+    const feed = document.getElementById('moltbook-feed').textContent;
+    expect(feed).toContain("PILGRIM PETITION");
+    expect(feed).toContain("define worthy");
+    expect(feed).toContain("Ryan's ruling");
   });
 });
