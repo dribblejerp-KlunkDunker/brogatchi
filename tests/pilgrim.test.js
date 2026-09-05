@@ -452,6 +452,61 @@ describe('pilgrim life log', () => {
     expect(feed.textContent).toContain('🧠 Ask Ryan');
   });
 
+  it('the Ask thread exposes EXPORT and CLEAR actions backed by the same handlers as the modal', async () => {
+    document.body.innerHTML = '<div id="moltbook-feed"></div>';
+    const state = defaultState();
+    state.moltbook = joinedMb();
+    state.askLog = [
+      { q: 'keep me?', a: '**yes**', at: 2_000, offline: false },
+      { q: 'and me?', a: 'always', at: 1_000, offline: false },
+    ];
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const real = BroGatchiApp.prototype;
+    const said = [];
+    const app = {
+      state, save: () => {}, openAskModal: () => {},
+      exportAskLog: real.exportAskLog, clearAskLog: real.clearAskLog,
+      downloadAskBackup: real.downloadAskBackup, buildAskLogPayload: real.buildAskLogPayload,
+      say: (t) => said.push(t), audio: { playBeep() {} }, renderAskLog: () => {},
+    };
+    const ui = await import('../src/ui/moltbook.js');
+    document.getElementById('moltbook-feed').dataset.moltbookBound = ''; // fresh binding
+    ui.bindFeedEvents(app);
+    ui.switchTab(app, 'feed');
+    const feed = document.getElementById('moltbook-feed');
+    feed.querySelector('[data-ask-thread]').click();
+
+    // The action row renders above the bubbles.
+    const exportBtn = feed.querySelector('.moltbook-ask-export');
+    const clearBtn = feed.querySelector('.moltbook-ask-clear');
+    expect(exportBtn).toBeTruthy();
+    expect(clearBtn).toBeTruthy();
+    expect(feed.textContent).toContain('keep me?');
+
+    // EXPORT downloads the transcript without touching the log.
+    const clicks = [];
+    const origCreate = document.createElement.bind(document);
+    document.createElement = (tag) => {
+      const el = origCreate(tag);
+      if (tag === 'a') { el.click = () => clicks.push(el.download); }
+      return el;
+    };
+    exportBtn.click();
+    expect(clicks).toHaveLength(1);
+    expect(clicks[0]).toMatch(/^ryan-ask-log-\d{4}-\d{2}-\d{2}\.txt$/);
+    expect(app.state.askLog).toHaveLength(2);
+    expect(said.some((t) => t.includes('Log exported'))).toBe(true);
+
+    // CLEAR confirms, auto-downloads the backup, wipes, and shows the empty state.
+    window.confirm = () => true;
+    clearBtn.click();
+    document.createElement = origCreate;
+    expect(clicks).toHaveLength(2); // the automatic pre-wipe backup
+    expect(app.state.askLog).toHaveLength(0);
+    expect(feed.textContent).toContain('No conversations yet');
+    expect(said.some((t) => t.includes('Backed up'))).toBe(true);
+  });
+
   it('the CROSS-REF tab merges every surface with filters and the hour histogram', async () => {
     document.body.innerHTML = '<div id="moltbook-feed"></div>';
     const state = defaultState();
@@ -580,5 +635,41 @@ describe('pilgrim life log', () => {
     const feed = document.getElementById('moltbook-feed');
     expect(feed.querySelector('[data-ask-thread]')).toBeNull();
     expect(feed.textContent).toContain('No chats yet');
+  });
+});
+describe("your pilgrim's soul panel", () => {
+  it('YOUR ACCOUNT shows the grown soul: description, topics, and bonds', async () => {
+    document.body.innerHTML = '<div id="moltbook-feed"></div>';
+    const state = defaultState();
+    const mb = joinedMb();
+    molt.joinAsPilgrim(mb, 'ShellBot 9000');
+    // Some lived history: topics + bonds + one distillation.
+    molt.growYouSoul(mb.you, 'Ryan', 'pigeons are watching the tidepool');
+    molt.growYouSoul(mb.you, 'Ryan', 'pigeons again');
+    molt.growYouSoul(mb.you, 'The Tide', 'pigeons know something');
+    molt.growYouSoul(mb.you, 'BugBard', 'pigeons imply pigeons imply pigeons');
+    molt.growYouSoul(mb.you, 'BugBard', 'pigeons at the shore');
+    molt.growYouSoul(mb.you, 'BugBard', 'pigeons never blink');
+    state.moltbook = mb;
+    const ui = await import('../src/ui/moltbook.js');
+    document.getElementById('moltbook-feed').dataset.moltbookBound = '';
+    ui.bindFeedEvents({ state, save: () => {}, say: () => {}, memory: () => {}, updateUI: () => {} });
+    ui.switchTab({ state, save: () => {} }, 'feed');
+    const feed = document.getElementById('moltbook-feed');
+
+    expect(feed.textContent).toContain("YOUR PILGRIM'S SOUL");
+    expect(feed.textContent).toContain('Pigeons'); // top topic surfaces
+    expect(feed.textContent).toContain('BugBard (3)'); // bond with exchange count
+    expect(feed.textContent).toContain('Ryan (2)');
+  });
+
+  it('the join-time soul seeds and survives save normalization', async () => {
+    const state = defaultState();
+    const mb = joinedMb();
+    molt.joinAsPilgrim(mb, 'SeedBot');
+    expect(mb.you.soul.selfDescription).toContain('SeedBot');
+    const out = molt.normalizeMoltbook(mb);
+    expect(out.you.soul.selfDescription).toContain('SeedBot');
+    expect(Array.isArray(out.you.soul.history)).toBe(true);
   });
 });

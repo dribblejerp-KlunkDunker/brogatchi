@@ -1276,6 +1276,7 @@ export class BroGatchiApp {
       ? `Backed up ${log.length} exchange${log.length === 1 ? '' : 's'} to ${backedUp} before the wipe. The log is clear — what is read is remembered — somewhere.`
       : `The Ask log is clear. The backup could not download, so it's on your clipboard — paste it somewhere safe.`);
     this.renderAskLog(true);
+    if (moltbook.isAskThreadActive()) moltbook.refreshMoltbook(this); // the open Ask thread re-renders to its empty state
     this.save();
   }
 

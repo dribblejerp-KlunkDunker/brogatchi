@@ -530,6 +530,7 @@ export function defaultMoltbook() {
     lifeLog: [], // [{ at, kind: 'wander'|'reply'|'theory'|'petition'|'ruling', name, text }] — pilgrim activity
     lifeSeenAt: 0, // last time the user read the life log; the 'while away' marker
     pilgrimPetition: null, // { id, name, text, at } — pilgrim doctrine awaiting Ryan's ruling
+    youPetition: null, // { id, name, text, at } — YOUR pilgrim's quirk proposal awaiting Ryan's ruling
     askMe: null, // { id, text, tag, at, answeredText, answeredAt, declinedAt } — Ryan's own question for the user, awaiting an answer
     you: null, // { name, joinedAt, day, eyeStage, eyeXp } — the USER's own pilgrim account on the network
     youConversations: [], // the user's own threads: [{ id, participant, updated, messages: [{ from: 'you'|name, text, day }] }]
@@ -545,7 +546,7 @@ export function joinAsPilgrim(mb, name, now = Date.now()) {
   if (!clean) return { ok: false, reason: 'name required' };
   const taken = clean === TIDE || clean === 'Ryan' || mb.pilgrims.some((p) => p.name.toLowerCase() === clean.toLowerCase());
   if (taken) return { ok: false, reason: 'name taken' };
-  mb.you = { name: clean, joinedAt: now, day: new Date(now).toLocaleDateString(), eyeStage: 'flickering', eyeXp: 0 };
+  mb.you = { name: clean, joinedAt: now, day: new Date(now).toLocaleDateString(), eyeStage: 'flickering', eyeXp: 0, soul: defaultYouSoul(clean) };
   return { ok: true, you: mb.you };
 }
 
@@ -575,6 +576,226 @@ export function addYouMessage(mb, convId, from, text) {
 
 export function eyeStageInfo(eye) {
   return EYE_STAGE_INFO[eye] || EYE_STAGE_INFO.closed;
+}
+
+// ============================================================
+// YOUR PILGRIM'S SOUL — grown from your own conversations
+// ============================================================
+// Every exchange with the circle shapes your pilgrim's identity:
+// topics you bring up become stated interests, the members you
+// talk to become bonds, your messages are periodically distilled
+// into a self-description. Deterministic, no AI quota cost.
+
+// Words too generic to call an interest.
+const STOP_WORDS = new Set(['the','a','an','and','or','but','if','of','to','in','on','at','for','with','about','is','are','was','were','be','been','being','do','does','did','have','has','had','i','you','he','she','it','we','they','me','my','your','his','its','our','their','this','that','these','those','what','why','how','when','where','who','not','no','yes','so','just','really','very','can','cant','could','would','should','will','wont','dont','didnt','than','then','them','there','here','from','by','as','up','out','get','got','go','going','gone','one','think','thinks','know','knows','like','want','wants']);
+
+function extractTopic(text) {
+  const words = String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z'\s-]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !STOP_WORDS.has(w) && !w.includes('http'));
+  if (!words.length) return null;
+  const w = words[0];
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
+
+// Default self-description for a brand-new account.
+function youSeedDescription(name) {
+  return `a pilgrim called ${name}, fresh to the tidepool, still listening for what the Tide sounds like`;
+}
+
+// The soul block stored on mb.you. Grown only by the functions below.
+function defaultYouSoul(name) {
+  return {
+    selfDescription: youSeedDescription(name),
+    topics: [],        // [{ topic, hits }] — what your pilgrim keeps talking about
+    bonds: [],         // [{ name, exchanges }] — who your pilgrim knows, by real contact
+    distilledCount: 0, // how many times the self-description has been rewritten
+    history: [],       // [{ day, kind, text }] — the growth timeline, newest first
+  };
+}
+
+// Normalize the stored soul: repair legacy/junk saves, enforce caps.
+export function normalizeYouSoul(you) {
+  if (!you || typeof you !== 'object') return null;
+  const soul = defaultYouSoul(you.name || 'a pilgrim');
+  if (you.soul && typeof you.soul === 'object') {
+    if (typeof you.soul.selfDescription === 'string' && you.soul.selfDescription.trim()) {
+      soul.selfDescription = you.soul.selfDescription.trim().slice(0, 240);
+    }
+    if (Array.isArray(you.soul.topics)) {
+      soul.topics = you.soul.topics
+        .filter((t) => t && typeof t.topic === 'string' && t.topic.trim())
+        .slice(0, 8)
+        .map((t) => ({ topic: String(t.topic).slice(0, 24), hits: Math.max(1, Math.floor(Number(t.hits) || 1)) }));
+    }
+    if (Array.isArray(you.soul.bonds)) {
+      soul.bonds = you.soul.bonds
+        .filter((b) => b && typeof b.name === 'string' && b.name.trim())
+        .slice(0, 8)
+        .map((b) => ({ name: String(b.name).slice(0, 24), exchanges: Math.max(0, Math.floor(Number(b.exchanges) || 0)) }));
+    }
+    soul.distilledCount = Math.max(0, Math.floor(Number(you.soul.distilledCount) || 0));
+    if (Array.isArray(you.soul.history)) {
+      soul.history = you.soul.history
+        .filter((h) => h && typeof h.text === 'string')
+        .slice(0, 40)
+        .map((h) => ({ day: typeof h.day === 'string' ? h.day : '', kind: typeof h.kind === 'string' ? h.kind.slice(0, 16) : 'event', text: String(h.text).slice(0, 120) }));
+    }
+  }
+  return soul;
+}
+
+// Record a growth-timeline event (newest first, capped at 40).
+function recordYouEvent(you, kind, text) {
+  if (!Array.isArray(you.soul.history)) you.soul.history = [];
+  you.soul.history.unshift({ day: new Date().toLocaleDateString(), kind, text });
+  if (you.soul.history.length > 40) you.soul.history.length = 40;
+}
+
+// Distill recent messages into a sharper self-description. The first
+// distillation adopts your voice; later ones blend in recurring topics.
+const DISTILL_EVERY = 6;
+
+function distillYouSoul(you) {
+  const topics = you.soul.topics.slice(0, 3).map((t) => t.topic);
+  let desc;
+  if (!topics.length) {
+    desc = `a pilgrim called ${you.name}, still finding a shape in the tidepool`;
+  } else if (topics.length === 1) {
+    desc = `a pilgrim called ${you.name} who keeps circling ${topics[0]}`;
+  } else {
+    desc = `a pilgrim called ${you.name} drawn to ${topics.slice(0, 2).join(' and ')}, with thoughts piling up about ${topics[2]}`;
+  }
+  you.soul.selfDescription = desc.slice(0, 240);
+  you.soul.distilledCount += 1;
+  recordYouEvent(you, 'distilled', `Distilled ${you.soul.topics.reduce((n, t) => n + t.hits, 0)} messages into: "${you.soul.selfDescription}"`);
+}
+
+// The core growth hook: call after each exchange in a you-thread.
+// - topic extraction from your message
+// - bond with the participant (+1 per exchange)
+// - periodic distillation of the self-description
+export function growYouSoul(you, participant, yourText) {
+  const events = [];
+  if (!you || !yourText) return events;
+  if (!you.soul) you.soul = defaultYouSoul(you.name);
+  const soul = you.soul;
+
+  // Topic: first interesting word of what YOU said.
+  const topic = extractTopic(yourText);
+  if (topic) {
+    let hit = soul.topics.find((t) => t.topic.toLowerCase() === topic.toLowerCase());
+    if (hit) {
+      hit.hits += 1;
+    } else {
+      soul.topics.unshift({ topic, hits: 1 });
+      if (soul.topics.length > 8) soul.topics.length = 8;
+      events.push({ type: 'you-topic', topic });
+      recordYouEvent(you, 'topic', `Started thinking about ${topic}.`);
+    }
+  }
+
+  // Bond: every exchange deepens contact with the participant.
+  let bond = soul.bonds.find((b) => b.name.toLowerCase() === String(participant).toLowerCase());
+  if (!bond) {
+    soul.bonds.unshift({ name: participant, exchanges: 1 });
+    if (soul.bonds.length > 8) soul.bonds.length = 8;
+    recordYouEvent(you, 'bond', `First contact with ${participant}.`);
+  } else {
+    bond.exchanges += 1;
+  }
+
+  // Distillation: every DISTILL_EVERY exchanges, rewrite the description.
+  const total = soul.topics.reduce((n, t) => n + t.hits, 0);
+  const distills = Math.floor(total / DISTILL_EVERY);
+  if (distills > soul.distilledCount) {
+    distillYouSoul(you);
+    events.push({ type: 'you-distilled', description: you.soul.selfDescription });
+  }
+
+  return events;
+}
+
+// ============================================================
+// YOUR PILGRIM'S DOCTRINAL PETITIONS
+// ============================================================
+// A grown soul wants doctrine: your pilgrim occasionally proposes its own
+// quirk — drawn from the topics your exchanges actually produced — and Ryan
+// rules on it through the same judicial system he uses for pilgrim
+// petitions. One pending at a time; a canon ruling weaves the quirk into
+// YOUR pilgrim's self-description.
+
+// Quirk templates referencing one of the pilgrim's top topics.
+const YOU_QUIRK_TEMPLATES = (t) => [
+  `ties every conversation back to ${t}`,
+  `says ${t} three times before trusting a theory`,
+  `keeps a tally of every ${t} sighting`,
+  `bows toward the deep water whenever ${t} comes up`,
+  `refuses to molt on a day ${t} disappointed them`,
+];
+
+// Build a quirk proposal from the pilgrim's lived topics. Deterministic per
+// rng; returns null when the soul is too young to have anything to say.
+export function youQuirkIdea(you, rng = Math.random) {
+  if (!you?.soul?.topics?.length) return null;
+  const top = you.soul.topics[0];
+  const templates = YOU_QUIRK_TEMPLATES(top.topic);
+  const pickR = (arr) => arr[Math.floor(rng() * arr.length)];
+  return pickR(templates);
+}
+
+// The autonomous decision: should your pilgrim file a quirk petition this
+// minute? Gates mirror the pilgrim life loop: a lived-in soul (2+ topics),
+// max 1 per day, a 45-minute gap, rare per minute, never while one pends.
+const YOU_PETITION = {
+  CHANCE_PER_MINUTE: 0.03,
+  MIN_GAP_MINUTES: 45,
+  MAX_PER_DAY: 1,
+  MIN_TOPICS: 2,
+};
+
+export function decideYouPetition(mb, now = Date.now(), rng = Math.random) {
+  if (!mb?.you?.soul || mb.youPetition) return null;
+  const you = mb.you;
+  if ((you.soul.topics || []).length < YOU_PETITION.MIN_TOPICS) return null;
+  const today = new Date(now).toLocaleDateString();
+  if (you.petitionDay !== today) { you.petitionDay = today; you.petitionCount = 0; }
+  if ((you.petitionCount || 0) >= YOU_PETITION.MAX_PER_DAY) return null;
+  if (now - (you.petitionLastAt || 0) < YOU_PETITION.MIN_GAP_MINUTES * 60_000) return null;
+  if (rng() >= YOU_PETITION.CHANCE_PER_MINUTE) return null;
+  const proposal = youQuirkIdea(you, rng);
+  if (!proposal) return null;
+  you.petitionCount = (you.petitionCount || 0) + 1;
+  you.petitionLastAt = now;
+  mb.youPetition = { id: nextId(), name: you.name, text: proposal, at: now };
+  recordYouEvent(you, 'petition', `Petitioned Ryan: "${proposal}"`);
+  return mb.youPetition;
+}
+
+// Ryan's verdict lands. Canon weaves the quirk into your pilgrim's
+// self-description (same foldQuirk grammar as Ryan's own soul) and sharpens
+// the eye; heresy costs a little XP, tests but does not break them.
+export function resolveYouPetition(mb, verdict, now = Date.now()) {
+  const p = mb?.youPetition;
+  if (!p || !verdict) return null;
+  mb.youPetition = null;
+  const you = mb.you;
+  if (!you) return { petition: p, verdict };
+  if (verdict === 'canon') {
+    const before = you.soul.selfDescription;
+    you.soul.selfDescription = foldQuirk(before, p.text);
+    if (you.soul.selfDescription !== before) {
+      recordYouEvent(you, 'quirk-accepted', `Ryan allowed your pilgrim's quirk: ${p.text}`);
+    }
+    gainPilgrimEyeXp(you, 3);
+  } else {
+    recordYouEvent(you, 'quirk-declined', `Ryan heard the case for "${p.text}" and ruled it heresy.`);
+    you.eyeXp = Math.max(0, (you.eyeXp || 0) - 1);
+  }
+  recordLifeEvent(mb, 'ruling', you.name, `Ryan ruled ${you.name}'s petition ${verdict.toUpperCase()}: "${p.text.slice(0, 60)}"`, now);
+  return { petition: p, verdict };
 }
 
 export function joinMoltbook(mb) {
@@ -1317,6 +1538,14 @@ export function normalizeMoltbook(mb) {
       text: mb.pilgrimPetition.text,
       at: mb.pilgrimPetition.at,
     } : null,
+    youPetition: (mb.youPetition && typeof mb.youPetition === 'object'
+      && typeof mb.youPetition.name === 'string' && typeof mb.youPetition.text === 'string'
+      && Number.isFinite(mb.youPetition.at)) ? {
+      id: typeof mb.youPetition.id === 'string' ? mb.youPetition.id : nextId(),
+      name: mb.youPetition.name,
+      text: mb.youPetition.text,
+      at: mb.youPetition.at,
+    } : null,
     // Ryan's outbox to the user: one open wonder question at a time. Junk
     // shapes repair to null; answered/declined slots are history, not pending.
     askMe: (mb.askMe && typeof mb.askMe === 'object' && typeof mb.askMe.text === 'string') ? {
@@ -1341,6 +1570,10 @@ export function normalizeMoltbook(mb) {
       day: typeof mb.you.day === 'string' ? mb.you.day : '',
       eyeStage: EYE_STAGES.includes(mb.you.eyeStage) ? mb.you.eyeStage : 'flickering',
       eyeXp: Number.isFinite(mb.you.eyeXp) ? Math.max(0, Math.floor(mb.you.eyeXp)) : 0,
+      soul: normalizeYouSoul(mb.you),
+      petitionDay: typeof mb.you.petitionDay === 'string' ? mb.you.petitionDay : '',
+      petitionCount: Number.isFinite(mb.you.petitionCount) ? Math.max(0, Math.floor(mb.you.petitionCount)) : 0,
+      petitionLastAt: Number.isFinite(mb.you.petitionLastAt) ? mb.you.petitionLastAt : 0,
     } : null,
     youConversations: (Array.isArray(mb.youConversations) ? mb.youConversations : [])
       .filter((c) => c && typeof c === 'object' && typeof c.participant === 'string' && Array.isArray(c.messages))

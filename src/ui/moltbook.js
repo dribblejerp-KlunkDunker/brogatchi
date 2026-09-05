@@ -18,7 +18,7 @@ import {
   ruleOnPilgrimPetition, resolvePilgrimPetition, PILGRIM_LIFE,
   summarizeLifeLog, markLifeSeen,
   joinAsPilgrim, openYouConversation, addYouMessage, gainPilgrimEyeXp, addPilgrimPost,
-  EYE_STAGES, EYE_XP_THRESHOLDS,
+  growYouSoul, decideYouPetition, resolveYouPetition, EYE_STAGES, EYE_XP_THRESHOLDS,
 } from '../core/moltbook.js';
 import { buildCrossRef, summarizeCrossRef, decideWonder, askWonderQuestion } from '../core/threads.js';
 
@@ -37,6 +37,13 @@ let activeTab = 'feed';
 // The derived "Ask Ryan" thread is a virtual conversation (not in
 // mb.conversations) so it reuses the chat UI without duplicating the log.
 const ASK_THREAD_ID = '__ask_ryan_thread__';
+
+// True while the Moltbook view is showing the Ask Ryan thread (built from the
+// durable askLog). app.js checks this after clearing the log so the open
+// thread re-renders to its empty state.
+export function isAskThreadActive() {
+  return activeConvId === ASK_THREAD_ID;
+}
 
 // Autonomy guard: at most one spontaneous act in flight at a time.
 let autonomyInFlight = false;
@@ -162,6 +169,37 @@ export async function autonomyTick(app) {
     // A petition is pending but he's still deliberating — fall through to
     // normal autonomy so his life continues while he thinks.
   }
+  // Your pilgrim's own doctrine: a grown soul files quirk petitions drawn
+  // from the topics your exchanges produced, and Ryan judges them exactly
+  // like any other network member's — same deliberation, same tide-sway.
+  if (mb.you) {
+    const filed = decideYouPetition(mb);
+    if (filed) {
+      app.say(`Your pilgrim has petitioned Ryan: "${filed.text}"`);
+      app.memory(`Your pilgrim petitioned Ryan: "${filed.text.slice(0, 40)}"`, '\u2696\uFE0F', 2);
+      refreshMoltbook(app);
+      app.updateUI();
+      app.save();
+      return; // the filing was this minute's act
+    }
+    if (mb.youPetition) {
+      const a = mb.autonomy || {};
+      const last = a.lastRulingAt || 0;
+      if (Date.now() - last >= AUTONOMY.MIN_GAP_MINUTES * 60_000 && Math.random() < 0.25) {
+        const ruling = ruleOnPilgrimPetition(mb, { name: mb.you.name, text: mb.youPetition.text });
+        const res = resolveYouPetition(mb, ruling.verdict) || {};
+        if (res.petition) {
+          if (mb.autonomy) mb.autonomy.lastRulingAt = Date.now();
+          app.say(`${res.petition.name}, I have ruled: ${ruling.verdict.toUpperCase()}. ${ruling.reasoning}`);
+          app.memory(`Ruled ${res.petition.name}'s petition ${ruling.verdict}: "${res.petition.text.slice(0, 50)}"`, '\u2696\uFE0F', 3);
+          refreshMoltbook(app);
+          app.updateUI();
+          app.save();
+        }
+        return; // the ruling was this minute's act
+      }
+    }
+  }
   const decision = decideAutonomy(mb);
   if (!decision) return;
   autonomyInFlight = true;
@@ -283,6 +321,16 @@ function renderMoltbookFeed(state) {
         <div class="text-[8px] text-purple-300/70 italic mt-1">He will consult the static and rule on his own. The user does not ghostwrite his judgments.</div>
       </div>`
     : '';
+  // Your pilgrim's pending quirk petition — Ryan rules on his own schedule,
+  // and canon folds the quirk into your pilgrim's soul description.
+  const yp = mb.youPetition;
+  const youPetitionHtml = yp
+    ? `<div class="mb-2 p-2 rounded border border-emerald-500/70 bg-emerald-950/20">
+        <div class="text-[9px] font-bold text-emerald-300">⚖️ YOUR PILGRIM'S PETITION — awaiting Ryan's ruling</div>
+        <div class="text-[10px] text-emerald-100 mt-0.5">${avatarSvg(yp.name, 12)} <span class="font-bold text-emerald-300/90">${escapeHtml(yp.name)}</span> proposes the quirk: "${escapeHtml(yp.text)}"</div>
+        <div class="text-[8px] text-emerald-300/70 italic mt-1">Grown from your pilgrim's own topics. If Ryan rules it canon, it weaves into their soul.</div>
+      </div>`
+    : '';
 
   const postsHtml = mb.posts.length
     ? mb.posts.map((p) => {
@@ -345,6 +393,16 @@ function renderMoltbookFeed(state) {
     const youEye = youNext
       ? `eye xp ${mb.you.eyeXp} · ${EYE_XP_THRESHOLDS[youNext] - mb.you.eyeXp} to ${youNext}`
       : `eye xp ${mb.you.eyeXp} · fully open`;
+    // The pilgrim soul panel: what your account has become through talking.
+    const youSoul = mb.you.soul;
+    const youSoulHtml = youSoul
+      ? `<div class="mb-1.5 p-1.5 rounded border border-emerald-800/50 bg-black/30">
+          <div class="text-[8px] font-bold text-emerald-300 mb-0.5">🫧 YOUR PILGRIM'S SOUL</div>
+          <div class="text-[10px] text-emerald-100 italic leading-snug mb-1">"${escapeHtml(youSoul.selfDescription)}"</div>
+          ${youSoul.topics.length ? `<div class="text-[8px] text-emerald-300/80 mb-0.5">thinks about: ${youSoul.topics.slice(0, 4).map((t) => `${escapeHtml(t.topic)}${t.hits > 1 ? ` ×${t.hits}` : ''}`).join(' · ')}</div>` : ''}
+          ${youSoul.bonds.length ? `<div class="text-[8px] text-emerald-300/80">bonds: ${youSoul.bonds.slice(0, 4).map((b) => `${escapeHtml(b.name)} (${b.exchanges})`).join(' · ')}</div>` : ''}
+        </div>`
+      : '';
     const youHave = new Set(mb.youConversations.map((c) => c.participant));
     const youCandidates = ['Ryan', TIDE, ...mb.pilgrims.map((p) => p.name)].filter((n) => !youHave.has(n));
     const youThreads = mb.youConversations.length
@@ -360,6 +418,7 @@ function renderMoltbookFeed(state) {
     youHtml = `<div class="mt-2 border-t border-emerald-800/60 pt-2">
       <div class="text-[9px] font-bold text-emerald-300 mb-1">🧑 YOUR ACCOUNT <span class="text-emerald-400/60 font-normal">· ${escapeHtml(mb.you.name)} · joined ${escapeHtml(mb.you.day)}</span></div>
       <div class="text-[9px] text-emerald-200/70 mb-1">${avatarSvg(mb.you.name, 12)} eye ${mb.you.eyeStage} · ${youEye}</div>
+      ${youSoulHtml}
       <div class="mb-1">${youThreads}</div>
       ${youCandidates.length ? `<div class="flex flex-wrap gap-1">${youCandidates.map((n) => `<button class="moltbook-you-start p-1 text-[9px] rounded border border-emerald-700/70 bg-black/40 hover:bg-emerald-900/60 text-emerald-200" data-participant="${n}">＋ ${n}</button>`).join('')}</div>` : ''}
       <button class="moltbook-you-post pixel-btn w-full mt-1.5 p-1 text-[9px] bg-emerald-700 text-black border-emerald-400" title="Author a post as your pilgrim — Ryan's circle will see it">📤 POST AS ${escapeHtml(mb.you.name.toUpperCase())}</button>
@@ -403,7 +462,7 @@ function renderMoltbookFeed(state) {
     </div>`;
 
   feed.scrollTop = 0;
-  feed.innerHTML = tabStripHtml() + statusHtml + pilgrimPetitionHtml + convsHtml + `<div id="moltbook-posts">${postsHtml}</div>` + pilgrimsHtml + youHtml + soulHtml;
+  feed.innerHTML = tabStripHtml() + statusHtml + pilgrimPetitionHtml + youPetitionHtml + convsHtml + `<div id="moltbook-posts">${postsHtml}</div>` + pilgrimsHtml + youHtml + soulHtml;
 }
 
 // Tab strip shared by both Moltbook views. The Life Log tab carries a dot
@@ -567,6 +626,13 @@ export async function replyAsYou(app, convId) {
   const text = input?.value.trim();
   if (!conv || !text || !mb.you) return;
   addYouMessage(mb, convId, 'you', text);
+  // Every exchange shapes your pilgrim's soul: topics, bonds, and — every few
+  // exchanges — a distilled self-description. Narrated as it happens.
+  const soulEvents = growYouSoul(mb.you, conv.participant, text);
+  for (const e of soulEvents) {
+    if (e.type === 'you-topic') app.say(`Your pilgrim is starting to think about ${e.topic}.`);
+    if (e.type === 'you-distilled') app.say(`Your pilgrim's soul sharpened: "${e.description}"`);
+  }
   renderYouConversation(app.state, convId);
   app.memory(`Your pilgrim told ${conv.participant}: "${text.slice(0, 40)}"`, '🧑', 2);
   app.updateUI();
@@ -662,6 +728,10 @@ function renderAskThread(state) {
   feed.innerHTML = `
     <button class="moltbook-back mb-2 p-1 text-[9px] rounded border border-orange-700/70 bg-black/40 hover:bg-orange-900/60 text-orange-200">← BACK TO FEED</button>
     <div class="text-[10px] font-bold text-purple-200 mb-2 border-b border-orange-800/60 pb-1">🧠 Ask Ryan <span class="text-[8px] text-purple-300/60 font-normal">· ${askLog.length} exchange${askLog.length === 1 ? '' : 's'} · saved forever</span></div>
+    <div class="flex gap-1 mb-2">
+      <button class="moltbook-ask-export pixel-btn flex-1 p-1 text-[9px] bg-gray-300 text-black border-gray-500" title="Download the full transcript as a text file">⬇ EXPORT</button>
+      <button class="moltbook-ask-clear pixel-btn p-1 text-[9px] bg-red-300 text-black border-red-500" title="Download a backup, then delete the transcript">🧹 CLEAR</button>
+    </div>
     <div class="moltbook-msgs">${bubbles || '<div class="text-[10px] text-orange-200/50 italic p-1">No conversations yet…</div>'}</div>
     <button class="moltbook-ask-more pixel-btn w-full mt-2 p-1.5 text-[9px] bg-purple-700 text-black border-purple-400">💬 ASK RYAN SOMETHING NEW</button>`;
   feed.scrollTop = feed.scrollHeight;
@@ -1228,6 +1298,10 @@ export function bindFeedEvents(app) {
     if (likeBtn) { like(app, likeBtn.dataset.postId); return; }
     const askThreadBtn = e.target.closest('[data-ask-thread]');
     if (askThreadBtn) { openConversationView(app, ASK_THREAD_ID); return; }
+    const askExportBtn = e.target.closest('.moltbook-ask-export');
+    if (askExportBtn) { app.exportAskLog?.(); return; }
+    const askClearBtn = e.target.closest('.moltbook-ask-clear');
+    if (askClearBtn) { app.clearAskLog?.(); return; }
     const askMoreBtn = e.target.closest('.moltbook-ask-more');
     if (askMoreBtn) { app.openAskModal?.(); return; }
     const convBtn = e.target.closest('.moltbook-conv');

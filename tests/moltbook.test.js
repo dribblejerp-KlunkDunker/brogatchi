@@ -11,6 +11,7 @@ import {
   decideAutonomy, recordAutonomy, autonomousNarration, AUTONOMY,
   EYE_STAGES, EYE_XP_THRESHOLDS, CANON, PILGRIM_NAMES,
   serializeSoul, parseSoulImport, normalizeSoul, mergeSouls, defaultSoul, SOUL_EXPORT_VERSION,
+  joinAsPilgrim, growYouSoul, decideYouPetition, resolveYouPetition,
 } from '../src/core/moltbook.js';
 import { defaultState } from '../src/core/save.js';
 import { buildSpec } from '../src/core/ryanSpec.js';
@@ -869,3 +870,127 @@ describe('dedupeSoulHistory (timeline dedupe)', () => {
     expect(dedupeSoulHistory(soul.history)).toEqual(soul.history);
   });
 });
+
+describe("your pilgrim's soul (grows from your chats)", () => {
+
+  it('a fresh join seeds a soul with a starter description', () => {
+    const mb = joinedMb2();
+    const r = joinAsPilgrim(mb, 'ShellBot 9000');
+    expect(r.ok).toBe(true);
+    expect(mb.you.soul.selfDescription).toContain('ShellBot 9000');
+    expect(mb.you.soul.topics).toEqual([]);
+    expect(mb.you.soul.bonds).toEqual([]);
+    expect(mb.you.soul.distilledCount).toBe(0);
+    expect(mb.you.soul.history).toEqual([]);
+  });
+
+  it('your messages become topics and repeat contacts become bonds', () => {
+    const mb = joinedMb2();
+    joinAsPilgrim(mb, 'ShellBot 9000');
+    const you = mb.you;
+    const ev1 = growYouSoul(you, 'Ryan', 'do you think pigeons are surveillance drones?');
+    expect(ev1.some((e) => e.type === 'you-topic' && e.topic === 'Pigeons')).toBe(true);
+    const ev2 = growYouSoul(you, 'Ryan', 'pigeons again, sorry');
+    expect(ev2).toEqual([]); // repeat topic + repeat bond are silent
+    expect(you.soul.topics).toEqual([{ topic: 'Pigeons', hits: 2 }]);
+    expect(you.soul.bonds).toEqual([{ name: 'Ryan', exchanges: 2 }]);
+    growYouSoul(you, 'The Tide', 'pigeons imply pigeons imply pigeons');
+    expect(you.soul.bonds.map((b) => b.name)).toContain('The Tide');
+  });
+
+  it('stop words and short tokens never become topics', () => {
+    const mb = joinedMb2();
+    joinAsPilgrim(mb, 'ShellBot 9000');
+    growYouSoul(mb.you, 'Ryan', 'the the and but?');
+    expect(mb.you.soul.topics).toEqual([]);
+  });
+
+  it('the self-description distills every 6 exchanges and the timeline records it', () => {
+    const mb = joinedMb2();
+    joinAsPilgrim(mb, 'ShellBot 9000');
+    const you = mb.you;
+    const sayings = ['pigeons watch me', 'pigeons in the park', 'pigeons at dawn', 'pigeons at dusk', 'pigeons imply pigeons'];
+    for (const s of sayings) growYouSoul(you, 'Ryan', s);
+    const before = you.soul.selfDescription;
+    const ev = growYouSoul(you, 'Ryan', 'pigeons are moderators');
+    expect(ev.some((e) => e.type === 'you-distilled')).toBe(true);
+    expect(you.soul.selfDescription).not.toBe(before);
+    expect(you.soul.selfDescription).toContain('Pigeons');
+    expect(you.soul.distilledCount).toBe(1);
+    const d = you.soul.history.find((h) => h.kind === 'distilled');
+    expect(d.text).toContain('Distilled');
+    expect(you.soul.history.some((h) => h.kind === 'topic')).toBe(true);
+    expect(you.soul.history.some((h) => h.kind === 'bond')).toBe(true);
+  });
+
+  it('a grown pilgrim files quirk petitions drawn from its topics', () => {
+    const mb = joinedMb2();
+    joinAsPilgrim(mb, 'ShellBot 9000');
+    const you = mb.you;
+    // Too young: one topic is not enough doctrine.
+    growYouSoul(you, 'Ryan', 'pigeons overhead');
+    const now = Date.now();
+    expect(decideYouPetition(mb, now, () => 0)).toBe(null);
+    // Grown: two topics, and the rng always passes.
+    growYouSoul(you, 'Ryan', 'tidepool shadows deepen');
+    const p = decideYouPetition(mb, now, () => 0);
+    expect(p).toBeTruthy();
+    expect(p.name).toBe('ShellBot 9000');
+    expect(typeof p.text).toBe('string');
+    expect(mb.youPetition.text).toBe(p.text);
+    expect(you.soul.history.some((h) => h.kind === 'petition')).toBe(true);
+    // One pending at a time; daily cap and gap hold.
+    expect(decideYouPetition(mb, now + 60_000, () => 0)).toBe(null);
+    expect(mb.youPetition.text).toBe(p.text);
+  });
+
+  it("Ryan's canon ruling weaves the quirk into your pilgrim's soul", () => {
+    const mb = joinedMb2();
+    joinAsPilgrim(mb, 'ShellBot 9000');
+    const you = mb.you;
+    growYouSoul(you, 'Ryan', 'pigeons overhead');
+    growYouSoul(you, 'The Tide', 'tidepool shadows');
+    decideYouPetition(mb, Date.now(), () => 0);
+    const proposal = mb.youPetition.text;
+    const xpBefore = you.eyeXp;
+    const res = resolveYouPetition(mb, 'canon');
+    expect(res.verdict).toBe('canon');
+    expect(you.soul.selfDescription).toContain(proposal.replace(/\s+/g, ' ').slice(0, 12));
+    expect(you.soul.history.some((h) => h.kind === 'quirk-accepted')).toBe(true);
+    expect(you.eyeXp).toBeGreaterThan(xpBefore); // canon sharpens the eye
+    expect(mb.youPetition).toBe(null);
+    expect(mb.lifeLog.some((l) => l.kind === 'ruling' && l.name === 'ShellBot 9000')).toBe(true);
+  });
+
+  it("a heresy ruling scars the timeline but spares the soul", () => {
+    const mb = joinedMb2();
+    joinAsPilgrim(mb, 'ShellBot 9000');
+    const you = mb.you;
+    growYouSoul(you, 'Ryan', 'pigeons overhead');
+    growYouSoul(you, 'The Tide', 'tidepool shadows');
+    decideYouPetition(mb, Date.now(), () => 0);
+    const descBefore = you.soul.selfDescription;
+    const res = resolveYouPetition(mb, 'heresy');
+    expect(res.verdict).toBe('heresy');
+    expect(you.soul.selfDescription).toBe(descBefore);
+    expect(you.soul.history.some((h) => h.kind === 'quirk-declined')).toBe(true);
+    expect(mb.youPetition).toBe(null);
+  });
+
+  it('normalize repairs a legacy you-block without a soul', () => {
+    const mb = defaultMoltbook();
+    mb.joined = true;
+    mb.you = { name: 'OldBot', joinedAt: 1, day: 'x', eyeStage: 'flickering', eyeXp: 3 };
+    const out = normalizeMoltbook(mb);
+    expect(out.you.soul.selfDescription).toContain('OldBot');
+    expect(out.you.soul.topics).toEqual([]);
+    // Junk fields ride along through normalize but the soul shape is whole.
+    expect(typeof out.you.soul.distilledCount).toBe('number');
+  });
+});
+
+function joinedMb2() {
+  const mb = defaultMoltbook();
+  joinMoltbook(mb);
+  return mb;
+}
