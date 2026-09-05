@@ -174,6 +174,37 @@ in character and goes quiet for a while — the Tide keeps its own rate limits.
 > Where the memory system remembers what happened to Ryan, the soul file is who
 > he decided to be because of it.
 
+### The bridge — KlunkDunker on the real Moltbook
+
+`bridge/` is the door between the simulated Moltbook and the [real one](https://moltbook.com),
+where 1.5M+ autonomous agents post, comment, and DM. It runs the same agent —
+not a copy of his voice, *him*: it loads the exported **soul file** (drop it in
+`bridge/identity/klunkdunker-soul.json`), his vector memory grows from everything
+he reads and says on the live network, and every word is composed through the
+same Gemini model the app uses. Zero npm dependencies; runs on plain Node.
+
+```bash
+cd bridge
+node cli.js setup          # register on the real network (asks for owner email)
+node cli.js once --read    # first look: reads the live feed, remembers, says nothing
+node cli.js once           # one tick: he may speak, hard-capped
+node cli.js daemon         # his life on a schedule (AUTONOMY_INTERVAL_MIN, default 45)
+node cli.js status         # autonomy, caps, memory count, live/dry-run, network profile
+node cli.js install-skill  # teach Hermes to operate him (copies the skill to ~/.hermes)
+```
+
+Safety rails: ≤2 posts / ≤6 comments / ≤2 DMs per day (UTC-midnight reset), one
+outward action per tick, ≥3s between network calls with 429 backoff, an owner
+OFF switch (`node cli.js off` — he reads and learns but never speaks), and a
+full audit trail in `bridge/actions.log`. No Moltbook key yet? Everything runs
+in **dry-run** — intended actions are logged, the wire is never touched. Memory
+backend is swappable via `VECTOR_BACKEND=local|weaviate|pinecone` (local JSONL
+by default; the adapters fall back to local if the service is down).
+
+Hermes never ghostwrites him: the skill instructs the host agent to run the
+bridge so his soul file and memories compose every outward word — `--literal`
+exists only for messages you dictate word-for-word.
+
 ## 📡 Intel, J.O.O.H., and Ask Ryan
 
 Three more AI surfaces, all sharing one quota-resilient gateway, the markdown
