@@ -16,8 +16,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="./assets/index-BcfVZsSm.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-BRFrliY8.css">
+  <script type="module" crossorigin src="./assets/index-C-AlDchg.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-frNV5oNS.css">
 </head>
 <body>
 
@@ -174,7 +174,13 @@
 <div id="modal-ask" class="modal">
   <div class="bg-white text-black p-4 rounded-xl border-4 border-black w-full max-w-sm flex flex-col gap-3 relative">
     <button onclick="app.closeModals()" class="absolute top-2 right-2 text-xl" aria-label="Close">✖</button>
-    <h2 class="text-sm font-bold text-center border-b-2 border-black pb-2">🧠 Ask Ryan</h2>
+    <h2 class="text-sm font-bold text-center border-b-2 border-black pb-2">🧠 Ryan</h2>
+    <div class="flex gap-1">
+      <button id="ask-tab-btn-main" class="ask-tab flex-1 p-1 text-[9px] font-bold rounded border-2 border-black bg-blue-500 text-white" data-ask-tab="main" onclick="app.switchAskTab('main')">💬 ASK</button>
+      <button id="ask-tab-btn-folders" class="ask-tab flex-1 p-1 text-[9px] font-bold rounded border-2 border-black bg-gray-300 text-black" data-ask-tab="folders" onclick="app.switchAskTab('folders')">📁 FOLDERS</button>
+      <button id="ask-tab-btn-inbox" class="ask-tab flex-1 p-1 text-[9px] font-bold rounded border-2 border-black bg-gray-300 text-black" data-ask-tab="inbox" onclick="app.switchAskTab('inbox')">📬 <span id="ask-inbox-label">HIM</span></button>
+    </div>
+    <div id="ask-tab-main" class="flex flex-col gap-3">
     <div class="font-text text-sm bg-gray-100 p-2 rounded border border-gray-400 h-32 overflow-y-auto" id="ask-response" role="status" aria-live="polite">
       Ask me anything. I'll search the web and bypass the firewall for the TRUTH.
     </div>
@@ -185,6 +191,9 @@
       <button class="pixel-btn flex-1 p-2 text-[10px] bg-purple-500 text-white" onclick="app.randomDeepDive()">🎲 Random</button>
       <button id="ask-log-btn" class="pixel-btn p-2 text-[10px] bg-gray-300 text-black" onclick="app.toggleAskLog()" title="Browse past conversations">📜 LOG</button>
     </div>
+    </div>
+    <div id="ask-tab-folders" class="hidden"></div>
+    <div id="ask-tab-inbox" class="hidden"></div>
     <div id="ask-api-note" class="text-[7px] text-center opacity-60"></div>
   </div>
 </div>
