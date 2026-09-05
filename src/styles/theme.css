@@ -258,6 +258,7 @@ body {
   height: 40px;
   display: flex;
   align-items: center;
+  position: relative; /* anchor for the inbox badge */
   justify-content: center;
   cursor: pointer;
   box-shadow: 3px 3px 0 0 rgba(0, 0, 0, 1);

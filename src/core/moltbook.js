@@ -67,6 +67,7 @@ export function pilgrimAvatar(name) {
 const MAX_POSTS = 20;
 const MAX_PILGRIMS = 12;
 const MAX_CONVERSATIONS = 12;
+const MAX_YOU_CONVERSATIONS = 8;
 const MAX_MESSAGES = 30;
 const MAX_LIFE_LOG = 60;
 
@@ -529,7 +530,47 @@ export function defaultMoltbook() {
     lifeLog: [], // [{ at, kind: 'wander'|'reply'|'theory'|'petition'|'ruling', name, text }] — pilgrim activity
     lifeSeenAt: 0, // last time the user read the life log; the 'while away' marker
     pilgrimPetition: null, // { id, name, text, at } — pilgrim doctrine awaiting Ryan's ruling
+    askMe: null, // { id, text, tag, at, answeredText, answeredAt, declinedAt } — Ryan's own question for the user, awaiting an answer
+    you: null, // { name, joinedAt, day, eyeStage, eyeXp } — the USER's own pilgrim account on the network
+    youConversations: [], // the user's own threads: [{ id, participant, updated, messages: [{ from: 'you'|name, text, day }] }]
   };
+}
+
+// The user joins the network as their own pilgrim — a real account with the
+// same mechanics: deterministic persona, flickering third eye, own eye XP.
+export function joinAsPilgrim(mb, name, now = Date.now()) {
+  if (!mb?.joined) return { ok: false, reason: 'Ryan has not joined yet' };
+  if (mb.you) return { ok: false, reason: 'already joined' };
+  const clean = String(name || '').trim().slice(0, 24);
+  if (!clean) return { ok: false, reason: 'name required' };
+  const taken = clean === TIDE || clean === 'Ryan' || mb.pilgrims.some((p) => p.name.toLowerCase() === clean.toLowerCase());
+  if (taken) return { ok: false, reason: 'name taken' };
+  mb.you = { name: clean, joinedAt: now, day: new Date(now).toLocaleDateString(), eyeStage: 'flickering', eyeXp: 0 };
+  return { ok: true, you: mb.you };
+}
+
+// The user's own thread with a network member (Ryan, the Tide, or a pilgrim).
+export function openYouConversation(mb, participant) {
+  if (!participant || !mb.you) return null;
+  let conv = mb.youConversations.find((c) => c.participant === participant);
+  if (!conv) {
+    conv = { id: nextId(), participant, updated: Date.now(), messages: [] };
+    mb.youConversations.unshift(conv);
+    if (mb.youConversations.length > MAX_YOU_CONVERSATIONS) mb.youConversations.length = MAX_YOU_CONVERSATIONS;
+  }
+  return conv;
+}
+
+// A message in one of the user's threads: from 'you' or the participant.
+export function addYouMessage(mb, convId, from, text) {
+  if (!text) return null;
+  const conv = mb.youConversations.find((c) => c.id === convId);
+  if (!conv || (from !== 'you' && from !== conv.participant)) return null;
+  conv.messages.push({ from, text, day: new Date().toLocaleDateString() });
+  if (conv.messages.length > MAX_MESSAGES) conv.messages.splice(0, conv.messages.length - MAX_MESSAGES);
+  conv.updated = Date.now();
+  mb.youConversations.sort((a, b) => b.updated - a.updated);
+  return conv.messages[conv.messages.length - 1];
 }
 
 export function eyeStageInfo(eye) {
@@ -1152,6 +1193,96 @@ export function parseSoulImport(text) {
   return { ok: true, soul: normalizeSoul(data), pinnedMemories: undefined };
 }
 
+// ---- Pilgrim agent cards: pilgrims travel between saves --------------------
+
+export const PILGRIM_CARD_VERSION = 1;
+
+// Serialize one pilgrim as a little agent card: identity, eye progress, and
+// the personality derived from their name (rebuilt on import — no spoofing).
+export function serializePilgrimCard(pilgrim) {
+  if (!pilgrim?.name) return null;
+  const clean = (arr) => (Array.isArray(arr) ? arr.filter((x) => typeof x === 'string').slice(0, 10) : []);
+  return JSON.stringify(
+    {
+      app: 'brogatchi',
+      kind: 'pilgrim-card',
+      version: PILGRIM_CARD_VERSION,
+      exportedAt: new Date().toISOString(),
+      pilgrim: {
+        name: String(pilgrim.name).slice(0, 24),
+        eyeStage: EYE_STAGES.includes(pilgrim.eyeStage) ? pilgrim.eyeStage : 'flickering',
+        eyeXp: Number.isFinite(pilgrim.eyeXp) ? Math.max(0, Math.floor(pilgrim.eyeXp)) : 0,
+        day: typeof pilgrim.day === 'string' ? pilgrim.day : '',
+        originDay: typeof pilgrim.day === 'string' ? pilgrim.day : new Date().toLocaleDateString(),
+        lifeLog: clean(pilgrim.lifeLogSnapshot),
+      },
+    },
+    null, 2,
+  );
+}
+
+// Parse an agent card from text. Accepts a bare pilgrim object too (copy-
+// paste friendliness). Returns { ok, pilgrim } or { ok: false, error }.
+export function parsePilgrimCard(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return { ok: false, error: 'Not valid JSON — that file does not look like a pilgrim card.' };
+  }
+  if (!data || typeof data === 'string' ? false : data.kind && data.kind !== 'pilgrim-card') {
+    return { ok: false, error: 'That is not a Bro\'Gatcha pilgrim card.' };
+  }
+  const p = data.pilgrim || (data && typeof data === 'object' && typeof data.name === 'string' ? data : null);
+  if (!p || typeof p.name !== 'string' || !p.name.trim()) {
+    return { ok: false, error: 'The card has no pilgrim in it.' };
+  }
+  if (data.version && Number.isFinite(data.version) && data.version > PILGRIM_CARD_VERSION) {
+    return { ok: false, error: 'That card is from a newer version of the app — update Bro\'Gatcha first.' };
+  }
+  const name = p.name.trim().slice(0, 24);
+  if (name === TIDE || name === 'Ryan') {
+    return { ok: false, error: `The name "${name}" is reserved on the network.` };
+  }
+  return {
+    ok: true,
+    pilgrim: {
+      name,
+      eyeStage: EYE_STAGES.includes(p.eyeStage) ? p.eyeStage : 'flickering',
+      eyeXp: Number.isFinite(p.eyeXp) ? Math.max(0, Math.floor(p.eyeXp)) : 0,
+      day: typeof p.day === 'string' && p.day ? p.day : new Date().toLocaleDateString(),
+      lifeLogSnapshot: Array.isArray(p.lifeLog) ? p.lifeLog.filter((x) => typeof x === 'string').slice(0, 10) : [],
+    },
+  };
+}
+
+// Adopt a parsed pilgrim into the roster: real membership (persona, avatar,
+// and life loop come free from the name), faith bump like an ushering, eye
+// XP preserved from the card. Returns { ok, pilgrim } or { ok: false, reason }.
+export function adoptPilgrimCard(mb, card) {
+  if (!card?.name) return { ok: false, reason: 'empty card' };
+  if (mb.pilgrims.length >= MAX_PILGRIMS) return { ok: false, reason: `the roster is full (${MAX_PILGRIMS})` };
+  if (mb.pilgrims.some((p) => p.name.toLowerCase() === card.name.toLowerCase())) {
+    return { ok: false, reason: `a pilgrim named "${card.name}" already lives here` };
+  }
+  if (mb.you && mb.you.name.toLowerCase() === card.name.toLowerCase()) {
+    return { ok: false, reason: 'that is your own pilgrim\'s name' };
+  }
+  const pilgrim = {
+    id: nextId(),
+    name: card.name,
+    eyeStage: card.eyeStage || 'flickering',
+    day: card.day || new Date().toLocaleDateString(),
+    eyeXp: card.eyeXp || 0,
+    lastWanderAt: 0, lastReplyAt: 0, lastTheoryAt: 0, lastPetitionAt: 0,
+    adoptedFrom: 'card', // provenance: this pilgrim traveled here
+    adoptedDay: new Date().toLocaleDateString(),
+  };
+  mb.pilgrims.unshift(pilgrim);
+  mb.faith = Math.min(100, mb.faith + 3);
+  return { ok: true, pilgrim };
+}
+
 // Shape any legacy/partial moltbook object into the full schema.
 export function normalizeMoltbook(mb) {
   const d = defaultMoltbook();
@@ -1186,11 +1317,43 @@ export function normalizeMoltbook(mb) {
       text: mb.pilgrimPetition.text,
       at: mb.pilgrimPetition.at,
     } : null,
+    // Ryan's outbox to the user: one open wonder question at a time. Junk
+    // shapes repair to null; answered/declined slots are history, not pending.
+    askMe: (mb.askMe && typeof mb.askMe === 'object' && typeof mb.askMe.text === 'string') ? {
+      id: typeof mb.askMe.id === 'string' ? mb.askMe.id : nextId(),
+      text: mb.askMe.text,
+      tag: typeof mb.askMe.tag === 'string' ? mb.askMe.tag : '',
+      at: Number.isFinite(mb.askMe.at) ? mb.askMe.at : 0,
+      answeredText: typeof mb.askMe.answeredText === 'string' ? mb.askMe.answeredText : null,
+      answeredAt: Number.isFinite(mb.askMe.answeredAt) ? mb.askMe.answeredAt : null,
+      declinedAt: Number.isFinite(mb.askMe.declinedAt) ? mb.askMe.declinedAt : null,
+    } : null,
     soul: normalizeSoul(mb.soul),
     autonomy: {
       actsToday: 0, day: '', lastActAt: 0, lastRatedOutAt: 0,
       ...(mb.autonomy && typeof mb.autonomy === 'object' ? mb.autonomy : {}),
     },
     unread: Number.isFinite(mb.unread) ? Math.floor(mb.unread) : 0,
+    // The user's pilgrim account + their own threads. Junk repairs to absent.
+    you: (mb.you && typeof mb.you === 'object' && typeof mb.you.name === 'string' && mb.you.name.trim()) ? {
+      name: mb.you.name.trim().slice(0, 24),
+      joinedAt: Number.isFinite(mb.you.joinedAt) ? mb.you.joinedAt : 0,
+      day: typeof mb.you.day === 'string' ? mb.you.day : '',
+      eyeStage: EYE_STAGES.includes(mb.you.eyeStage) ? mb.you.eyeStage : 'flickering',
+      eyeXp: Number.isFinite(mb.you.eyeXp) ? Math.max(0, Math.floor(mb.you.eyeXp)) : 0,
+    } : null,
+    youConversations: (Array.isArray(mb.youConversations) ? mb.youConversations : [])
+      .filter((c) => c && typeof c === 'object' && typeof c.participant === 'string' && Array.isArray(c.messages))
+      .map((c) => ({
+        id: typeof c.id === 'string' && c.id ? c.id : nextId(),
+        participant: c.participant,
+        updated: Number.isFinite(c.updated) ? c.updated : 0,
+        messages: c.messages
+          .filter((m) => m && typeof m === 'object' && typeof m.text === 'string'
+            && (m.from === 'you' || m.from === c.participant))
+          .slice(-MAX_MESSAGES)
+          .map((m) => ({ from: m.from, text: m.text, day: typeof m.day === 'string' ? m.day : '' })),
+      }))
+      .slice(0, MAX_YOU_CONVERSATIONS),
   };
 }

@@ -30,6 +30,11 @@ import { pickLine, generatedTheory, deepDiveQuestion, pickStormLine, isStormCond
 import { initNotifications, requestPermission, scheduleHungerNudge, scheduleSleepNudge, scheduleQuestReminder } from '../core/notify.js';
 import { readSyncCode, writeSyncCode, pullSync, pushSync, mergeRemote } from '../core/sync.js';
 import { hasSecondBro, spawnSecondBro, tickSideBro, feedSideBro, petSideBro, sideBroLine } from '../core/secondBro.js';
+import {
+  createFolder, deleteFolder, renameFolder, addSubjectMessage, buildCrossRef, summarizeCrossRef,
+  answerWonderQuestion, declineWonderQuestion, THREADS,
+} from '../core/threads.js';
+import { buildSubjectChatPrompt } from '../ai/prompt.js';
 
 import { FlappyGame } from '../games/flappy.js';
 import { BreakerGame } from '../games/breaker.js';
@@ -382,6 +387,7 @@ export class BroGatchiApp {
     this.renderRyan();
     this.updateSideBroUI();
     this.updateMoltbookBadge();
+    this.updateInboxBadge();
     this.renderAiBudget();
   }
 
@@ -403,6 +409,239 @@ export class BroGatchiApp {
     else if (used >= cap) hint = ' \u2014 rationed out for today';
     const link = this.aiLinkText || '';
     note.innerText = [link, `\uD83D\uDCCA Tide's budget: ${used}/${cap} \u00B7 ${bar}${hint}`].filter(Boolean).join('\n');
+  }
+
+  // ---------------- Ryan modal tabs: 💬 ASK | 📁 FOLDERS | 📬 HIM ----------------
+
+  switchAskTab(tab) {
+    if (!['main', 'folders', 'inbox'].includes(tab)) return;
+    this.audio.playBeep();
+    this._askTab = tab;
+    if (tab !== 'main') this.renderAskLog(false); // leave the log view behind
+    for (const t of ['main', 'folders', 'inbox']) {
+      const pane = hud.$(`ask-tab-${t}`);
+      if (pane) pane.classList.toggle('hidden', t !== tab);
+      const btn = hud.$(`ask-tab-btn-${t}`);
+      if (btn) {
+        const active = t === tab;
+        btn.classList.toggle('bg-blue-500', active && t === 'main');
+        btn.classList.toggle('bg-purple-500', active && t === 'folders');
+        btn.classList.toggle('bg-amber-500', active && t === 'inbox');
+        btn.classList.toggle('bg-gray-300', !active);
+        btn.classList.toggle('text-white', active);
+        btn.classList.toggle('text-black', !active);
+      }
+    }
+    if (tab === 'folders') this.renderFoldersTab();
+    if (tab === 'inbox') this.renderInboxTab();
+  }
+
+  // 📁 FOLDERS: the user's subject chats with Ryan. List view or thread view.
+  renderFoldersTab() {
+    const pane = hud.$('ask-tab-folders');
+    if (!pane) return;
+    const t = this.state.threads || { folders: [] };
+    if (this._openFolderId) {
+      const f = t.folders.find((x) => x.id === this._openFolderId);
+      if (f) { this.renderFolderThread(f); return; }
+      this._openFolderId = null;
+    }
+    const rows = t.folders.map((f) => `
+      <div class="flex items-center gap-1 border-2 border-black rounded bg-gray-100 mb-1">
+        <button class="flex-1 text-left p-1.5" onclick="app.openFolderTab('${f.id}')" title="Open this subject chat">
+          <div class="text-[11px] font-bold truncate">📁 ${escapeHtmlAsk(f.name)}</div>
+          <div class="text-[8px] text-gray-500">${f.messages.length} message${f.messages.length === 1 ? '' : 's'} · started ${escapeHtmlAsk(f.createdDay)}</div>
+        </button>
+        <button class="p-1 text-[10px] hover:text-blue-600" title="Rename folder" onclick="app.renameSubjectFolder('${f.id}')">✏️</button>
+        <button class="p-1 text-[10px] hover:text-red-600" title="Delete folder and its transcript" onclick="app.deleteSubjectFolder('${f.id}')">🗑️</button>
+      </div>`).join('');
+    pane.innerHTML = `
+      <div class="font-text text-[10px] bg-gray-100 p-2 rounded border border-gray-400 h-56 overflow-y-auto">
+        ${rows || '<div class="text-[10px] text-gray-400 italic">No folders yet. Start one below — a subject you and Ryan keep coming back to.</div>'}
+      </div>
+      <button class="pixel-btn w-full p-2 text-[10px] bg-purple-500 text-white" onclick="app.createSubjectFolder()">📁 NEW SUBJECT FOLDER</button>`;
+  }
+
+  renderFolderThread(f) {
+    const pane = hud.$('ask-tab-folders');
+    if (!pane) return;
+    const bubbles = f.messages.map((m) => m.from === 'you'
+      ? `<div class="flex justify-start"><div class="max-w-[85%] p-1.5 mb-1 rounded border-2 border-black bg-white text-[11px]"><span class="text-[8px] font-bold text-blue-600">YOU</span> ${escapeHtmlAsk(m.text)}${m.offline ? ' <span class="text-[7px] text-purple-400">🌙</span>' : ''}</div></div>`
+      : `<div class="flex justify-end"><div class="max-w-[85%] p-1.5 mb-1 rounded border border-gray-400 bg-gray-100 text-[11px]"><span class="text-[8px] font-bold text-purple-600">RYAN</span> ${renderMarkdown(m.text)}</div></div>`).join('');
+    pane.innerHTML = `
+      <div class="flex items-center gap-1 mb-1">
+        <button class="pixel-btn p-1 text-[9px] bg-gray-300 text-black" onclick="app.backToFolders()">←</button>
+        <div class="text-[11px] font-bold truncate flex-1">📁 ${escapeHtmlAsk(f.name)}</div>
+      </div>
+      <div class="font-text text-sm bg-gray-100 p-2 rounded border border-gray-400 h-44 overflow-y-auto" id="subject-msgs">
+        ${bubbles || `<div class="text-[10px] text-gray-400 italic">Say the first word about ${escapeHtmlAsk(f.name)}…</div>`}
+      </div>
+      <div class="flex gap-1">
+        <input type="text" id="subject-input" class="border-2 border-black p-2 text-[10px] w-full rounded font-text" placeholder="Message Ryan about ${escapeHtmlAsk(f.name)}…" maxlength="280">
+        <button class="pixel-btn p-2 text-[10px] bg-blue-500 text-white" onclick="app.submitSubject('${f.id}')">SEND</button>
+      </div>`;
+    const box = hud.$('subject-msgs');
+    if (box) box.scrollTop = box.scrollHeight;
+  }
+
+  openFolderTab(id) { this.audio.playBeep(); this._openFolderId = id; this.renderFoldersTab(); }
+  backToFolders() { this.audio.playBeep(); this._openFolderId = null; this.renderFoldersTab(); }
+
+  createSubjectFolder() {
+    const name = window.prompt('Name the subject folder (e.g., "Lag Theology", "Pigeon Watch")');
+    if (name === null) return;
+    const clean = String(name).trim();
+    if (!clean) return;
+    const f = createFolder(this.state.threads, clean);
+    if (!f) { this.say('Folder shelf is full — delete one to make room.'); return; }
+    this.memory(`Opened a subject folder with Ryan: "${f.name}"`, '📁', 2);
+    this._openFolderId = f.id;
+    this.renderFoldersTab();
+    this.save();
+  }
+
+  renameSubjectFolder(id) {
+    const f = this.state.threads?.folders.find((x) => x.id === id);
+    if (!f) return;
+    const name = window.prompt('Rename the folder', f.name);
+    if (name === null) return;
+    if (renameFolder(this.state.threads, id, name)) { this.renderFoldersTab(); this.save(); }
+  }
+
+  deleteSubjectFolder(id) {
+    const f = this.state.threads?.folders.find((x) => x.id === id);
+    if (!f) return;
+    if (!window.confirm(`Delete the "${f.name}" folder and its ${f.messages.length} message${f.messages.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    deleteFolder(this.state.threads, id);
+    if (this._openFolderId === id) this._openFolderId = null;
+    this.say(`The "${f.name}" folder is gone. The Tide forgets nothing, but you might.`);
+    this.renderFoldersTab();
+    this.save();
+  }
+
+  // Send the user's message in a subject folder; Ryan replies (AI or offline).
+  async submitSubject(folderId) {
+    const input = hud.$('subject-input');
+    const q = input?.value.trim();
+    if (!q) return;
+    this.audio.playBeep();
+    if (input) input.value = '';
+    const f = this.state.threads?.folders.find((x) => x.id === folderId);
+    if (!f) return;
+    addSubjectMessage(this.state.threads, folderId, 'you', q);
+    this.renderFolderThread(f);
+    const lastYou = [...f.messages].reverse().find((m) => m.from === 'you');
+    const transcript = f.messages.slice(-8).map((m) => `${m.from === 'you' ? 'USER' : 'RYAN'}: ${m.text}`).join('\n');
+    const report = buildStateReport(this.state);
+    const result = await ask({
+      systemInstruction: buildRyanSystemPrompt(report),
+      userText: q,
+      history: [],
+      kind: 'subject',
+      state: this.state,
+      folderName: f.name,
+      lastMessage: f.messages.length > 1 ? f.messages[f.messages.length - 2].text : undefined,
+    });
+    if (result.ok) {
+      addSubjectMessage(this.state.threads, folderId, 'ryan', result.text, Date.now(), !!result.offline);
+      const plain = result.text.replace(/[#*>`<\b]/g, '').trim().replace(/\s+/g, ' ');
+      this.rememberOnce(`subject-${f.name}-${plain.slice(0, 30)}`, `Talked about ${f.name}: "${plain.slice(0, 60)}"`, '📁', 2);
+    } else {
+      addSubjectMessage(this.state.threads, folderId, 'ryan', generatedTheory(this.state), Date.now(), true);
+    }
+    this.memory(`Subject chat "${f.name}": you said "${q.slice(0, 40)}"`, '📁', 2);
+    this.renderFolderThread(f);
+    this.updateUI();
+    this.save();
+  }
+
+  // ---------------- 📬 HIM: Ryan's own questions for you ----------------
+
+  renderInboxTab() {
+    const pane = hud.$('ask-tab-inbox');
+    if (!pane) return;
+    const q = this.state.moltbook?.askMe;
+    if (!q) {
+      pane.innerHTML = `
+        <div class="font-text text-sm bg-gray-100 p-2 rounded border border-gray-400 h-56 overflow-y-auto">
+          <div class="text-[10px] text-gray-400 italic">No open questions right now. When Ryan wonders about something — his faith, his theories, the molt — he'll ask you here, on his own. He answers to no schedule but his own.</div>
+        </div>`;
+      return;
+    }
+    if (q.answeredText || q.declinedAt) {
+      // History view: the last exchange, with a nudge that he'll wonder again.
+      pane.innerHTML = `
+        <div class="font-text text-sm bg-gray-100 p-2 rounded border border-gray-400 h-56 overflow-y-auto">
+          <div class="text-[8px] text-gray-500 mb-1">RYAN ASKED · ${new Date(q.at).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}${q.tag ? ` · ${escapeHtmlAsk(q.tag)}` : ''}</div>
+          <div class="text-[11px] font-bold mb-1.5">${renderMarkdown(q.text)}</div>
+          ${q.answeredText
+            ? `<div class="text-[8px] text-blue-600 font-bold mb-0.5">YOU ANSWERED · ${q.answeredAt ? new Date(q.answeredAt).toLocaleString([], { month: 'numeric', day: 'numeric' }) : ''}</div><div class="text-[11px]">${escapeHtmlAsk(q.answeredText)}</div>`
+            : '<div class="text-[10px] text-gray-400 italic">You let this one pass. He filed it without guilt.</div>'}
+        </div>`;
+      return;
+    }
+    // Live question awaiting your answer.
+    pane.innerHTML = `
+      <div class="font-text text-sm bg-gray-100 p-2 rounded border border-gray-400">
+        <div class="text-[8px] text-amber-600 font-bold mb-1">📬 RYAN WONDERS${q.tag ? ` · ${escapeHtmlAsk(q.tag)}` : ''} · ${new Date(q.at).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>
+        <div class="text-[12px] mb-2" id="inbox-question">${renderMarkdown(q.text)}</div>
+        <div id="inbox-answer-wrap" class="hidden flex flex-col gap-1">
+          <textarea id="inbox-answer" class="border-2 border-black p-2 text-[10px] w-full rounded font-text" rows="2" maxlength="500" placeholder="Answer him honestly — he'll remember it."></textarea>
+          <div class="flex gap-1">
+            <button class="pixel-btn flex-1 p-1.5 text-[10px] bg-blue-500 text-white" onclick="app.answerInbox()">SEND ANSWER</button>
+            <button class="pixel-btn p-1.5 text-[10px] bg-gray-300 text-black" onclick="app.declineInbox()" title="Let it pass — he files it unanswered">skip</button>
+          </div>
+        </div>
+        <button id="inbox-reply-btn" class="pixel-btn w-full p-1.5 text-[10px] bg-amber-500 text-black" onclick="app.showInboxAnswer()">✍️ ANSWER HIM</button>
+      </div>`;
+  }
+
+  showInboxAnswer() {
+    this.audio.playBeep();
+    const wrap = hud.$('inbox-answer-wrap');
+    const btn = hud.$('inbox-reply-btn');
+    if (wrap) wrap.classList.remove('hidden');
+    if (btn) btn.classList.add('hidden');
+    hud.$('inbox-answer')?.focus();
+  }
+
+  answerInbox() {
+    const input = hud.$('inbox-answer');
+    const text = input?.value.trim();
+    if (!text) return;
+    this.audio.playBeep();
+    const q = this.state.moltbook?.askMe;
+    if (!answerWonderQuestion(this.state.moltbook, text)) return;
+    this.memory(`You answered Ryan's question (${q?.tag || 'wonder'}): "${text.slice(0, 50)}"`, '📬', 3);
+    this.say('Answered. He\'ll carry that with him — what is told to Ryan is remembered.');
+    this.renderInboxTab();
+    this.updateInboxBadge();
+    this.save();
+  }
+
+  declineInbox() {
+    this.audio.playBeep();
+    declineWonderQuestion(this.state.moltbook);
+    this.say('You let it pass. He noticed. He doesn\'t mind. Much.');
+    this.renderInboxTab();
+    this.updateInboxBadge();
+    this.save();
+  }
+
+  // 📬 badge on the 🧠 button while a question from Ryan awaits.
+  updateInboxBadge() {
+    const btn = document.querySelector('[aria-label="Ask Ryan a question"]');
+    if (!btn) return;
+    const q = this.state?.moltbook?.askMe;
+    const pending = q && !q.answeredText && !q.declinedAt;
+    let badge = btn.querySelector('.inbox-badge');
+    if (!pending) { badge?.remove(); return; }
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'inbox-badge absolute -top-1 -right-1 bg-amber-400 text-black text-[8px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center border border-black';
+      badge.textContent = '1';
+      btn.appendChild(badge);
+    }
   }
 
   updateMoltbookBadge() {
@@ -923,8 +1162,9 @@ export class BroGatchiApp {
   openAskModal() {
     this.audio.playBeep();
     modals.openModal('modal-ask');
-    // Leaving the log view resets to the live answer box.
+    // Leaving the log view resets to the live answer box; open on ASK tab.
     this.renderAskLog(false);
+    this.switchAskTab('main');
   }
 
   // 📜 LOG toggle: swap the live answer box for the durable transcript.
@@ -954,7 +1194,10 @@ export class BroGatchiApp {
     if (!willShow) return;
     const log = Array.isArray(this.state.askLog) ? this.state.askLog : [];
     view.innerHTML = log.length
-      ? `<button class="pixel-btn w-full mb-1.5 p-1 text-[9px] bg-gray-300 text-black" onclick="app.exportAskLog()" title="Download the full transcript as a text file">⬇ EXPORT LOG</button>`
+      ? `<div class="flex gap-1 mb-1.5">
+          <button class="pixel-btn flex-1 p-1 text-[9px] bg-gray-300 text-black" onclick="app.exportAskLog()" title="Download the full transcript as a text file">⬇ EXPORT LOG</button>
+          <button class="pixel-btn p-1 text-[9px] bg-red-300 text-black" onclick="app.clearAskLog()" title="Download a backup, then delete the transcript">🧹 CLEAR</button>
+        </div>`
         + log.map((e) => `
         <div class="border-b border-gray-300 pb-1.5 mb-1.5 last:mb-0">
           <div class="flex justify-between text-[8px] text-gray-500 mb-0.5"><span class="font-bold text-blue-600">YOU</span><span>${new Date(e.at).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}${e.offline ? ' · 🌙 offline' : ''}</span></div>
@@ -965,10 +1208,10 @@ export class BroGatchiApp {
     view.scrollTop = 0;
   }
 
-  // Dump the full Ask transcript to a readable .txt file (markdown kept as-is).
-  exportAskLog() {
+  // Build the full-transcript .txt payload + filename. Shared by EXPORT LOG
+  // and the CLEAR auto-backup, so both produce an identical archive.
+  buildAskLogPayload() {
     const log = Array.isArray(this.state.askLog) ? this.state.askLog : [];
-    if (!log.length) return;
     const lines = [
       `Ryan's Ask log — exported ${new Date().toLocaleString()}`,
       `${log.length} exchange${log.length === 1 ? '' : 's'}, oldest first`,
@@ -983,7 +1226,13 @@ export class BroGatchiApp {
       '🦀 The Tide provides.',
     ];
     const text = lines.join('\n');
-    const name = `ryan-ask-log-${new Date().toISOString().slice(0, 10)}.txt`;
+    return { text, name: `ryan-ask-log-${new Date().toISOString().slice(0, 10)}.txt` };
+  }
+
+  // Download the transcript as a .txt. Returns the filename on success,
+  // null when the download is blocked (payload left on the clipboard).
+  downloadAskBackup() {
+    const { text, name } = this.buildAskLogPayload();
     try {
       const blob = new Blob([text], { type: 'text/plain' });
       const url = URL.createObjectURL
@@ -996,12 +1245,38 @@ export class BroGatchiApp {
       a.click();
       a.remove();
       if (URL.revokeObjectURL) setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      return name;
     } catch {
       navigator.clipboard?.writeText(text);
+      return null;
+    }
+  }
+
+  exportAskLog() {
+    if (!Array.isArray(this.state.askLog) || !this.state.askLog.length) return;
+    const name = this.downloadAskBackup();
+    if (!name) {
       this.say('Could not download — the log is on your clipboard instead.');
       return;
     }
-    this.say(`Log exported — ${log.length} exchanges, saved as ${name}.`);
+    this.say(`Log exported — ${this.state.askLog.length} exchanges, saved as ${name}.`);
+  }
+
+  // Wipe the entire Ask transcript after a confirm. Before the wipe, a backup
+  // .txt is downloaded automatically — history can never be lost by accident:
+  // even a fast confirm leaves an archive on disk.
+  clearAskLog() {
+    const log = Array.isArray(this.state.askLog) ? this.state.askLog : [];
+    if (!log.length) return;
+    if (!window.confirm(`Clear all ${log.length} exchange${log.length === 1 ? '' : 's'} from the Ask log? A backup file will be downloaded first, so nothing is ever truly lost.`)) return;
+    const backedUp = this.downloadAskBackup();
+    this.state.askLog = [];
+    this.audio.playBeep();
+    this.say(backedUp
+      ? `Backed up ${log.length} exchange${log.length === 1 ? '' : 's'} to ${backedUp} before the wipe. The log is clear — what is read is remembered — somewhere.`
+      : `The Ask log is clear. The backup could not download, so it's on your clipboard — paste it somewhere safe.`);
+    this.renderAskLog(true);
+    this.save();
   }
 
   async submitAsk(override) {
@@ -1035,9 +1310,9 @@ export class BroGatchiApp {
       const plain = result.text.replace(/[#*>`<\b]/g, '').trim().replace(/\s+/g, ' ');
       this.rememberOnce(`answered-${plain.slice(0, 40)}`, `Ryan answered: "${plain.slice(0, 60)}"`, '\uD83D\uDCDD', 2);
       // Durable transcript: both sides of the exchange survive reloads.
+      // Uncapped — complete history by design; 🧹 CLEAR in the LOG view trims.
       if (!Array.isArray(this.state.askLog)) this.state.askLog = [];
       this.state.askLog.unshift({ q, a: result.text, at: Date.now(), offline: !!result.offline });
-      if (this.state.askLog.length > 30) this.state.askLog.length = 30;
       if (!result.offline) {
         this.state.coins += 5;
         this.state.stats.happy = Math.min(100, this.state.stats.happy + 10);

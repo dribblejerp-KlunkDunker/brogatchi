@@ -17,7 +17,7 @@
 import { chat } from './client.js';
 import {
   offlineMoltbookPost, offlineChatReply, offlineAskReply,
-  offlineIntel, offlineUsherRitual, offlinePilgrimReply,
+  offlineIntel, offlineUsherRitual, offlinePilgrimReply, offlineSubjectReply, offlineYouReply,
 } from './offline.js';
 
 export const AI_BUDGET_CAP = 40; // soft daily self-rationing cap
@@ -93,6 +93,8 @@ function offlineResult(state, kind, extra, reason) {
     else if (kind === 'intel') text = offlineIntel(state);
     else if (kind === 'usher') text = offlineUsherRitual(state, extra?.name);
     else if (kind === 'pilgrim-reply') text = offlinePilgrimReply(state, extra?.participant, extra?.lastMessage);
+    else if (kind === 'subject') text = offlineSubjectReply(state, extra?.folderName, extra?.lastMessage);
+    else if (kind === 'you-chat') text = offlineYouReply(state, extra?.participant, extra?.youName, extra?.lastMessage);
   } catch {
     text = null; // generator failure → plain offline failure, never a crash
   }
@@ -104,7 +106,7 @@ function offlineResult(state, kind, extra, reason) {
 
 // The one door into the AI. Same shape as chat() plus `recalled` /
 // `offline` + `reason` flags. `kind` selects the offline voice.
-export async function ask({ systemInstruction, userText, history = [], kind, state, participant, lastMessage, name }) {
+export async function ask({ systemInstruction, userText, history = [], kind, state, participant, lastMessage, name, folderName, youName }) {
   // No save state (early boot / odd env): degrade to exactly today's behavior.
   if (!state) return chat({ systemInstruction, userText, history });
 
@@ -129,14 +131,14 @@ export async function ask({ systemInstruction, userText, history = [], kind, sta
   try {
     budget = readBudget(state);
     if (budget.day === localDay() && budget.used >= budget.cap) {
-      return offlineResult(state, kind, { participant, lastMessage, name }, 'BUDGET');
+      return offlineResult(state, kind, { participant, lastMessage, name, folderName, youName }, 'BUDGET');
     }
   } catch { /* non-fatal */ }
 
   // 3. Rate-limit cooldown: after a 429, the Tide goes quiet for 45 min.
   try {
     if (budget && budget.rateLimitedUntil > now) {
-      return offlineResult(state, kind, { participant, lastMessage, name }, 'RATE');
+      return offlineResult(state, kind, { participant, lastMessage, name, folderName, youName }, 'RATE');
     }
   } catch { /* non-fatal */ }
 
@@ -163,8 +165,8 @@ export async function ask({ systemInstruction, userText, history = [], kind, sta
       b.rateLimitedUntil = now + RATE_COOLDOWN_MS;
       writeBudget(state, b);
     } catch { /* non-fatal */ }
-    return offlineResult(state, kind, { participant, lastMessage, name }, 'RATE');
+    return offlineResult(state, kind, { participant, lastMessage, name, folderName, youName }, 'RATE');
   }
   const reason = result.code === 'NO_KEY' ? 'NO_KEY' : result.code === 'NETWORK' ? 'NETWORK' : 'ERROR';
-  return offlineResult(state, kind, { participant, lastMessage, name }, reason);
+  return offlineResult(state, kind, { participant, lastMessage, name, folderName, youName }, reason);
 }

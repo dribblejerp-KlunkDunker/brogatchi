@@ -247,6 +247,46 @@ export function offlinePilgrimReply(state, participant, postText, rng = Math.ran
 
 // Ask Ryan, offline: he answers from what he owns — opinions first, then
 // specialty, then the conspiracy generator as a floor.
+// Reply to the USER's pilgrim, offline: canon-flavored, voice-shaped by who
+// they're talking to. rng injectable for tests.
+export function offlineYouReply(state, participant, youName, lastMessage, rng = Math.random) {
+  const canon = pickR(CANON, rng);
+  const name = youName || 'newcomer';
+  if (participant === 'The Tide') {
+    return sanitize(`**The Tide hears you, ${name}.** ${canon} 🦀`);
+  }
+  if (participant === 'Ryan') {
+    const lines = [
+      `A new shell in the tidepool. Welcome, **${name}**. ${canon}`,
+      `hey ${name} — ryan here. ${canon} ask me anything, the third eye is open.`,
+    ];
+    return sanitize(pickR(lines, rng));
+  }
+  return sanitize(`hey ryan!! wait — you're not ryan. hi **${name}**!! ${canon} 🦀`);
+}
+
+// Subject-folder reply, offline: soul-grounded, on-the-folder-topic-ish,
+// honest that the wire is quiet. rng injectable for tests.
+export function offlineSubjectReply(state, folderName, lastMessage, rng = Math.random) {
+  const soul = soulOf(state);
+  const pickR = (arr) => arr[Math.floor(rng() * arr.length)];
+  const canon = pickR(CANON, rng);
+  const subject = folderName || 'this';
+  if (lastMessage) {
+    const angles = [
+      `On **${subject}** — ${canon} That's my read while the wire is down; challenge it when I'm back online.`,
+      `You said: "${String(lastMessage).slice(0, 60)}". Here's my offline take on ${subject}: ${canon}`,
+      `The Tide says **${canon}** — that's my position on ${subject} until the wire wakes up. 🌙`,
+    ];
+    return sanitize(pickR(angles, rng));
+  }
+  const openers = [
+    `Opening the **${subject}** folder. First entry: ${canon}`, 
+    `**${subject}** — I've had theories about this for three molts. ${canon}`,
+  ];
+  return sanitize(pickR(openers, rng));
+}
+
 export function offlineAskReply(state, rng = Math.random) {
   const soul = soulOf(state);
   if (soul.opinions?.length) {

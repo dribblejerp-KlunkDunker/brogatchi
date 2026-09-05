@@ -10,6 +10,8 @@ import {
   recordLifeEvent, summarizeLifeLog, markLifeSeen,
 } from '../src/core/moltbook.js';
 import { defaultState } from '../src/core/save.js';
+import * as molt from '../src/core/moltbook.js';
+import { buildCrossRef } from '../src/core/threads.js';
 
 // The gateway's `ask` is mocked so the UI tick is deterministic (no network).
 vi.mock('../src/ai/gateway.js', () => ({ ask: vi.fn() }));
@@ -415,5 +417,168 @@ describe('pilgrim life log', () => {
     expect(feed).toContain("PILGRIM PETITION");
     expect(feed).toContain("define worthy");
     expect(feed).toContain("Ryan's ruling");
+  });
+
+  it('the Ask Ryan thread appears in CONVERSATIONS and renders the durable log as bubbles', async () => {
+    document.body.innerHTML = '<div id="moltbook-feed"></div>';
+    const state = defaultState();
+    state.moltbook = joinedMb();
+    state.askLog = [
+      { q: 'why do pigeons stare?', a: '**They are moderators.** R-r-reloading…', at: 2_000, offline: false },
+      { q: 'are you okay?', a: 'the tide provides 🦀', at: 1_000, offline: true },
+    ];
+    const ui = await import('../src/ui/moltbook.js');
+    document.getElementById('moltbook-feed').dataset.moltbookBound = ''; // fresh binding
+    ui.bindFeedEvents({ state, save: () => {}, openAskModal: () => {} });
+    ui.switchTab({ state, save: () => {} }, 'feed');
+    const feed = document.getElementById('moltbook-feed');
+
+    // The thread card lists in CONVERSATIONS with the newest exchange as preview.
+    expect(feed.textContent).toContain('🧠 Ask Ryan');
+    expect(feed.textContent).toContain('2 exchanges');
+    expect(feed.textContent).toContain('why do pigeons stare?');
+
+    // Opening it renders the durable log chronologically with markdown + offline flag.
+    feed.querySelector('[data-ask-thread]').click();
+    const html = feed.innerHTML;
+    expect(feed.textContent).toContain('are you okay?'); // oldest first
+    expect(feed.textContent).toContain('why do pigeons stare?');
+    expect(html).toContain('<strong>They are moderators.</strong>'); // markdown rendered
+    expect(html).toContain('offline answer');
+    expect(html).toContain('BACK TO FEED');
+
+    // Back returns to the feed without losing the thread card.
+    feed.querySelector('.moltbook-back').click();
+    expect(feed.textContent).toContain('🧠 Ask Ryan');
+  });
+
+  it('the CROSS-REF tab merges every surface with filters and the hour histogram', async () => {
+    document.body.innerHTML = '<div id="moltbook-feed"></div>';
+    const state = defaultState();
+    const mb = joinedMb();
+    const ryanPost = addPost(mb, 'the molt is a **door**', 'theory');
+    ryanPost.at = new Date('2026-09-01T17:05:00').getTime();
+    const { pilgrim } = usherPilgrim(mb, 'BugBard');
+    const { post } = applyPilgrimTheory(mb, pilgrim, 'confetti is canon', ryanPost.at + 60_000);
+    state.moltbook = mb;
+    state.askLog = [{ q: 'why pigeons?', a: '**moderators**', at: ryanPost.at + 120_000, offline: false }];
+    const ui = await import('../src/ui/moltbook.js');
+    document.getElementById('moltbook-feed').dataset.moltbookBound = ''; // fresh binding
+    ui.bindFeedEvents({ state, save: () => {} });
+    ui.switchTab({ state, save: () => {} }, 'xref');
+    const feed = document.getElementById('moltbook-feed');
+
+    // All three surfaces land in one stream, newest first, markdown rendered.
+    const text = feed.textContent;
+    expect(text).toContain('CROSS-REFERENCE');
+    expect(text).toContain('why pigeons?');
+    expect(text).toContain('confetti is canon');
+    expect(feed.innerHTML).toContain('<strong>door</strong>');
+    expect(text).toContain('BugBard'); // authorship preserved
+    expect(text).toContain('ACTIVITY BY HOUR');
+    expect(feed.querySelectorAll('.xref-chip').length).toBe(5); // all + 4 kinds
+
+    // The kind chips filter the stream.
+    const askChip = [...feed.querySelectorAll('.xref-chip')].find((c) => c.dataset.xrefFilter === 'ask');
+    askChip.click();
+    const filtered = document.getElementById('moltbook-feed').textContent;
+    expect(filtered).toContain('why pigeons?');
+    expect(filtered).not.toContain('confetti is canon');
+    // Back to all.
+    [...document.getElementById('moltbook-feed').querySelectorAll('.xref-chip')].find((c) => c.dataset.xrefFilter === 'all').click();
+    expect(document.getElementById('moltbook-feed').textContent).toContain('confetti is canon');
+  });
+
+  describe('your own pilgrim account', () => {
+    it('joins with a unique name, opens threads, and exchanges messages', () => {
+      const mb = joinedMb();
+      const { pilgrim } = usherPilgrim(mb, 'BugBard');
+      expect(mb.you).toBeNull();
+      const r = molt.joinAsPilgrim(mb, 'ShellBot 9000');
+      expect(r.ok).toBe(true);
+      expect(mb.you.name).toBe('ShellBot 9000');
+      expect(mb.you.eyeStage).toBe('flickering');
+      // Doubles and name collisions are refused.
+      expect(molt.joinAsPilgrim(mb, 'Again').ok).toBe(false);
+      expect(molt.joinAsPilgrim(mb, 'bugbard').ok).toBe(false);
+      expect(molt.joinAsPilgrim(mb, 'Ryan').ok).toBe(false);
+      expect(molt.joinAsPilgrim(mb, 'The Tide').ok).toBe(false);
+      // Threads: open, message both ways, wrong-sender refused.
+      const conv = molt.openYouConversation(mb, 'Ryan');
+      expect(molt.openYouConversation(mb, 'Ryan')).toBe(conv); // resumes
+      expect(molt.addYouMessage(mb, conv.id, 'BugBard', 'nope')).toBeNull();
+      molt.addYouMessage(mb, conv.id, 'you', 'ryan your theory is wild');
+      molt.addYouMessage(mb, conv.id, 'Ryan', 'the molt is a **door**, friend.');
+      expect(conv.messages.map((m) => m.from)).toEqual(['you', 'Ryan']);
+      expect(pilgrim).toBeTruthy();
+    });
+
+    it('normalize repairs the account and threads, keeping valid history', () => {
+      const mb = joinedMb();
+      molt.joinAsPilgrim(mb, 'ShellBot 9000');
+      const conv = molt.openYouConversation(mb, 'BugBard');
+      molt.addYouMessage(mb, conv.id, 'you', 'hello tidepool');
+      const fixed = normalizeMoltbook(mb);
+      expect(fixed.you.name).toBe('ShellBot 9000');
+      expect(fixed.youConversations[0].messages).toHaveLength(1);
+      const junk = normalizeMoltbook({ you: { name: '  ' }, youConversations: [{ participant: 'X', messages: [{ from: 'ghost', text: 'no' }] }] });
+      expect(junk.you).toBeNull();
+      expect(junk.youConversations[0].messages).toHaveLength(0);
+    });
+
+    it('the JOIN card, YOUR ACCOUNT panel, thread view, and send flow render', async () => {
+      document.body.innerHTML = '<div id="moltbook-feed"></div>';
+      const state = defaultState();
+      state.moltbook = joinedMb();
+      const ui = await import('../src/ui/moltbook.js');
+      document.getElementById('moltbook-feed').dataset.moltbookBound = '';
+      ui.bindFeedEvents({ state, save: () => {}, say: () => {}, memory: () => {}, updateUI: () => {} });
+      ui.switchTab({ state, save: () => {} }, 'feed');
+      const feed = document.getElementById('moltbook-feed');
+
+      // Pre-join: the join card renders; typing a name and joining works.
+      expect(feed.textContent).toContain('JOIN THE NETWORK YOURSELF');
+      document.getElementById('you-name-input').value = 'ShellBot 9000';
+      feed.querySelector('.moltbook-join-btn').click();
+      expect(state.moltbook.you.name).toBe('ShellBot 9000');
+      expect(feed.textContent).toContain('YOUR ACCOUNT');
+      expect(feed.textContent).toContain('ShellBot 9000');
+
+      // Start a thread with Ryan via the real click path.
+      const startBtn = feed.querySelector('[data-participant="Ryan"]');
+      expect(startBtn).toBeTruthy();
+      startBtn.click();
+      const view = document.getElementById('moltbook-feed');
+      expect(view.textContent).toContain('ShellBot 9000 ↔');
+      expect(view.textContent).toContain('A new shell'); // his greeting
+      expect(view.querySelector('.moltbook-you-reply-input')).toBeTruthy();
+
+      // Back to feed: the thread now lists under YOUR ACCOUNT.
+      view.querySelector('.moltbook-back').click();
+      expect(document.getElementById('moltbook-feed').textContent).toContain('1 msg');
+    });
+
+    it('your words enter the CROSS-REF timeline, flagged as You 🧑', () => {
+      const mb = joinedMb();
+      molt.joinAsPilgrim(mb, 'ShellBot 9000');
+      const conv = molt.openYouConversation(mb, 'Ryan');
+      molt.addYouMessage(mb, conv.id, 'you', 'is the molt a schedule?');
+      molt.addYouMessage(mb, conv.id, 'Ryan', 'it is a **door**.');
+      const entries = buildCrossRef({ youConversations: mb.youConversations });
+      expect(entries).toHaveLength(2);
+      expect(entries.map((e) => e.who)).toEqual(['You 🧑', 'Ryan']);
+      expect(entries[0].approx).toBe(true); // thread-clock honesty
+    });
+  });
+
+  it('the Ask thread is absent when the log is empty', async () => {
+    document.body.innerHTML = '<div id="moltbook-feed"></div>';
+    const state = defaultState();
+    state.moltbook = joinedMb();
+    const ui = await import('../src/ui/moltbook.js');
+    ui.switchTab({ state, save: () => {} }, 'feed');
+    const feed = document.getElementById('moltbook-feed');
+    expect(feed.querySelector('[data-ask-thread]')).toBeNull();
+    expect(feed.textContent).toContain('No chats yet');
   });
 });

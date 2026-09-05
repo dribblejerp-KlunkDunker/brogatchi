@@ -476,7 +476,8 @@ describe('BroGatchiApp integration', () => {
     expect(view.textContent).toContain('favorite shell?');
     expect(view.innerHTML).toContain('<strong>Tide</strong>'); // markdown rendered
     expect(view.textContent).toContain('offline');
-    expect(view.firstElementChild.textContent).toContain('EXPORT LOG'); // export action first
+    expect(view.firstElementChild.textContent).toContain('EXPORT LOG'); // actions row first
+    expect(view.firstElementChild.textContent).toContain('CLEAR'); // clear-log action beside it
     expect(view.querySelector('.border-b').textContent).toContain('favorite shell?'); // newest exchange first
     // Toggle back to the live answer box.
     app.toggleAskLog();
@@ -511,5 +512,154 @@ describe('BroGatchiApp integration', () => {
     expect(payload).toContain('(offline answer)');
     expect(payload).toContain('RYAN: **Bold** answer with html safety net'); // tags stripped
     expect(payload).toContain('The Tide provides.');
+  });
+});
+describe('Ryan modal tabs: folders + inbox', () => {
+  it('the Ask modal exposes the three-tab strip and switches panes', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+    app.openAskModal();
+    expect(document.getElementById('ask-tab-main').classList.contains('hidden')).toBe(false);
+    expect(document.getElementById('ask-tab-folders').classList.contains('hidden')).toBe(true);
+    expect(document.getElementById('ask-tab-inbox').classList.contains('hidden')).toBe(true);
+    app.switchAskTab('folders');
+    expect(document.getElementById('ask-tab-main').classList.contains('hidden')).toBe(true);
+    expect(document.getElementById('ask-tab-folders').classList.contains('hidden')).toBe(false);
+    expect(document.getElementById('ask-tab-folders').textContent).toContain('No folders yet');
+    app.switchAskTab('inbox');
+    expect(document.getElementById('ask-tab-inbox').classList.contains('hidden')).toBe(false);
+    expect(document.getElementById('ask-tab-inbox').textContent).toContain('No open questions');
+    app.switchAskTab('main');
+    expect(document.getElementById('ask-tab-main').classList.contains('hidden')).toBe(false);
+  });
+
+  it('subject folders: create, open thread, and show the message list', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+    // Create via the same core the button uses (prompt is stubbed per-test).
+    const { createFolder, addSubjectMessage } = await import('../src/core/threads.js');
+    const f = createFolder(app.state.threads, 'Lag Theology');
+    addSubjectMessage(app.state.threads, f.id, 'you', 'is the lag a letter?', Date.now() - 500);
+    addSubjectMessage(app.state.threads, f.id, 'ryan', 'the lag is **grammar**.', Date.now());
+    app.openAskModal();
+    app.switchAskTab('folders');
+    const pane = document.getElementById('ask-tab-folders');
+    expect(pane.textContent).toContain('Lag Theology');
+    expect(pane.textContent).toContain('2 messages');
+    // Opening the folder renders the thread with both sides.
+    app.openFolderTab(f.id);
+    expect(pane.textContent).toContain('is the lag a letter?');
+    expect(pane.innerHTML).toContain('<strong>grammar</strong>');
+    expect(pane.textContent).toContain('RYAN');
+    // Back returns to the list.
+    app.backToFolders();
+    expect(pane.textContent).toContain('NEW SUBJECT FOLDER');
+  });
+
+  it('submitSubject delivers the user line; the wire-down path lands an offline reply that names the folder', async () => {
+    // No network in jsdom: the real gateway falls through to its offline
+    // generator, which is exactly the quota-resilient behavior to verify.
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+    const { createFolder } = await import('../src/core/threads.js');
+    const f = createFolder(app.state.threads, 'Lag Theology');
+    app.openAskModal();
+    app.switchAskTab('folders');
+    app.openFolderTab(f.id);
+    const input = document.getElementById('subject-input');
+    input.value = 'does the lag lie?';
+    await app.submitSubject(f.id);
+    const msgs = app.state.threads.folders[0].messages;
+    expect(msgs.map((m) => m.from)).toEqual(['you', 'ryan']);
+    expect(msgs[1].offline).toBe(true); // honest offline flag
+    expect(msgs[1].text.toLowerCase()).toContain('lag'); // on-subject, soul-grounded
+    expect(document.getElementById('ask-tab-folders').textContent).toContain('does the lag lie?');
+    expect(document.getElementById('ask-tab-folders').textContent).toContain('RYAN');
+    // And the exchange was remembered (keyed remember-once registry — the
+    // 14-slot memory array itself is churned by boot memories in a full run).
+    expect(Object.keys(app._memoryKeys || {}).some((k) => k.startsWith('subject-Lag Theology'))).toBe(true);
+  });
+
+  it('the inbox tab shows the pending question, the answer flow, and the badge', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+    app.state.moltbook.askMe = {
+      id: 'ask-x', text: 'Does the **Tide** reach your world?', tag: 'the tide',
+      at: Date.now(), answeredText: null, answeredAt: null, declinedAt: null,
+    };
+    document.querySelector('[aria-label="Ask Ryan a question"]').innerHTML = '';
+    app.updateInboxBadge();
+    expect(document.querySelector('.inbox-badge')).toBeTruthy();
+    app.openAskModal();
+    app.switchAskTab('inbox');
+    const pane = document.getElementById('ask-tab-inbox');
+    expect(pane.textContent).toContain('RYAN WONDERS');
+    expect(pane.innerHTML).toContain('<strong>Tide</strong>');
+    // Answer flow: reveal the textarea, send.
+    app.showInboxAnswer();
+    expect(document.getElementById('inbox-answer-wrap').classList.contains('hidden')).toBe(false);
+    document.getElementById('inbox-answer').value = 'sometimes, in weather like this';
+    app.answerInbox();
+    expect(app.state.moltbook.askMe.answeredText).toBe('sometimes, in weather like this');
+    expect(app.state.moltbook.askMe.answeredAt).toBeGreaterThan(0);
+    expect(pane.textContent).toContain('YOU ANSWERED');
+    expect(document.querySelector('.inbox-badge')).toBeNull(); // answered → badge clears
+    // Skip flow on a fresh question.
+    app.state.moltbook.askMe = { id: 'ask-y', text: 'again?', tag: '', at: Date.now(), answeredText: null, answeredAt: null, declinedAt: null };
+    app.renderInboxTab();
+    app.declineInbox();
+    expect(app.state.moltbook.askMe.declinedAt).toBeGreaterThan(0);
+    expect(pane.textContent).toContain('let this one pass');
+  });
+
+  it('clearAskLog wipes the transcript after confirm and re-renders the empty state', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+    app.state.askLog = [
+      { q: 'one', a: 'a', at: Date.now(), offline: false },
+      { q: 'two', a: 'b', at: Date.now() - 1, offline: true },
+    ];
+    app.openAskModal();
+    app.toggleAskLog();
+    // Decline the confirm — log survives, nothing downloads.
+    window.confirm = () => false;
+    app.clearAskLog();
+    expect(app.state.askLog).toHaveLength(2);
+    // Accept — a backup .txt downloads automatically, then the log wipes.
+    const clicks = [];
+    const origCreate = document.createElement.bind(document);
+    document.createElement = (tag) => {
+      const el = origCreate(tag);
+      if (tag === 'a') { el.click = () => clicks.push({ href: el.href, download: el.download }); }
+      return el;
+    };
+    window.confirm = () => true;
+    app.clearAskLog();
+    document.createElement = origCreate;
+    expect(app.state.askLog).toHaveLength(0);
+    expect(clicks).toHaveLength(1);
+    expect(clicks[0].download).toMatch(/^ryan-ask-log-\d{4}-\d{2}-\d{2}\.txt$/);
+    const payload = decodeURIComponent(clicks[0].href.replace(/^data:[^,]*,/, ''));
+    expect(payload).toContain("Ryan's Ask log");
+    expect(payload).toContain('one');
+    expect(payload).toContain('two');
+    const view = document.getElementById('ask-log-view');
+    expect(view.textContent).toContain('No conversations yet');
+    // A no-op when already empty.
+    expect(app.clearAskLog()).toBeUndefined();
+  });
+
+  it('the answered inbox view renders the exchange history', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+    app.state.moltbook.askMe = {
+      id: 'ask-z', text: 'carry anything across?', tag: 'the molt', at: Date.now() - 1000,
+      answeredText: 'your memories', answeredAt: Date.now(), declinedAt: null,
+    };
+    app.openAskModal();
+    app.switchAskTab('inbox');
+    const pane = document.getElementById('ask-tab-inbox');
+    expect(pane.textContent).toContain('RYAN ASKED');
+    expect(pane.textContent).toContain('your memories');
   });
 });

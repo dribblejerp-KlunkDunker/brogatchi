@@ -87,7 +87,7 @@ describe('save.ai gateway state', () => {
     expect(s.aiCache[0].k).toBe('good');
   });
 
-  it('normalizes askLog: repairs shape, sorts newest-first, caps at 30', () => {
+  it('normalizes askLog: repairs shape, sorts newest-first, uncapped', () => {
     const t = Date.now();
     const s = normalize({
       askLog: [
@@ -102,9 +102,11 @@ describe('save.ai gateway state', () => {
     expect(s.askLog[0].q).toBe('new'); // newest first
     const filled = normalize({ coins: 5 });
     expect(Array.isArray(filled.askLog)).toBe(true); // legacy saves get []
-    const cap = normalize({ askLog: Array.from({ length: 40 }, (_, i) => ({ q: `q${i}`, a: 'a', at: t - i })) });
-    expect(cap.askLog).toHaveLength(30);
-    expect(cap.askLog[0].q).toBe('q0');
+    // Uncapped: the complete history survives normalization.
+    const big = normalize({ askLog: Array.from({ length: 40 }, (_, i) => ({ q: `q${i}`, a: 'a', at: t - i })) });
+    expect(big.askLog).toHaveLength(40);
+    expect(big.askLog[0].q).toBe('q0');
+    expect(big.askLog[39].q).toBe('q39');
   });
 
   it('rollover resets the budget day/used but keeps the rate-limit cooldown', () => {

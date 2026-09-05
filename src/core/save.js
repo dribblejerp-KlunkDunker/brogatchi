@@ -3,6 +3,7 @@
 import { initialStats } from './stats.js';
 import { initialPersonality } from './personality.js';
 import { addDiaryEntry, buildDayLines, memoryId, capMemories } from './memory.js';
+import { defaultThreads, normalizeThreads } from './threads.js';
 
 const KEY = 'brogatchi_v4';
 const KEY_V3 = 'brogatchi_v3';
@@ -77,6 +78,8 @@ export function defaultState() {
     // Durable Ask-Ryan transcript: [{ q, a, at, offline }] — survives reloads
     // (unlike the in-memory chatHistory, which only feeds the AI context).
     askLog: [],
+    // Subject folders + Ryan's self-started-question counters.
+    threads: defaultThreads(),
   };
 }
 
@@ -179,12 +182,12 @@ export function normalize(s) {
   out.aiCache = out.aiCache
     .filter((e) => e && typeof e === 'object' && typeof e.k === 'string' && typeof e.text === 'string' && Number.isFinite(e.at))
     .slice(0, 40);
-  // Ask-Ryan transcript: repair shape, keep newest 30 exchanges.
+  // Ask-Ryan transcript: repair shape, sort newest-first. Uncapped — the full
+  // history is the point; the 🧹 CLEAR button in the LOG view manages size.
   if (!Array.isArray(out.askLog)) out.askLog = [];
   out.askLog = out.askLog
     .filter((e) => e && typeof e === 'object' && typeof e.q === 'string' && typeof e.a === 'string' && Number.isFinite(e.at))
-    .sort((x, y) => y.at - x.at)
-    .slice(0, 30);
+    .sort((x, y) => y.at - x.at);
   const b = out.aiBudget || {};
   out.aiBudget = {
     day: typeof b.day === 'string' && b.day ? b.day : todayKey(),
@@ -192,6 +195,7 @@ export function normalize(s) {
     cap: Number.isFinite(b.cap) && b.cap > 0 ? Math.floor(b.cap) : 40,
     rateLimitedUntil: Number.isFinite(b.rateLimitedUntil) ? b.rateLimitedUntil : 0,
   };
+  out.threads = normalizeThreads(out.threads);
   out.moltbook = normalizeMoltbook(out.moltbook);
   return out;
 }

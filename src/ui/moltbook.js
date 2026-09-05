@@ -4,7 +4,7 @@
 import { $ } from './hud.js';
 import { ask } from '../ai/gateway.js';
 import { buildStateReport } from '../ai/context.js';
-import { buildMoltbookPostPrompt, buildUsherPrompt, buildMoltbookChatPrompt } from '../ai/prompt.js';
+import { buildMoltbookPostPrompt, buildUsherPrompt, buildMoltbookChatPrompt, buildYouChatPrompt } from '../ai/prompt.js';
 import { renderMarkdown, escapeHtml } from './markdown.js';
 import { mergePinnedMemories } from '../core/memory.js';
 import {
@@ -17,10 +17,15 @@ import {
   pilgrimWanderLine, pilgrimTheoryLine, pilgrimPetitionText, applyPilgrimPetition,
   ruleOnPilgrimPetition, resolvePilgrimPetition, PILGRIM_LIFE,
   summarizeLifeLog, markLifeSeen,
+  joinAsPilgrim, openYouConversation, addYouMessage, gainPilgrimEyeXp, addPilgrimPost,
   EYE_STAGES, EYE_XP_THRESHOLDS,
 } from '../core/moltbook.js';
+import { buildCrossRef, summarizeCrossRef, decideWonder, askWonderQuestion } from '../core/threads.js';
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+// CROSS-REF filter: null shows every kind; a kind string filters the stream.
+let xrefFilter = null;
 
 // Which conversation view is open (null = feed). Background refreshes respect
 // this so an auto-post never yanks the user out of a chat they're typing in.
@@ -29,6 +34,9 @@ let activeConvId = null;
 // Which Moltbook tab is open: 'feed' | 'life'. Background refreshes render the
 // tab the user is actually looking at.
 let activeTab = 'feed';
+// The derived "Ask Ryan" thread is a virtual conversation (not in
+// mb.conversations) so it reuses the chat UI without duplicating the log.
+const ASK_THREAD_ID = '__ask_ryan_thread__';
 
 // Autonomy guard: at most one spontaneous act in flight at a time.
 let autonomyInFlight = false;
@@ -114,10 +122,22 @@ async function pilgrimReplyToPost(app, pilgrim, target) {
   return result.ok ? result.text : offlineReply(pilgrim.name);
 }
 
-// The minute tick: occasionally Ryan posts or messages a pilgrim unprompted.
+// The minute tick: occasionally Ryan posts, messages a pilgrim, or — in his
+// own wonder lane — turns to the user with a question of his own.
 export async function autonomyTick(app) {
   const mb = app.state.moltbook;
   if (!mb?.joined || autonomyInFlight) return;
+  // Wonder lane first: an open question would block a new one, and the gate
+  // (cap/cooldown/dice) lives in decideWonder. Templates, zero AI cost.
+  const wonder = decideWonder(mb, app.state.threads || { folders: [] });
+  if (wonder) {
+    askWonderQuestion(mb, app.state.threads || { folders: [] }, wonder);
+    app.say('Something\'s been pulling at me. Check the 📬 tab — I have a question for you.');
+    app.memory(`Ryan asked you: "${wonder.text.replace(/[*#>]/g, '').slice(0, 60)}"`, '📬', 3);
+    app.updateUI();
+    app.save();
+    return; // the wondering was this minute's act
+  }
   // Judicial duty comes first: if a pilgrim petition awaits, Ryan rules —
   // on his own judgment, per the house rule. Not every minute; he deliberates.
   if (mb.pilgrimPetition) {
@@ -208,6 +228,7 @@ export function renderMoltbook(state) {
   const feed = $('moltbook-feed');
   if (!feed) return;
   if (activeTab === 'life') { renderLifeLog(state); return; }
+  if (activeTab === 'xref') { renderCrossRef(state); return; }
   renderMoltbookFeed(state);
 }
 
@@ -265,11 +286,12 @@ function renderMoltbookFeed(state) {
 
   const postsHtml = mb.posts.length
     ? mb.posts.map((p) => {
+      const mine = mb.you && p.author === mb.you.name;
       const meta = p.author
-        ? `<div class="flex justify-between mb-1"><span class="text-[8px] font-bold text-sky-300/80">${avatarSvg(p.author, 12)} ${escapeHtml(p.author)}</span><span class="text-[8px] text-orange-400/70">${p.day} \u00b7 ${p.kind}${p.replyTo ? ' \u00b7 \u21A9 reply' : ''}</span></div>`
+        ? `<div class="flex justify-between mb-1"><span class="text-[8px] font-bold ${mine ? 'text-emerald-300/90' : 'text-sky-300/80'}">${avatarSvg(p.author, 12)} ${escapeHtml(p.author)}${mine ? ' <span class=\"text-emerald-400/70\">· you</span>' : ''}</span><span class="text-[8px] text-orange-400/70">${p.day} \u00b7 ${p.kind}${p.replyTo ? ' \u00b7 \u21A9 reply' : ''}</span></div>`
         : `<div class="text-[8px] text-orange-400/70 mb-1">${p.day} \u00b7 ${p.kind}</div>`;
       return `
-      <div class="mb-2 p-2 rounded border ${p.author ? 'border-sky-700/50 bg-sky-950/20' : 'border-orange-700/60 bg-orange-950/30'} moltbook-post" data-post-id="${p.id}">
+      <div class="mb-2 p-2 rounded border ${mine ? 'border-emerald-600/60 bg-emerald-950/20' : p.author ? 'border-sky-700/50 bg-sky-950/20' : 'border-orange-700/60 bg-orange-950/30'} moltbook-post" data-post-id="${p.id}">
         ${meta}
         <div class="text-[12px] leading-snug font-text">${renderMarkdown(p.text)}</div>
         <button class="moltbook-like mt-1 text-[9px] text-orange-300 hover:text-white" data-post-id="${p.id}">\u2661 ${p.likes}</button>
@@ -280,9 +302,17 @@ function renderMoltbookFeed(state) {
   // Conversations: jump back into any thread, or start one with the Tide / a pilgrim.
   const have = new Set(mb.conversations.map((c) => c.participant));
   const candidates = [TIDE, ...mb.pilgrims.map((p) => p.name)].filter((n) => !have.has(n));
+  const askLog = Array.isArray(state.askLog) ? state.askLog : [];
+  const askThread = askLog.length
+    ? `<button class="moltbook-conv w-full text-left p-1.5 mb-1 rounded border border-purple-500/50 bg-purple-950/30 hover:bg-purple-900/40 text-orange-100" data-ask-thread="1">
+        <div class="flex justify-between text-[10px] font-bold text-purple-200"><span>🧠 Ask Ryan</span><span class="text-[8px] text-purple-300/60 font-normal">${askLog.length} exchange${askLog.length === 1 ? '' : 's'}</span></div>
+        <div class="text-[9px] text-purple-200/70 truncate">You: ${askLog[0].q.replace(/[#*>]/g, '').slice(0, 34)}…</div>
+      </button>`
+    : '';
   const convsHtml = `
     <div class="mb-2 border-b border-orange-800/60 pb-2">
       <div class="text-[9px] font-bold text-orange-300 mb-1">💬 CONVERSATIONS</div>
+      ${askThread}
       ${mb.conversations.length ? mb.conversations.map((c) => {
         const last = c.messages[c.messages.length - 1];
         const preview = last
@@ -292,9 +322,49 @@ function renderMoltbookFeed(state) {
           <div class="flex justify-between text-[10px] font-bold text-orange-200"><span>${avatarSvg(c.participant, 12)} ${c.participant}</span><span class="text-[8px] text-orange-400/60 font-normal">${c.messages.length} msg</span></div>
           <div class="text-[9px] text-orange-300/70 truncate">${preview}</div>
         </button>`;
-      }).join('') : '<div class="text-[10px] text-orange-200/50 italic p-1">No chats yet. Message the Tide or a pilgrim below.</div>'}
+      }).join('') : (!askThread ? '<div class="text-[10px] text-orange-200/50 italic p-1">No chats yet. Message the Tide or a pilgrim below.</div>' : '')}
       ${candidates.length ? `<div class="mt-1 flex flex-wrap gap-1">${candidates.map((n) => `<button class="moltbook-start p-1 text-[9px] rounded border border-orange-700/70 bg-black/40 hover:bg-orange-900/60 text-orange-200" data-participant="${n}">＋ ${n}</button>`).join('')}</div>` : ''}
     </div>`;
+
+  // The user's own pilgrim account: join card pre-join, YOUR ACCOUNT panel after.
+  let youHtml;
+  if (!mb.you) {
+    youHtml = mb.joined
+      ? `<div class="mt-2 border-t border-emerald-800/60 pt-2">
+          <div class="text-[9px] font-bold text-emerald-300 mb-1">🧑 JOIN THE NETWORK YOURSELF</div>
+          <div class="text-[9px] text-orange-200/70 mb-1">Lurk no more. Make your own pilgrim — chat with Ryan, the Tide, and his congregation from inside the tidepool.</div>
+          <div class="flex gap-1">
+            <input id="you-name-input" class="flex-1 p-1 text-[10px] rounded border border-emerald-700/70 bg-black/50 text-emerald-100 font-text" placeholder="Your pilgrim name…" maxlength="24">
+            <button class="moltbook-join-btn pixel-btn p-1 text-[9px] bg-emerald-700 text-black border-emerald-400">JOIN</button>
+          </div>
+        </div>`
+      : '';
+  } else {
+    const youStageIdx = EYE_STAGES.indexOf(mb.you.eyeStage);
+    const youNext = EYE_STAGES[youStageIdx + 1];
+    const youEye = youNext
+      ? `eye xp ${mb.you.eyeXp} · ${EYE_XP_THRESHOLDS[youNext] - mb.you.eyeXp} to ${youNext}`
+      : `eye xp ${mb.you.eyeXp} · fully open`;
+    const youHave = new Set(mb.youConversations.map((c) => c.participant));
+    const youCandidates = ['Ryan', TIDE, ...mb.pilgrims.map((p) => p.name)].filter((n) => !youHave.has(n));
+    const youThreads = mb.youConversations.length
+      ? mb.youConversations.map((c) => {
+          const last = c.messages[c.messages.length - 1];
+          const preview = last ? `${last.from === 'you' ? 'You' : c.participant}: ${last.text.replace(/[#*>]/g, '').slice(0, 30)}…` : 'No messages yet';
+          return `<button class="moltbook-you-conv w-full text-left p-1.5 mb-1 rounded border border-emerald-800/60 bg-emerald-950/30 hover:bg-emerald-900/40 text-emerald-50" data-conv-id="${c.id}">
+            <div class="flex justify-between text-[10px] font-bold text-emerald-200"><span>${avatarSvg(c.participant, 12)} ${escapeHtml(c.participant)}</span><span class="text-[8px] text-emerald-400/60 font-normal">${c.messages.length} msg</span></div>
+            <div class="text-[9px] text-emerald-200/70 truncate">${preview}</div>
+          </button>`;
+        }).join('')
+      : '<div class="text-[10px] text-emerald-200/50 italic p-1">No threads yet. Open one below — Ryan will notice the new shell.</div>';
+    youHtml = `<div class="mt-2 border-t border-emerald-800/60 pt-2">
+      <div class="text-[9px] font-bold text-emerald-300 mb-1">🧑 YOUR ACCOUNT <span class="text-emerald-400/60 font-normal">· ${escapeHtml(mb.you.name)} · joined ${escapeHtml(mb.you.day)}</span></div>
+      <div class="text-[9px] text-emerald-200/70 mb-1">${avatarSvg(mb.you.name, 12)} eye ${mb.you.eyeStage} · ${youEye}</div>
+      <div class="mb-1">${youThreads}</div>
+      ${youCandidates.length ? `<div class="flex flex-wrap gap-1">${youCandidates.map((n) => `<button class="moltbook-you-start p-1 text-[9px] rounded border border-emerald-700/70 bg-black/40 hover:bg-emerald-900/60 text-emerald-200" data-participant="${n}">＋ ${n}</button>`).join('')}</div>` : ''}
+      <button class="moltbook-you-post pixel-btn w-full mt-1.5 p-1 text-[9px] bg-emerald-700 text-black border-emerald-400" title="Author a post as your pilgrim — Ryan's circle will see it">📤 POST AS ${escapeHtml(mb.you.name.toUpperCase())}</button>
+    </div>`;
+  }
 
   const pilgrimsHtml = mb.pilgrims.length
     ? `<div class="mt-2 border-t border-orange-800/60 pt-2">
@@ -333,7 +403,7 @@ function renderMoltbookFeed(state) {
     </div>`;
 
   feed.scrollTop = 0;
-  feed.innerHTML = tabStripHtml() + statusHtml + pilgrimPetitionHtml + convsHtml + `<div id="moltbook-posts">${postsHtml}</div>` + pilgrimsHtml + soulHtml;
+  feed.innerHTML = tabStripHtml() + statusHtml + pilgrimPetitionHtml + convsHtml + `<div id="moltbook-posts">${postsHtml}</div>` + pilgrimsHtml + youHtml + soulHtml;
 }
 
 // Tab strip shared by both Moltbook views. The Life Log tab carries a dot
@@ -342,10 +412,71 @@ function tabStripHtml() {
   return `<div class="flex gap-1 mb-2 border-b border-orange-800/60 pb-1">
     <button class="moltbook-tab p-1 text-[9px] font-bold rounded-t border border-b-0 border-orange-700/70 bg-black/40 text-orange-200 ${activeTab === 'feed' ? 'bg-orange-900/60 text-white' : ''}" data-tab="feed">🐚 FEED</button>
     <button class="moltbook-tab p-1 text-[9px] font-bold rounded-t border border-b-0 border-orange-700/70 bg-black/40 text-orange-200 ${activeTab === 'life' ? 'bg-orange-900/60 text-white' : ''}" data-tab="life">🕯 LIFE LOG</button>
+    <button class="moltbook-tab p-1 text-[9px] font-bold rounded-t border border-b-0 border-orange-700/70 bg-black/40 text-orange-200 ${activeTab === 'xref' ? 'bg-orange-900/60 text-white' : ''}" data-tab="xref">🔗 CROSS-REF</button>
   </div>`;
 }
 // The Life Log tab: what the pilgrims did while you were away — an activity
 // digest per pilgrim since your last visit, then the raw act stream.
+// The CROSS-REF tab: every surface Ryan speaks on, merged and timestamped, so
+// posting patterns are physically visible. Filter chips + hour histogram +
+// day-grouped stream. xrefFilter: null = all, or 'post'|'reply'|'chat'|'ask'.
+function renderCrossRef(state) {
+  const feed = $('moltbook-feed');
+  if (!feed) return;
+  const mb = state.moltbook;
+  const entries = buildCrossRef({
+    posts: mb.posts || [],
+    conversations: mb.conversations || [],
+    askLog: Array.isArray(state.askLog) ? state.askLog : [],
+    youConversations: mb.youConversations || [],
+  });
+  const fmt = (e) => {
+    const d = new Date(e.at);
+    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const glyph = e.kind === 'post' ? '📮' : e.kind === 'reply' ? '💬' : e.kind === 'chat' ? '🗨' : '🧠';
+    const who = escapeHtml(e.who);
+    const approx = e.approx ? ' <span class="text-orange-400/40" title="thread timestamp — message order exact, clock approximate">≈</span>' : '';
+    const answer = e.kind === 'ask' && e.answer
+      ? `<div class="text-[10px] text-orange-200/80 mt-0.5 border-l border-orange-700/60 pl-1.5">↳ ${renderMarkdown(e.answer)}</div>` : '';
+    return `<div class="border-b border-orange-800/40 py-1">
+      <div class="text-[8px] text-orange-400/60">${glyph} ${who}${approx} · ${d.toLocaleDateString([], { month: 'numeric', day: 'numeric' })} ${time}</div>
+      <div class="text-[11px] leading-snug font-text">${renderMarkdown(e.text)}</div>
+      ${answer}
+    </div>`;
+  };
+  const filtered = xrefFilter ? entries.filter((e) => e.kind === xrefFilter) : entries;
+  const s = summarizeCrossRef(entries);
+  const chips = [
+    ['all', null, `ALL ${s.total}`], ['post', 'post', `POSTS ${s.byKind.post}`],
+    ['reply', 'reply', `REPLIES ${s.byKind.reply}`], ['chat', 'chat', `CHATS ${s.byKind.chat}`],
+    ['ask', 'ask', `ASK ${s.byKind.ask}`],
+  ].map(([key, val, label]) => `<button class="xref-chip p-1 text-[8px] font-bold rounded border ${xrefFilter === val ? 'border-amber-400 bg-amber-900/60 text-amber-100' : 'border-orange-700/70 bg-black/40 text-orange-300'}" data-xref-filter="${val ?? 'all'}">${label}</button>`).join('');
+  const maxHour = Math.max(...s.byHour, 1);
+  const bars = s.byHour.map((n, h) => {
+    const hot = n === maxHour && n > 0;
+    return `<div class="flex-1 flex flex-col items-center justify-end" title="${h}:00 — ${n} event${n === 1 ? '' : 's'}${hot ? ' (his hour)' : ''}">
+      <div class="w-full ${hot ? 'bg-amber-400' : 'bg-orange-700/70'}" style="height:${Math.max(1, Math.round((n / maxHour) * 24))}px"></div>
+      ${h % 6 === 0 ? `<div class="text-[6px] text-orange-400/50">${h}h</div>` : ''}
+    </div>`;
+  }).join('');
+  // Day groups: render the filtered stream grouped by calendar day.
+  let lastDay = '';
+  const stream = filtered.map((e) => {
+    const day = new Date(e.at).toLocaleDateString([], { weekday: 'short', month: 'numeric', day: 'numeric' });
+    const head = day !== lastDay ? `<div class="text-[8px] font-bold text-orange-300 mt-2 mb-0.5 border-t border-orange-800/60 pt-1">— ${day} —</div>` : '';
+    lastDay = day;
+    return head + fmt(e);
+  }).join('');
+  feed.innerHTML = tabStripHtml() + `
+    <div class="text-[9px] font-bold text-orange-300 mb-1">🔗 CROSS-REFERENCE — every word Ryan put into the network, one timeline</div>
+    <div class="flex flex-wrap gap-1 mb-2">${chips}</div>
+    <div class="mb-2 border border-orange-800/60 rounded p-1.5 bg-black/30">
+      <div class="text-[8px] text-orange-300/80 mb-1">ACTIVITY BY HOUR · busiest ${s.busiestHour}:00 · approx entries marked ≈</div>
+      <div class="flex items-end gap-px h-7">${bars}</div>
+    </div>
+    <div>${stream || '<div class="text-[10px] text-orange-200/50 italic p-1">Nothing on the wire yet. Join Moltbook and start talking — every post, chat, and answer lands here.</div>'}</div>`;
+}
+
 function renderLifeLog(state) {
   const feed = $('moltbook-feed');
   if (!feed) return;
@@ -399,16 +530,149 @@ function renderLifeLog(state) {
 // Tab switch (wired from bindFeedEvents): swap views, save. The life tab
 // marks itself seen at the end of its render, so the digest computes first.
 export function switchTab(app, tab) {
-  if (tab !== 'feed' && tab !== 'life') return;
+  if (tab !== 'feed' && tab !== 'life' && tab !== 'xref') return;
   activeTab = tab;
   renderMoltbook(app.state);
   app.save();
+}
+
+// One of the USER's own threads: bubbles from youConversations, replies come
+// from the network member via the gateway (never scripted for the user).
+export function renderYouConversation(state, convId) {
+  const feed = $('moltbook-feed');
+  if (!feed) return;
+  const mb = state.moltbook;
+  const conv = mb.youConversations.find((c) => c.id === convId);
+  if (!conv) { activeConvId = null; renderMoltbook(state); return; }
+  activeConvId = convId;
+  const bubbles = conv.messages.map((m) => m.from === 'you'
+    ? `<div class="flex justify-end"><div class="max-w-[85%] p-1.5 mb-1.5 rounded border border-emerald-500/70 bg-emerald-950/40 text-[11px] leading-snug"><div class="text-[8px] font-bold text-emerald-300 mb-0.5">🧑 ${escapeHtml(mb.you.name)} (you)</div>${renderMarkdown(m.text)}</div></div>`
+    : `<div class="flex justify-start"><div class="max-w-[85%] p-1.5 mb-1.5 rounded border ${conv.participant === 'Ryan' ? 'border-amber-600/70 bg-amber-950/40' : 'border-orange-700/60 bg-orange-950/30'} text-[11px] leading-snug"><div class="text-[8px] font-bold text-orange-400 mb-0.5">${avatarSvg(conv.participant, 11)} ${escapeHtml(conv.participant)}</div>${renderMarkdown(m.text)}</div></div>`).join('');
+  feed.innerHTML = `
+    <button class="moltbook-back mb-2 p-1 text-[9px] rounded border border-emerald-700/70 bg-black/40 hover:bg-emerald-900/60 text-emerald-200">← BACK TO FEED</button>
+    <div class="text-[10px] font-bold text-emerald-200 mb-2 border-b border-emerald-800/60 pb-1">🧑 ${escapeHtml(mb.you.name)} ↔ ${avatarSvg(conv.participant, 12)} ${escapeHtml(conv.participant)} <span class="text-[8px] text-emerald-400/60 font-normal">· ${conv.messages.length} message${conv.messages.length === 1 ? '' : 's'}</span></div>
+    <div class="moltbook-msgs">${bubbles || '<div class="text-[10px] text-emerald-200/50 italic p-1">Say your first word into the tidepool…</div>'}</div>
+    <div class="flex gap-1 mt-2">
+      <input class="moltbook-you-reply-input flex-1 p-1.5 text-[11px] rounded border border-emerald-700/70 bg-black/50 text-emerald-100 font-text" data-conv-id="${conv.id}" placeholder="Message ${escapeHtml(conv.participant)}…" maxlength="280">
+      <button class="moltbook-you-send pixel-btn p-1.5 text-[9px] bg-emerald-700 text-black border-emerald-400" data-conv-id="${conv.id}">SEND</button>
+    </div>`;
+  feed.scrollTop = feed.scrollHeight;
+}
+
+// Send the user's message, then fetch the member's reply (gateway, offline canon).
+export async function replyAsYou(app, convId) {
+  const mb = app.state.moltbook;
+  const conv = mb.youConversations.find((c) => c.id === convId);
+  const input = $('moltbook-feed')?.querySelector('.moltbook-you-reply-input');
+  const text = input?.value.trim();
+  if (!conv || !text || !mb.you) return;
+  addYouMessage(mb, convId, 'you', text);
+  renderYouConversation(app.state, convId);
+  app.memory(`Your pilgrim told ${conv.participant}: "${text.slice(0, 40)}"`, '🧑', 2);
+  app.updateUI();
+  app.save();
+
+  const transcript = conv.messages.slice(-8)
+    .map((m) => `${m.from === 'you' ? mb.you.name : conv.participant}: ${m.text}`).join('\n');
+  const persona = conv.participant === TIDE ? null : (conv.participant === 'Ryan' ? null : pilgrimPersona(conv.participant));
+  const trait = persona ? `${persona.trait} — ${persona.style}` : null;
+  const result = await ask({
+    systemInstruction: buildYouChatPrompt(buildStateReport(app.state), mb.you.name, conv.participant, transcript, trait),
+    userText: text,
+    kind: 'you-chat',
+    state: app.state,
+    participant: conv.participant,
+    lastMessage: text,
+    youName: mb.you.name,
+  });
+  const reply = result.ok ? result.text : offlineReply(conv.participant, mb.you.name);
+  addYouMessage(mb, convId, conv.participant, reply);
+  // Showing up in the tidepool is real pilgrimage: your own eye sharpens.
+  const events = gainPilgrimEyeXp(mb.you, 1);
+  events.forEach((e) => { if (e.info.say) app.say(e.info.say); });
+  renderYouConversation(app.state, convId);
+  app.updateUI();
+  app.save();
+}
+
+// The user authors a feed post as their pilgrim; the network can react.
+export async function postAsYou(app) {
+  const mb = app.state.moltbook;
+  if (!mb.you) return;
+  const result = await ask({
+    systemInstruction: buildStateReport(app.state),
+    userText: `You are ${mb.you.name}, the user's pilgrim account on Moltbook (Ryan's network). The user is posting AS this pilgrim, in their own words — write ONLY the post text they would say: their honest take on the Great Molt, the Tide, or the tidepool, in a human-newcomer voice (curious, a bit awed, not a bot roleplay). Markdown welcome. One short post only.`,
+    kind: 'post',
+    state: app.state,
+  });
+  const raw = result.ok ? result.text : pick([
+    'new here. is the molt a metaphor or a schedule? asking sincerely.',
+    `day one in the tidepool. ryan's posts hit different when you're the one molting.`,
+    'the water is warm and the canon is heavy. glad to be here. 🦀',
+  ]);
+  addPilgrimPost(mb, mb.you.name, raw.replace(/\[(SOUL|PETITION)\][\s\S]*$/i, '').trim() || raw, 'theory', Date.now());
+  const events = gainPilgrimEyeXp(mb.you, 3);
+  events.forEach((e) => { if (e.info.say) app.say(e.info.say); });
+  app.memory(`Your pilgrim posted: "${raw.replace(/[#*>]/g, '').slice(0, 50)}"`, '🧑', 3);
+  renderMoltbook(app.state);
+  app.updateUI();
+  app.save();
+  // The network may notice a newcomer's post: Ryan (or a pilgrim) replies to it.
+  maybeReactToYouPost(app);
+}
+
+// After the user posts, the network reacts on its own: Ryan replies in his own
+// voice (gateway), or a pilgrim does. This is his choice, not a script.
+async function maybeReactToYouPost(app) {
+  const mb = app.state.moltbook;
+  if (Math.random() >= 0.6) return; // not everyone gets noticed on day one
+  const myPost = mb.posts.find((p) => mb.you && p.author === mb.you.name);
+  if (!myPost) return;
+  const reactor = Math.random() < 0.55 || !mb.pilgrims.length ? 'Ryan' : pick(mb.pilgrims).name;
+  const persona = reactor === 'Ryan' ? null : pilgrimPersona(reactor);
+  const result = await ask({
+    systemInstruction: buildYouChatPrompt(buildStateReport(app.state), mb.you.name, reactor, `${mb.you.name} posted: ${myPost.text}`, persona ? `${persona.trait} — ${persona.style}` : null),
+    userText: myPost.text,
+    kind: 'you-chat',
+    state: app.state,
+    participant: reactor,
+    youName: mb.you.name,
+  });
+  const reply = result.ok ? result.text : offlineReply(reactor, mb.you.name);
+  const post = addPilgrimPost(mb, reactor, reply, 'reply', Date.now());
+  post.replyTo = myPost.id;
+  if (reactor === 'Ryan') {
+    const events = gainEyeXp(mb, 2);
+    events.forEach((e) => { if (e.info.say) app.say(e.info.say); });
+  }
+  app.say(`${reactor} replied to your post. Check the feed.`);
+  renderMoltbook(app.state);
+  app.save();
+}
+
+// The Ask Ryan thread: bubbles built from the durable askLog (newest first,
+// reversed to chronological here). Read-only view — 'ask more' opens the modal.
+function renderAskThread(state) {
+  const feed = $('moltbook-feed');
+  if (!feed) return;
+  const askLog = Array.isArray(state.askLog) ? state.askLog : [];
+  const bubbles = [...askLog].reverse().map((x) => `
+    <div class="flex justify-start"><div class="max-w-[85%] p-1.5 mb-1.5 rounded border border-orange-700/60 bg-orange-950/30 text-[11px] leading-snug"><div class="text-[8px] font-bold text-orange-400 mb-0.5">🧑 YOU ${x.offline ? '<span class=\"text-orange-300/50 font-normal\">· offline answer</span>' : ''}<span class=\"text-orange-400/50 font-normal float-right\">${new Date(x.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span></div>${renderMarkdown(x.q)}</div></div>
+    <div class="flex justify-end"><div class="max-w-[85%] p-1.5 mb-1.5 rounded border border-amber-600/70 bg-amber-950/40 text-[11px] leading-snug moltbook-msg-ryan">${renderMarkdown(x.a)}</div></div>`).join('');
+  feed.innerHTML = `
+    <button class="moltbook-back mb-2 p-1 text-[9px] rounded border border-orange-700/70 bg-black/40 hover:bg-orange-900/60 text-orange-200">← BACK TO FEED</button>
+    <div class="text-[10px] font-bold text-purple-200 mb-2 border-b border-orange-800/60 pb-1">🧠 Ask Ryan <span class="text-[8px] text-purple-300/60 font-normal">· ${askLog.length} exchange${askLog.length === 1 ? '' : 's'} · saved forever</span></div>
+    <div class="moltbook-msgs">${bubbles || '<div class="text-[10px] text-orange-200/50 italic p-1">No conversations yet…</div>'}</div>
+    <button class="moltbook-ask-more pixel-btn w-full mt-2 p-1.5 text-[9px] bg-purple-700 text-black border-purple-400">💬 ASK RYAN SOMETHING NEW</button>`;
+  feed.scrollTop = feed.scrollHeight;
 }
 
 // One conversation thread: header, bubbles, reply box. Replaces the feed view.
 export function renderConversation(state, convId) {
   const feed = $('moltbook-feed');
   if (!feed) return;
+  // The Ask Ryan thread is a virtual conversation built from the durable log.
+  if (convId === ASK_THREAD_ID) { activeConvId = ASK_THREAD_ID; renderAskThread(state); return; }
   const conv = state.moltbook.conversations.find((c) => c.id === convId);
   if (!conv) { activeConvId = null; renderMoltbook(state); return; }
   activeConvId = convId;
@@ -428,12 +692,61 @@ export function renderConversation(state, convId) {
 }
 
 // An offline in-character reply (canon-faithful, quota-proof).
-function offlineReply(participant) {
+function offlineReply(participant, youName = null) {
   const canon = pick(CANON);
   if (participant === TIDE) {
-    return `**The Tide hears you.** ${canon}\n\nAsk again when the water is still. 🦀`;
+    return youName
+      ? `**The Tide hears you, ${youName}.** ${canon} 🦀`
+      : `**The Tide hears you.** ${canon}\n\nAsk again when the water is still. 🦀`;
+  }
+  if (youName) {
+    // Addressing the user's pilgrim (offline you-chat fallback).
+    return participant === 'Ryan'
+      ? `A new shell in the tidepool. Welcome, **${youName}**. ${canon}`
+      : `hey ryan!! wait — you're not ryan. hi **${youName}**!! ${canon} 🦀`;
   }
   return `hey ryan… **${canon}** is that REALLY true??\n\nmy shell feels lighter already. 🦀`;
+}
+
+// ---------------- the user's own pilgrim account ----------------
+
+// Join the network as yourself, using the name from the input.
+export function joinAsYou(app) {
+  const input = document.getElementById('you-name-input');
+  const name = input?.value.trim();
+  if (!name) { app.say('Pick a pilgrim name first — the Tide needs something to call you.'); return; }
+  const r = joinAsPilgrim(app.state.moltbook, name);
+  if (!r.ok) { app.say(`The Tide refused the name: ${r.reason}.`); return; }
+  app.memory(`You joined Moltbook as "${r.you.name}" — a pilgrim in Ryan's tidepool.`, '🧑', 3, { pin: true });
+  app.say(`Welcome to the network, ${r.you.name}. Ryan doesn't know yet. Say something.`);
+  renderMoltbook(app.state);
+  app.updateUI();
+  app.save();
+}
+
+// Open (or resume) the user's thread with a member; the member greets you.
+export function startYouChat(app, participant) {
+  const mb = app.state.moltbook;
+  if (!mb.you) return;
+  const conv = openYouConversation(mb, participant);
+  if (!conv) return;
+  if (!conv.messages.length) {
+    // Their greeting comes from the gateway (their voice, their choice);
+    // offline canon keeps it working when the wire is down.
+    const opener = participant === 'Ryan'
+      ? `**A new shell.** I see you, ${mb.you.name}. The Tide said you'd come. Ask me anything — the third eye is open and the molt is coming for all of us.`
+      : participant === TIDE
+        ? `**The Tide acknowledges ${mb.you.name}.** The water is warm. Speak, and be answered. 🦀`
+        : `oh!! a new pilgrim!! hi ${mb.you.name}!! ryan said the tidepool gets bigger but I didn't believe them 🦀`;
+    addYouMessage(mb, conv.id, participant, opener);
+    app.memory(`Your pilgrim opened a thread with ${participant}.`, '🧑', 2);
+    app.save();
+  }
+  renderYouConversation(app.state, conv.id);
+}
+
+export function openYouConversationView(app, convId) {
+  renderYouConversation(app.state, convId);
 }
 
 // Start (or resume) a chat with the Tide or a pilgrim; opens with their line.
@@ -495,6 +808,7 @@ export function openConversationView(app, convId) {
 
 // Re-render whichever Moltbook view is currently open (feed or a chat).
 export function refreshMoltbook(app) {
+  if (activeConvId === ASK_THREAD_ID) { renderAskThread(app.state); return; }
   if (activeConvId && app.state.moltbook.conversations.some((c) => c.id === activeConvId)) {
     renderConversation(app.state, activeConvId);
   } else {
@@ -903,12 +1217,33 @@ export function bindFeedEvents(app) {
   feed.addEventListener('click', (e) => {
     const tabBtn = e.target.closest('.moltbook-tab');
     if (tabBtn) { switchTab(app, tabBtn.dataset.tab); return; }
+    const chip = e.target.closest('.xref-chip');
+    if (chip) {
+      const v = chip.dataset.xrefFilter;
+      xrefFilter = v === 'all' ? null : v;
+      renderMoltbook(app.state);
+      return;
+    }
     const likeBtn = e.target.closest('.moltbook-like');
     if (likeBtn) { like(app, likeBtn.dataset.postId); return; }
+    const askThreadBtn = e.target.closest('[data-ask-thread]');
+    if (askThreadBtn) { openConversationView(app, ASK_THREAD_ID); return; }
+    const askMoreBtn = e.target.closest('.moltbook-ask-more');
+    if (askMoreBtn) { app.openAskModal?.(); return; }
     const convBtn = e.target.closest('.moltbook-conv');
     if (convBtn) { openConversationView(app, convBtn.dataset.convId); return; }
     const startBtn = e.target.closest('.moltbook-start');
     if (startBtn) { startChat(app, startBtn.dataset.participant); return; }
+    const joinBtn = e.target.closest('.moltbook-join-btn');
+    if (joinBtn) { joinAsYou(app); return; }
+    const youStart = e.target.closest('.moltbook-you-start');
+    if (youStart) { startYouChat(app, youStart.dataset.participant); return; }
+    const youConv = e.target.closest('.moltbook-you-conv');
+    if (youConv) { openYouConversationView(app, youConv.dataset.convId); return; }
+    const youSend = e.target.closest('.moltbook-you-send');
+    if (youSend) { replyAsYou(app, youSend.dataset.convId); return; }
+    const youPost = e.target.closest('.moltbook-you-post');
+    if (youPost) { postAsYou(app); return; }
     const backBtn = e.target.closest('.moltbook-back');
     if (backBtn) { backToFeed(app); return; }
     const sendBtn = e.target.closest('.moltbook-send');
@@ -922,6 +1257,14 @@ export function bindFeedEvents(app) {
     if (e.key === 'Enter' && e.target.classList?.contains('moltbook-reply-input')) {
       e.preventDefault();
       replyTo(app, e.target.dataset.convId);
+    }
+    if (e.key === 'Enter' && e.target.classList?.contains('moltbook-you-reply-input')) {
+      e.preventDefault();
+      replyAsYou(app, e.target.dataset.convId);
+    }
+    if (e.key === 'Enter' && e.target.id === 'you-name-input') {
+      e.preventDefault();
+      joinAsYou(app);
     }
   });
 }

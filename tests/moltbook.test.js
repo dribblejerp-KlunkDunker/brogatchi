@@ -14,7 +14,7 @@ import {
 } from '../src/core/moltbook.js';
 import { defaultState } from '../src/core/save.js';
 import { buildSpec } from '../src/core/ryanSpec.js';
-import { buildStateReport } from '../src/ai/context.js';
+import { buildStateReport, RECALL_WINDOW } from '../src/ai/context.js';
 import { renderRyanSVG } from '../src/ui/ryanView.js';
 
 describe('moltbook core', () => {
@@ -156,15 +156,27 @@ describe('AI context report', () => {
     expect(report.moltbook.pilgrimsUshered).toBe(1);
   });
 
-  it('carries up to 8 recent memories into the report', () => {
+  it('carries recent memories into the report up to the recall window', () => {
     const s = defaultState();
     for (let i = 0; i < 10; i++) {
       s.memories.push({ icon: 'X', text: `memory ${i}`, imp: i, day: 'today' });
     }
     const report = JSON.parse(buildStateReport(s));
-    expect(report.recentMemories.length).toBe(8);
+    // The whole set fits inside the wide recall window.
+    expect(report.recentMemories.length).toBe(10);
     // Sorted by importance descending: imp 9 first.
     expect(report.recentMemories[0]).toContain('memory 9');
+  });
+
+  it('bounds the report memory list at RECALL_WINDOW even with a huge brain', () => {
+    const s = defaultState();
+    for (let i = 0; i < 60; i++) {
+      s.memories.push({ icon: 'X', text: `memory ${i}`, imp: i, day: 'today' });
+    }
+    const report = JSON.parse(buildStateReport(s));
+    expect(report.recentMemories.length).toBe(RECALL_WINDOW);
+    // Highest importance still leads.
+    expect(report.recentMemories[0]).toContain('memory 59');
   });
 
   it('openConversation creates and reuses threads per participant', () => {

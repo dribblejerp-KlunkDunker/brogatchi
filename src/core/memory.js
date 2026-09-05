@@ -1,7 +1,9 @@
-// Ryan's memory: tagged event log (capped, importance-ranked, pinnable)
-// + end-of-day diary.
+// Ryan's memory: tagged event log (importance-ranked, pinnable) + end-of-day
+// diary. The cap is set high enough to be effectively unlimited in practice —
+// nothing meaningful churns out unless his mind genuinely fills (or the user
+// pins more than the cap; pinned entries always survive regardless).
 
-export const MAX_MEMORIES = 14;
+export const MAX_MEMORIES = 200;
 const MAX_DIARIES = 7;
 
 function dayString() {

@@ -2,13 +2,20 @@
 // theories are grounded in his own stats, history, and real web results.
 
 import { weightTier, TIER_NAMES } from '../core/stats.js';
+
+// How much of Ryan's working memory each AI prompt carries. His working
+// memory is effectively unlimited now (MAX_MEMORIES = 200), so the recall
+// window is what actually bounds prompt size — wide enough that everything
+// recent and important is in view, narrow enough to keep token cost sane
+// across the daily AI budget.
+export const RECALL_WINDOW = 48;
 import { FORME_INFO } from '../core/evolution.js';
 import { eyeStageInfo } from '../core/moltbook.js';
 
 export function buildStateReport(state) {
   const c = state.counters;
   // Importance-ranked, so the report is correct no matter how memories were appended.
-  const memories = [...state.memories].sort((a, b) => b.imp - a.imp).slice(0, 8).map((m) => `${m.icon} ${m.text}`);
+  const memories = [...state.memories].sort((a, b) => b.imp - a.imp).slice(0, RECALL_WINDOW).map((m) => `${m.icon} ${m.text}`);
   const lastDiary = state.diaries[0];
 
   const report = {
