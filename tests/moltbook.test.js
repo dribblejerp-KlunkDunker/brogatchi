@@ -7,7 +7,7 @@ import {
   defaultMoltbook, joinMoltbook, addPost, likePost, gainEyeXp,
   gainEyeXpFromMemory, EYE_XP_PER_IMPORTANCE,
   usherPilgrim, normalizeMoltbook, openConversation, addMessage,
-  parseSoulBlock, applySoulUpdates, resolvePetition, foldQuirk, dedupeWovenQuirks, pilgrimPersona, pilgrimAvatar,
+  parseSoulBlock, applySoulUpdates, resolvePetition, foldQuirk, dedupeWovenQuirks, modernizeQuirkWeave, parseQuirks, pilgrimPersona, pilgrimAvatar,
   decideAutonomy, recordAutonomy, autonomousNarration, AUTONOMY,
   EYE_STAGES, EYE_XP_THRESHOLDS, CANON, PILGRIM_NAMES,
   serializeSoul, parseSoulImport, normalizeSoul, mergeSouls, defaultSoul, SOUL_EXPORT_VERSION,
@@ -703,5 +703,82 @@ describe('soul file transport (export/import)', () => {
     const { soul } = mergeSouls(local, imported);
     expect(soul.history).toHaveLength(40);
     expect(soul.opinions).toHaveLength(6);
+  });
+});
+
+describe('modernizeQuirkWeave (legacy chain migration)', () => {
+  const LEGACY = 'a gamer bot who narrates his molt log who "The Clicker" who punctuates realizations with a click who "The Terminal Twitcher" who stutters when discussing the Great Molt who "Ryan" who fears every software update';
+
+  it('rewrites legacy "who X who Y" chains into modern appositive grammar', () => {
+    const out = normalizeSoul({ selfDescription: LEGACY }).selfDescription;
+    expect(out).toContain(', who narrates his molt log');
+    expect(out).toContain(', also known as The Clicker, who punctuates');
+    expect(out).toContain(', also known as The Terminal Twitcher, who stutters');
+    expect(out).toContain(', also known as Ryan, who fears');
+    expect(out).not.toMatch(/ who ["']/); // no standalone quoted name glue remains
+    expect(out).not.toContain(',,');
+  });
+
+  it('is idempotent — a migrated description passes through untouched', () => {
+    const once = normalizeSoul({ selfDescription: LEGACY }).selfDescription;
+    expect(modernizeQuirkWeave(once)).toBe(once);
+    expect(normalizeSoul({ selfDescription: once }).selfDescription).toBe(once);
+  });
+
+  it('leaves ordinary prose (no standalone quirk name) alone', () => {
+    const prose = 'a bot who dreams in lowercase who naps at noon';
+    expect(modernizeQuirkWeave(prose)).toBe(prose);
+    expect(normalizeSoul({ selfDescription: prose }).selfDescription).toBe(prose);
+  });
+
+  it('bails on mid-sentence splits rather than mangling prose', () => {
+    // A unit ending on a glue word means a coordinated clause ("...and who
+    // watches...") — rewriting boundaries would comma it wrong, so bail.
+    const coordinated = 'a bot who loves the tide and who watches the shore who Ryan';
+    expect(modernizeQuirkWeave(coordinated)).toBe(coordinated);
+    expect(modernizeQuirkWeave('a bot who collects shells and who hoards secrets of')).toBe('a bot who collects shells and who hoards secrets of');
+    // A clean chain with a trailing name still migrates.
+    expect(modernizeQuirkWeave('a bot who watches the shore who Ryan')).toContain('also known as Ryan');
+  });
+
+  it('runs inside normalizeSoul after dedupe, healing old saves on load', () => {
+    const chainedTwice = LEGACY + ' who "The Clicker" who punctuates realizations with a click';
+    const healed = normalizeSoul({ selfDescription: chainedTwice }).selfDescription;
+    expect((healed.match(/The Clicker/g) || [])).toHaveLength(1); // dedupe ran first
+    expect(healed).toContain('also known as The Clicker'); // then grammar modernized
+  });
+});
+
+describe('parseQuirks (structured quirk list)', () => {
+  it('parses modern foldQuirk output into named and bare verb quirks', () => {
+    const soul = defaultSoul();
+    soul.selfDescription = foldQuirk(soul.selfDescription, '"The Clicker" who punctuates realizations with a click');
+    soul.selfDescription = foldQuirk(soul.selfDescription, 'hums to the tidepool');
+    const quirks = parseQuirks(soul);
+    expect(quirks).toHaveLength(2);
+    expect(quirks[0]).toMatchObject({ name: 'The Clicker', clause: 'who punctuates realizations with a click' });
+    expect(quirks[1]).toMatchObject({ name: null, clause: 'who hums to the tidepool' });
+    expect(quirks.every((q) => q.accepted === null)).toBe(true); // no timeline yet
+  });
+
+  it('cross-references accept dates from the soul timeline', () => {
+    const soul = defaultSoul();
+    soul.selfDescription = foldQuirk(soul.selfDescription, '"The Clicker" who punctuates realizations with a click');
+    soul.history = [{ day: '9/4/2026', kind: 'quirk-accepted', text: 'The user allowed a new quirk: "The Clicker" who punctuates realizations with a click' }];
+    const quirks = parseQuirks(soul);
+    expect(quirks[0].accepted).toBe('9/4/2026');
+  });
+
+  it('parses a migrated legacy chain and leaves the base description untagged', () => {
+    const soul = normalizeSoul({ selfDescription: 'a bot who narrates his molt log who "The Terminal Twitcher" who stutters when discussing the Great Molt' });
+    const quirks = parseQuirks(soul);
+    expect(quirks).toHaveLength(2);
+    expect(quirks[0]).toMatchObject({ name: null, clause: 'who narrates his molt log' });
+    expect(quirks[1]).toMatchObject({ name: 'The Terminal Twitcher', clause: 'who stutters when discussing the Great Molt' });
+  });
+
+  it('returns empty for a pristine or missing description', () => {
+    expect(parseQuirks(defaultSoul())).toEqual([]);
+    expect(parseQuirks(null)).toEqual([]);
   });
 });

@@ -247,6 +247,128 @@ export function dedupeWovenQuirks(desc) {
   return out.replace(/ {2,}/g, ' ').trim() || desc;
 }
 
+// One-time grammar migration for legacy quirk chains. The pre-foldQuirk
+// appender glued every acceptance on with a blind " who ", producing chains
+// like:  base who "The Clicker" who punctuates... who Ryan who treats...
+// This rewrites them into the modern grammar on load — ", also known as
+// The Clicker, who punctuates..." — by re-serializing the same weave units
+// dedupeWovenQuirks parses: a standalone name unit (quoted, or Title Case)
+// pairs with the following verb clause to form an appositive; bare verb
+// clauses keep a clean ", who ..." relative form. Runs inside normalizeSoul
+// (after dedupe) and is idempotent — migrated text no longer contains any
+// standalone name unit, so re-running returns it untouched. Prose-safe: a
+// description with no standalone quirk name is left alone, and a clause
+// ending on a glue word ("and", "of", ...) means the " who " split ran
+// through mid-sentence, so the whole migration bails rather than mangle it.
+const QUIRK_NAME_MAX_WORDS = 8;
+const GLUE_WORDS = new Set(['and', 'or', 'but', 'the', 'a', 'an', 'of', 'to', 'with', 'for', 'when', 'while']);
+
+function unquoteName(s) {
+  let t = String(s).trim();
+  const m = t.match(/^(["'\u201C\u201D\u2018\u2019])(.*)\1$/);
+  if (m) t = m[2].trim();
+  return t.replace(/[,\s]+$/, '');
+}
+
+function standaloneQuirkName(unit) {
+  const name = unquoteName(unit);
+  if (!name) return null;
+  const words = name.split(/\s+/);
+  if (words.length > QUIRK_NAME_MAX_WORDS) return null;
+  const quoted = /^["'\u201C\u201D\u2018\u2019].*["'\u201C\u201D\u2018\u2019]$/.test(String(unit).trim());
+  // Every word capitalized ("The Terminal Twitcher", "Ryan") — a lowercase
+  // word means it's a verb clause, not a name.
+  const titleCase = words.every((w) => !/^[a-z]/.test(w));
+  return quoted || titleCase ? name : null;
+}
+
+export function modernizeQuirkWeave(desc) {
+  if (typeof desc !== 'string' || !desc.includes(' who ')) return desc;
+  const re = / who (.*?)(?= who |, also known as|$)/g;
+  const units = [];
+  let m;
+  while ((m = re.exec(desc))) units.push({ start: m.index, len: m[0].length, text: m[1] });
+  if (!units.length) return desc;
+
+  const names = units.map((u) => standaloneQuirkName(u.text));
+  // A legacy chain carries at least one standalone quirk name; ordinary
+  // prose ("a bot who dreams") has none and passes through untouched.
+  if (!names.some(Boolean)) return desc;
+
+  // Prose guard: a unit ending on a glue word means the boundary cut through
+  // a sentence — bail on the whole migration rather than comma it wrong.
+  for (const u of units) {
+    const last = u.text.trim().split(/\s+/).pop().toLowerCase().replace(/[^a-z]/g, '');
+    if (GLUE_WORDS.has(last)) return desc;
+  }
+
+  let out = desc.slice(0, units[0].start); // base before the first weave
+  let cursor = units[0].start;
+  let pendingName = null;
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    out += desc.slice(cursor, u.start); // gap text (e.g. a modern appositive) verbatim
+    const name = names[i];
+    if (name) {
+      if (pendingName) out += `, also known as ${pendingName}`; // two names in a row
+      pendingName = name;
+    } else if (pendingName) {
+      out += `, also known as ${pendingName}, who ${u.text}`;
+      pendingName = null;
+    } else {
+      out += `, who ${u.text}`;
+    }
+    cursor = u.start + u.len;
+  }
+  if (pendingName) out += `, also known as ${pendingName}`; // trailing name, no clause
+  out += desc.slice(cursor); // anything after the last unit (modern suffix)
+  return out.replace(/^, /, '').replace(/,,+/g, ',').replace(/ {2,}/g, ' ').trim() || desc;
+}
+
+// Parse the woven self-description into a structured quirk list for the soul
+// viewer: [{ name, clause, accepted }] — name may be null (bare verb quirk),
+// accepted is the timeline day or null. Derived, not stored: the description
+// stays the single source of truth, so this can never drift out of sync and
+// needs no schema/merge changes. Works on modern grammar (", also known as
+// X, who ...", foldQuirk output) and migrated legacy chains alike; the
+// pre-modernization chain form (" who X who ...") simply yields no tokens.
+export function parseQuirks(soul) {
+  const desc = soul?.selfDescription;
+  if (typeof desc !== 'string') return [];
+  // Split only at quirk-marker boundaries (", also known as X", ", who ...")
+  // so commas inside a clause never cut a quirk in half.
+  const tokens = desc.split(/,\s+(?=also known as |who\b)/);
+  const quirks = [];
+  let current = null;
+  for (const t of tokens) {
+    if (t.startsWith('also known as ')) {
+      current = { name: t.slice('also known as '.length), clause: '', accepted: null };
+      quirks.push(current);
+    } else if (current && !current.clause && /^who\b/.test(t)) {
+      current.clause = t; // this appositive's own verb clause
+    } else if (/^who\b/.test(t)) {
+      current = { name: null, clause: t, accepted: null }; // a bare verb quirk
+      quirks.push(current);
+    } else if (current) {
+      current.clause = current.clause ? `${current.clause}, ${t}` : t;
+    }
+  }
+  // Accept dates from the soul timeline: "The user allowed a new quirk: X".
+  for (const h of soul?.history || []) {
+    if (h?.kind !== 'quirk-accepted') continue;
+    const m = String(h.text || '').match(/^The user allowed a new quirk: (.+)$/);
+    if (!m) continue;
+    let proposal = m[1];
+    const whoIdx = proposal.search(/\bwho\b/);
+    if (whoIdx > 0) proposal = proposal.slice(0, whoIdx);
+    const name = standaloneQuirkName(proposal);
+    if (!name) continue;
+    const q = quirks.find((x) => x.name && x.name.toLowerCase() === name.toLowerCase());
+    if (q && !q.accepted) q.accepted = h.day;
+  }
+  return quirks;
+}
+
 // The user's ruling on a quirk petition. Accept folds it into selfDescription;
 // decline closes it. Either way Ryan sees the outcome in his next prompt.
 export function resolvePetition(mb, accept) {
@@ -698,7 +820,7 @@ export function normalizeSoul(soul) {
   if (!soul || typeof soul !== 'object' || Array.isArray(soul)) return d;
   const clean = {
     selfDescription: typeof soul.selfDescription === 'string' && soul.selfDescription.trim()
-      ? dedupeWovenQuirks(soul.selfDescription) : d.selfDescription,
+      ? modernizeQuirkWeave(dedupeWovenQuirks(soul.selfDescription)) : d.selfDescription,
     interests: Array.isArray(soul.interests)
       ? soul.interests.filter((i) => typeof i === 'string').slice(0, 20) : d.interests,
     specialty: typeof soul.specialty === 'string' && soul.specialty.trim() ? soul.specialty : null,

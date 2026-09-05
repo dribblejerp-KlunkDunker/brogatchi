@@ -10,7 +10,7 @@ import { mergePinnedMemories } from '../core/memory.js';
 import {
   addPost, gainEyeXp, joinMoltbook, usherPilgrim, likePost,
   openConversation, addMessage, eyeStageInfo, PILGRIM_NAMES, CANON, TIDE,
-  parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona, pilgrimAvatar,
+  parseSoulBlock, applySoulUpdates, resolvePetition, pilgrimPersona, pilgrimAvatar, parseQuirks,
   serializeSoul, parseSoulImport, mergeSouls, recordSoulEvent,
   decideAutonomy, recordAutonomy, autonomousNarration,
   decidePilgrimAct, applyPilgrimWander, applyPilgrimReply, applyPilgrimTheory,
@@ -615,6 +615,21 @@ export function renderSoulFile(state, notice = null) {
       ${soul.interests?.length ? `<div class="text-[10px] text-orange-200/80 mt-1">Interested in: ${escapeHtml(soul.interests.join(', '))}</div>` : ''}
     </div>`;
 
+  // The same quirks as the prose above, but structured: one row per accepted
+  // quirk, with its accept date from the soul timeline where one exists.
+  const quirks = parseQuirks(soul);
+  const quirksHtml = quirks.length
+    ? `<div class="mb-2"><div class="text-[9px] font-bold text-orange-300 mb-1">✨ QUIRKS HE WEARS <span class="text-orange-400/50 font-normal">· ${quirks.length}</span></div>
+        ${quirks.map((q) => `
+          <div class="flex items-baseline gap-1.5 mb-0.5">
+            <span class="text-[10px] text-orange-100/90 flex-1">
+              ${q.name ? `<span class="font-bold text-amber-200">${escapeHtml(q.name)}</span>${q.clause ? ` — ${escapeHtml(q.clause.replace(/^who\s+/, ''))}` : ''}` : escapeHtml(q.clause.replace(/^who\s+/, ''))}
+            </span>
+            <span class="text-[8px] text-orange-400/50 whitespace-nowrap">${q.accepted ? `accepted ${escapeHtml(q.accepted)}` : 'woven'}</span>
+          </div>`).join('')}
+      </div>`
+    : ''; 
+
   const opinions = soul.opinions?.length
     ? soul.opinions.map((o) => `<div class="text-[10px] text-orange-100/90 mb-0.5"><span class="font-bold text-orange-300">${escapeHtml(o.topic)}</span> — ${escapeHtml(o.stance)}</div>`).join('')
     : '<div class="text-[10px] text-orange-200/40 italic">No opinions declared yet — he is still listening for what he thinks.</div>';
@@ -634,6 +649,7 @@ export function renderSoulFile(state, notice = null) {
     : '<div class="text-[10px] text-orange-200/40 italic">The timeline begins with his first self-declaration.</div>';
 
   body.innerHTML = identity
+    + quirksHtml
     + `<div class="mb-2"><div class="text-[9px] font-bold text-orange-300 mb-1">OPINIONS HE OWNS</div>${opinions}${pending}</div>`
     + `<div><div class="text-[9px] font-bold text-orange-300 mb-1 border-t border-orange-900 pt-1">SOUL TIMELINE</div>${history}</div>`;
 
