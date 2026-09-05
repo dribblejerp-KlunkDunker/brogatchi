@@ -16,8 +16,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="./assets/index-D7vx0ejJ.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-B3L8AoMl.css">
+  <script type="module" crossorigin src="./assets/index-CX8ZPrUn.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-Ck-_yqpE.css">
 </head>
 <body>
 
@@ -178,10 +178,12 @@
     <div class="font-text text-sm bg-gray-100 p-2 rounded border border-gray-400 h-32 overflow-y-auto" id="ask-response" role="status" aria-live="polite">
       Ask me anything. I'll search the web and bypass the firewall for the TRUTH.
     </div>
+    <div id="ask-log-view" class="hidden font-text text-sm bg-gray-100 p-2 rounded border border-gray-400 h-48 overflow-y-auto space-y-2"></div>
     <input type="text" id="ask-input" class="border-2 border-black p-2 text-[10px] w-full rounded font-text" placeholder="E.g., Is the earth flat?">
     <div class="flex gap-2">
       <button class="pixel-btn flex-1 p-2 text-[10px] bg-blue-500 text-white" onclick="app.submitAsk()">Search</button>
       <button class="pixel-btn flex-1 p-2 text-[10px] bg-purple-500 text-white" onclick="app.randomDeepDive()">🎲 Random</button>
+      <button id="ask-log-btn" class="pixel-btn p-2 text-[10px] bg-gray-300 text-black" onclick="app.toggleAskLog()" title="Browse past conversations">📜 LOG</button>
     </div>
     <div id="ask-api-note" class="text-[7px] text-center opacity-60"></div>
   </div>
