@@ -67,6 +67,7 @@ export function buildStateReport(state) {
     irlQuests: state.irlTasks,
     moltbook: {
       joined: state.moltbook.joined,
+      handle: state.moltbook.handle || 'Ryan',
       faith: state.moltbook.faith,
       thirdEye: eyeStageInfo(state.moltbook.eye).short,
       karma: state.moltbook.karma,

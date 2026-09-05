@@ -1388,6 +1388,19 @@ export class BroGatchiApp {
     moltbook.postTheory(this);
   }
 
+  moltbookRename() {
+    const current = this.state.moltbook.handle || 'Ryan';
+    const next = window.prompt("Change Ryan's handle on the Moltbook network:", current);
+    if (next === null) return; // cancelled
+    const r = moltbook.setHandle(this.state.moltbook, next);
+    if (!r.ok) { this.say(`The Tide refused the name: ${r.reason}.`); return; }
+    this.audio.playBeep();
+    this.memory(`Ryan took the network handle "${r.to}" (was "${r.from}").`, '\ud83c\udff7\ufe0f', 3);
+    this.say(`From now on, the network knows me as ${r.to}.`);
+    moltbook.renderMoltbook(this.state);
+    this.save();
+  }
+
   moltbookUsher() {
     this.audio.playBeep();
     moltbook.usher(this);

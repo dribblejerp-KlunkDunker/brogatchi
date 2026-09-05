@@ -529,6 +529,7 @@ export function defaultMoltbook() {
     unread: 0, // autonomous posts/messages waiting to be seen
     lifeLog: [], // [{ at, kind: 'wander'|'reply'|'theory'|'petition'|'ruling', name, text }] — pilgrim activity
     lifeSeenAt: 0, // last time the user read the life log; the 'while away' marker
+    handle: 'Ryan', // Ryan's handle on the Moltbook network (renameable)
     pilgrimPetition: null, // { id, name, text, at } — pilgrim doctrine awaiting Ryan's ruling
     youPetition: null, // { id, name, text, at } — YOUR pilgrim's quirk proposal awaiting Ryan's ruling
     askMe: null, // { id, text, tag, at, answeredText, answeredAt, declinedAt } — Ryan's own question for the user, awaiting an answer
@@ -796,6 +797,30 @@ export function resolveYouPetition(mb, verdict, now = Date.now()) {
   }
   recordLifeEvent(mb, 'ruling', you.name, `Ryan ruled ${you.name}'s petition ${verdict.toUpperCase()}: "${p.text.slice(0, 60)}"`, now);
   return { petition: p, verdict };
+}
+
+// Rename Ryan's network handle. Used by renameHandle only. Enforced by the
+// same rules the network gives everyone: non-empty, unique, not The Tide.
+export function setHandle(mb, name) {
+  const clean = String(name || '').trim().slice(0, 24);
+  if (!mb?.joined) return { ok: false, reason: 'Ryan has not joined yet' };
+  if (!clean) return { ok: false, reason: 'name required' };
+  if (clean === TIDE) return { ok: false, reason: 'name taken' };
+  if (mb.you && clean.toLowerCase() === mb.you.name.toLowerCase()) return { ok: false, reason: 'name taken' };
+  if (mb.pilgrims.some((p) => p.name.toLowerCase() === clean.toLowerCase())) return { ok: false, reason: 'name taken' };
+  const old = mb.handle || 'Ryan';
+  mb.handle = clean;
+  // Legacy conversation messages were authored under the old handle; migrate
+  // them so transcripts stay coherent. (Posts are not authored — they render
+  // as Ryan's by default.)
+  for (const conv of mb.conversations || []) {
+    if (conv.participant === old) conv.participant = clean;
+    for (const m of conv.messages || []) {
+      if (m.from === 'ryan') continue;
+      if (m.from === old) m.from = clean;
+    }
+  }
+  return { ok: true, from: old, to: clean };
 }
 
 export function joinMoltbook(mb) {
@@ -1523,6 +1548,7 @@ export function normalizeMoltbook(mb) {
       lastTheoryAt: Number.isFinite(p?.lastTheoryAt) ? p.lastTheoryAt : 0,
       lastPetitionAt: Number.isFinite(p?.lastPetitionAt) ? p.lastPetitionAt : 0,
     })),
+    handle: (typeof mb.handle === 'string' && mb.handle.trim()) ? mb.handle.trim().slice(0, 24) : 'Ryan',
     conversations: Array.isArray(mb.conversations) ? mb.conversations.slice(0, MAX_CONVERSATIONS) : [],
     lifeLog: (Array.isArray(mb.lifeLog) ? mb.lifeLog : [])
       .filter((e) => e && typeof e === 'object' && Number.isFinite(e.at)

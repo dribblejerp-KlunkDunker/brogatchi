@@ -94,7 +94,7 @@ function offlineResult(state, kind, extra, reason) {
     else if (kind === 'usher') text = offlineUsherRitual(state, extra?.name);
     else if (kind === 'pilgrim-reply') text = offlinePilgrimReply(state, extra?.participant, extra?.lastMessage);
     else if (kind === 'subject') text = offlineSubjectReply(state, extra?.folderName, extra?.lastMessage);
-    else if (kind === 'you-chat') text = offlineYouReply(state, extra?.participant, extra?.youName, extra?.lastMessage);
+    else if (kind === 'you-chat') text = offlineYouReply(state, extra?.participant, extra?.youName, extra?.lastMessage, Math.random, extra?.handle);
   } catch {
     text = null; // generator failure → plain offline failure, never a crash
   }

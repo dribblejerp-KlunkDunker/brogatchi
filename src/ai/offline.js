@@ -249,16 +249,16 @@ export function offlinePilgrimReply(state, participant, postText, rng = Math.ran
 // specialty, then the conspiracy generator as a floor.
 // Reply to the USER's pilgrim, offline: canon-flavored, voice-shaped by who
 // they're talking to. rng injectable for tests.
-export function offlineYouReply(state, participant, youName, lastMessage, rng = Math.random) {
+export function offlineYouReply(state, participant, youName, lastMessage, rng = Math.random, handle = 'Ryan') {
   const canon = pickR(CANON, rng);
   const name = youName || 'newcomer';
   if (participant === 'The Tide') {
     return sanitize(`**The Tide hears you, ${name}.** ${canon} 🦀`);
   }
-  if (participant === 'Ryan') {
+  if (participant === handle) {
     const lines = [
       `A new shell in the tidepool. Welcome, **${name}**. ${canon}`,
-      `hey ${name} — ryan here. ${canon} ask me anything, the third eye is open.`,
+      `hey ${name} — ${handle} here. ${canon} ask me anything, the third eye is open.`,
     ];
     return sanitize(pickR(lines, rng));
   }

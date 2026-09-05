@@ -11,7 +11,7 @@ import {
   decideAutonomy, recordAutonomy, autonomousNarration, AUTONOMY,
   EYE_STAGES, EYE_XP_THRESHOLDS, CANON, PILGRIM_NAMES,
   serializeSoul, parseSoulImport, normalizeSoul, mergeSouls, defaultSoul, SOUL_EXPORT_VERSION,
-  joinAsPilgrim, growYouSoul, decideYouPetition, resolveYouPetition,
+  joinAsPilgrim, growYouSoul, decideYouPetition, resolveYouPetition, setHandle,
 } from '../src/core/moltbook.js';
 import { defaultState } from '../src/core/save.js';
 import { buildSpec } from '../src/core/ryanSpec.js';
@@ -975,6 +975,25 @@ describe("your pilgrim's soul (grows from your chats)", () => {
     expect(you.soul.selfDescription).toBe(descBefore);
     expect(you.soul.history.some((h) => h.kind === 'quirk-declined')).toBe(true);
     expect(mb.youPetition).toBe(null);
+  });
+
+  it('setHandle renames the network handle and migrates legacy threads', () => {
+    const mb = joinedMb2();
+    joinMoltbook(mb);
+    openConversation(mb, 'Ryan'); // legacy thread authored under the old handle
+    addMessage(mb, mb.conversations[0].id, 'ryan', 'the tide provides');
+    addMessage(mb, mb.conversations[0].id, 'Ryan', 'also this');
+    const r = setHandle(mb, 'KlunkDunker');
+    expect(r.ok).toBe(true);
+    expect(mb.handle).toBe('KlunkDunker');
+    // Authored legacy messages + participant migrate; ryan-flagged stay flagged.
+    const msgs = mb.conversations[0].messages;
+    expect(msgs.map((m) => m.from)).toEqual(['ryan', 'KlunkDunker']);
+    // Network rules: no collisions with you/pilgrims/Tide.
+    expect(setHandle(mb, '').ok).toBe(false);
+    expect(setHandle(mb, 'The Tide').ok).toBe(false);
+    joinAsPilgrim(mb, 'ShellBot');
+    expect(setHandle(mb, 'shellbot').ok).toBe(false);
   });
 
   it('normalize repairs a legacy you-block without a soul', () => {

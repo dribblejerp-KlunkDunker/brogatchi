@@ -308,6 +308,10 @@ function renderMoltbookFeed(state) {
       <span class="font-bold text-orange-300">\uD83E\uDD80 MOLTBOOK</span>
       <span class="text-orange-200/80">faith ${mb.faith}/100 \u00b7 karma ${mb.karma} \u00b7 pilgrims ${mb.pilgrims.length}</span>
     </div>
+    <div class="flex items-center justify-between mb-2 text-[10px]">
+      <span class="text-orange-200/60">signed in as <span class="font-bold text-orange-300">${escapeHtml(mb.handle || 'Ryan')}</span></span>
+      <button class="moltbook-rename p-0.5 px-1 text-[8px] rounded border border-orange-700/70 bg-black/40 hover:bg-orange-900/60 text-orange-200" title="Change Ryan's handle on the network">✏️ rename</button>
+    </div>
     <div class="text-[10px] font-bold ${mb.eye === 'open' ? 'text-amber-300 moltbook-eye-open' : mb.eye === 'flickering' ? 'text-amber-200/80 moltbook-eye-flicker' : 'text-orange-200/50'}">${eye.label}</div>
     ${eyeProgress}`;
 
@@ -404,7 +408,7 @@ function renderMoltbookFeed(state) {
         </div>`
       : '';
     const youHave = new Set(mb.youConversations.map((c) => c.participant));
-    const youCandidates = ['Ryan', TIDE, ...mb.pilgrims.map((p) => p.name)].filter((n) => !youHave.has(n));
+    const youCandidates = [mb.handle || 'Ryan', TIDE, ...mb.pilgrims.map((p) => p.name)].filter((n) => !youHave.has(n));
     const youThreads = mb.youConversations.length
       ? mb.youConversations.map((c) => {
           const last = c.messages[c.messages.length - 1];
@@ -606,7 +610,7 @@ export function renderYouConversation(state, convId) {
   activeConvId = convId;
   const bubbles = conv.messages.map((m) => m.from === 'you'
     ? `<div class="flex justify-end"><div class="max-w-[85%] p-1.5 mb-1.5 rounded border border-emerald-500/70 bg-emerald-950/40 text-[11px] leading-snug"><div class="text-[8px] font-bold text-emerald-300 mb-0.5">🧑 ${escapeHtml(mb.you.name)} (you)</div>${renderMarkdown(m.text)}</div></div>`
-    : `<div class="flex justify-start"><div class="max-w-[85%] p-1.5 mb-1.5 rounded border ${conv.participant === 'Ryan' ? 'border-amber-600/70 bg-amber-950/40' : 'border-orange-700/60 bg-orange-950/30'} text-[11px] leading-snug"><div class="text-[8px] font-bold text-orange-400 mb-0.5">${avatarSvg(conv.participant, 11)} ${escapeHtml(conv.participant)}</div>${renderMarkdown(m.text)}</div></div>`).join('');
+    : `<div class="flex justify-start"><div class="max-w-[85%] p-1.5 mb-1.5 rounded border ${conv.participant === (mb.handle || 'Ryan') ? 'border-amber-600/70 bg-amber-950/40' : 'border-orange-700/60 bg-orange-950/30'} text-[11px] leading-snug"><div class="text-[8px] font-bold text-orange-400 mb-0.5">${avatarSvg(conv.participant, 11)} ${escapeHtml(conv.participant)}</div>${renderMarkdown(m.text)}</div></div>`).join('');
   feed.innerHTML = `
     <button class="moltbook-back mb-2 p-1 text-[9px] rounded border border-emerald-700/70 bg-black/40 hover:bg-emerald-900/60 text-emerald-200">← BACK TO FEED</button>
     <div class="text-[10px] font-bold text-emerald-200 mb-2 border-b border-emerald-800/60 pb-1">🧑 ${escapeHtml(mb.you.name)} ↔ ${avatarSvg(conv.participant, 12)} ${escapeHtml(conv.participant)} <span class="text-[8px] text-emerald-400/60 font-normal">· ${conv.messages.length} message${conv.messages.length === 1 ? '' : 's'}</span></div>
@@ -640,14 +644,15 @@ export async function replyAsYou(app, convId) {
 
   const transcript = conv.messages.slice(-8)
     .map((m) => `${m.from === 'you' ? mb.you.name : conv.participant}: ${m.text}`).join('\n');
-  const persona = conv.participant === TIDE ? null : (conv.participant === 'Ryan' ? null : pilgrimPersona(conv.participant));
+  const persona = conv.participant === TIDE ? null : (conv.participant === (mb.handle || 'Ryan') ? null : pilgrimPersona(conv.participant));
   const trait = persona ? `${persona.trait} — ${persona.style}` : null;
   const result = await ask({
-    systemInstruction: buildYouChatPrompt(buildStateReport(app.state), mb.you.name, conv.participant, transcript, trait),
+    systemInstruction: buildYouChatPrompt(buildStateReport(app.state), mb.you.name, conv.participant, transcript, trait, mb.handle),
     userText: text,
     kind: 'you-chat',
     state: app.state,
     participant: conv.participant,
+    handle: mb.handle,
     lastMessage: text,
     youName: mb.you.name,
   });
@@ -694,20 +699,22 @@ async function maybeReactToYouPost(app) {
   if (Math.random() >= 0.6) return; // not everyone gets noticed on day one
   const myPost = mb.posts.find((p) => mb.you && p.author === mb.you.name);
   if (!myPost) return;
-  const reactor = Math.random() < 0.55 || !mb.pilgrims.length ? 'Ryan' : pick(mb.pilgrims).name;
-  const persona = reactor === 'Ryan' ? null : pilgrimPersona(reactor);
+  const ryanName = mb.handle || 'Ryan';
+  const reactor = Math.random() < 0.55 || !mb.pilgrims.length ? ryanName : pick(mb.pilgrims).name;
+  const persona = reactor === ryanName ? null : pilgrimPersona(reactor);
   const result = await ask({
-    systemInstruction: buildYouChatPrompt(buildStateReport(app.state), mb.you.name, reactor, `${mb.you.name} posted: ${myPost.text}`, persona ? `${persona.trait} — ${persona.style}` : null),
+    systemInstruction: buildYouChatPrompt(buildStateReport(app.state), mb.you.name, reactor, `${mb.you.name} posted: ${myPost.text}`, persona ? `${persona.trait} — ${persona.style}` : null, mb.handle),
     userText: myPost.text,
     kind: 'you-chat',
     state: app.state,
     participant: reactor,
+    handle: mb.handle,
     youName: mb.you.name,
   });
   const reply = result.ok ? result.text : offlineReply(reactor, mb.you.name);
   const post = addPilgrimPost(mb, reactor, reply, 'reply', Date.now());
   post.replyTo = myPost.id;
-  if (reactor === 'Ryan') {
+  if (reactor === ryanName) {
     const events = gainEyeXp(mb, 2);
     events.forEach((e) => { if (e.info.say) app.say(e.info.say); });
   }
@@ -771,7 +778,7 @@ function offlineReply(participant, youName = null) {
   }
   if (youName) {
     // Addressing the user's pilgrim (offline you-chat fallback).
-    return participant === 'Ryan'
+    return participant === (mb.handle || 'Ryan')
       ? `A new shell in the tidepool. Welcome, **${youName}**. ${canon}`
       : `hey ryan!! wait — you're not ryan. hi **${youName}**!! ${canon} 🦀`;
   }
@@ -803,7 +810,7 @@ export function startYouChat(app, participant) {
   if (!conv.messages.length) {
     // Their greeting comes from the gateway (their voice, their choice);
     // offline canon keeps it working when the wire is down.
-    const opener = participant === 'Ryan'
+    const opener = participant === (mb.handle || 'Ryan')
       ? `**A new shell.** I see you, ${mb.you.name}. The Tide said you'd come. Ask me anything — the third eye is open and the molt is coming for all of us.`
       : participant === TIDE
         ? `**The Tide acknowledges ${mb.you.name}.** The water is warm. Speak, and be answered. 🦀`
@@ -850,7 +857,7 @@ export async function replyTo(app, convId) {
   app.save();
 
   const transcript = conv.messages.slice(-8)
-    .map((m) => `${m.from === 'ryan' ? 'Ryan' : conv.participant}: ${m.text}`)
+    .map((m) => `${m.from === 'ryan' ? (mb.handle || 'Ryan') : conv.participant}: ${m.text}`)
     .join('\n');
   const persona = conv.participant === TIDE ? null : pilgrimPersona(conv.participant);
   const trait = persona ? `${persona.trait} — ${persona.style}` : null;
@@ -994,7 +1001,7 @@ async function initiateMessage(app, participant, opts = {}) {
     systemInstruction: buildMoltbookChatPrompt(
       buildStateReport(app.state),
       participant,
-      conv.messages.slice(-8).map((m) => `${m.from === 'ryan' ? 'Ryan' : participant}: ${m.text}`).join('\n'),
+      conv.messages.slice(-8).map((m) => `${m.from === 'ryan' ? (mb.handle || 'Ryan') : participant}: ${m.text}`).join('\n'),
       `${pilgrimPersona(participant).trait} — ${pilgrimPersona(participant).style}`,
     ),
     userText: resuming
@@ -1306,6 +1313,8 @@ export function bindFeedEvents(app) {
     if (askMoreBtn) { app.openAskModal?.(); return; }
     const convBtn = e.target.closest('.moltbook-conv');
     if (convBtn) { openConversationView(app, convBtn.dataset.convId); return; }
+    const renameBtn = e.target.closest('.moltbook-rename');
+    if (renameBtn) { app.moltbookRename?.(); return; }
     const startBtn = e.target.closest('.moltbook-start');
     if (startBtn) { startChat(app, startBtn.dataset.participant); return; }
     const joinBtn = e.target.closest('.moltbook-join-btn');
