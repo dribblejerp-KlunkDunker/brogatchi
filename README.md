@@ -133,17 +133,21 @@ the quirk **and his own reasoning**, with ACCEPT / DECLINE buttons.
 
 **👻 VIEW SOUL FILE** opens a dedicated modal showing:
 
-- **WHO I AM** — his full self-description (accepted quirks included), specialty,
-  and interests.
+- **WHO I AM** — his full self-description (accepted quirks woven in with
+  natural grammar), specialty, and interests.
+- **✨ QUIRKS HE WEARS** — the same quirks as a structured list: one row per
+  quirk with its accept date from the timeline, and a ✕ to prune a quirk
+  from the weave directly (the pruning is recorded in the soul timeline).
 - **OPINIONS HE OWNS** — every stance he has declared, in his words.
 - **SOUL TIMELINE** — the dated history of who he has become: specialties
   chosen (🧭), opinions formed and opinions *reversed* (💭), quirks accepted
-  (✨), and petitions declined (🚫).
+  (✨), pruned (✂️), and petitions declined (🚫).
 
 ![The soul-file viewer](docs/screenshots/soul-file.png)
 
-*The soul-file modal: WHO I AM, the opinions he owns, and the soul timeline —
-with the ⬇ EXPORT / ⬆ IMPORT action row so his identity can travel between devices.*
+*The soul-file modal: WHO I AM with the woven quirks, the QUIRKS HE WEARS
+structured list (with accept dates and ✕ prune buttons), opinions, and the
+soul timeline — plus ⬇ EXPORT / ⬆ IMPORT so his identity can travel.*
 
 ### Conversations & pilgrims
 
