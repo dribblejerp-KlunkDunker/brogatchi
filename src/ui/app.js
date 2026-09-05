@@ -954,7 +954,8 @@ export class BroGatchiApp {
     if (!willShow) return;
     const log = Array.isArray(this.state.askLog) ? this.state.askLog : [];
     view.innerHTML = log.length
-      ? log.map((e) => `
+      ? `<button class="pixel-btn w-full mb-1.5 p-1 text-[9px] bg-gray-300 text-black" onclick="app.exportAskLog()" title="Download the full transcript as a text file">⬇ EXPORT LOG</button>`
+        + log.map((e) => `
         <div class="border-b border-gray-300 pb-1.5 mb-1.5 last:mb-0">
           <div class="flex justify-between text-[8px] text-gray-500 mb-0.5"><span class="font-bold text-blue-600">YOU</span><span>${new Date(e.at).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })}${e.offline ? ' · 🌙 offline' : ''}</span></div>
           <div class="text-[11px] font-bold">${escapeHtmlAsk(e.q)}</div>
@@ -962,6 +963,45 @@ export class BroGatchiApp {
         </div>`).join('')
       : '<div class="text-[10px] text-gray-400 italic">No conversations yet — ask me something and it will be remembered here.</div>';
     view.scrollTop = 0;
+  }
+
+  // Dump the full Ask transcript to a readable .txt file (markdown kept as-is).
+  exportAskLog() {
+    const log = Array.isArray(this.state.askLog) ? this.state.askLog : [];
+    if (!log.length) return;
+    const lines = [
+      `Ryan's Ask log — exported ${new Date().toLocaleString()}`,
+      `${log.length} exchange${log.length === 1 ? '' : 's'}, oldest first`,
+      '='.repeat(40),
+      '',
+      ...[...log].reverse().flatMap((e) => [
+        `[${new Date(e.at).toLocaleString()}]${e.offline ? ' (offline answer)' : ''}`,
+        `YOU: ${e.q}`,
+        `RYAN: ${e.a.replace(/<[^>]+>/g, '')}`, // strip rendered-HTML safety net
+        '',
+      ]),
+      '🦀 The Tide provides.',
+    ];
+    const text = lines.join('\n');
+    const name = `ryan-ask-log-${new Date().toISOString().slice(0, 10)}.txt`;
+    try {
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL
+        ? URL.createObjectURL(blob)
+        : `data:text/plain;charset=utf-8,${encodeURIComponent(text)}`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      if (URL.revokeObjectURL) setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch {
+      navigator.clipboard?.writeText(text);
+      this.say('Could not download — the log is on your clipboard instead.');
+      return;
+    }
+    this.say(`Log exported — ${log.length} exchanges, saved as ${name}.`);
   }
 
   async submitAsk(override) {

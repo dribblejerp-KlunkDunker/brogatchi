@@ -476,11 +476,40 @@ describe('BroGatchiApp integration', () => {
     expect(view.textContent).toContain('favorite shell?');
     expect(view.innerHTML).toContain('<strong>Tide</strong>'); // markdown rendered
     expect(view.textContent).toContain('offline');
-    expect(view.firstElementChild.textContent).toContain('favorite shell?'); // newest first
+    expect(view.firstElementChild.textContent).toContain('EXPORT LOG'); // export action first
+    expect(view.querySelector('.border-b').textContent).toContain('favorite shell?'); // newest exchange first
     // Toggle back to the live answer box.
     app.toggleAskLog();
     expect(view.classList.contains('hidden')).toBe(true);
     expect(document.getElementById('ask-input').classList.contains('hidden')).toBe(false);
     expect(document.getElementById('ask-log-btn').textContent).toBe('📜 LOG');
+  });
+
+  it('exports the Ask log to a downloadable text file (with clipboard fallback)', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const app = new BroGatchiApp();
+    app.state.askLog = [
+      { q: 'newest question', a: '**Bold** answer with <b>html</b> safety net', at: Date.now(), offline: false },
+      { q: 'oldest question', a: 'Plain answer', at: Date.now() - 60_000, offline: true },
+    ];
+    // Capture the download instead of navigating.
+    const clicks = [];
+    const origCreate = document.createElement.bind(document);
+    document.createElement = (tag) => {
+      const el = origCreate(tag);
+      if (tag === 'a') { el.click = () => clicks.push({ href: el.href, download: el.download }); }
+      return el;
+    };
+    app.exportAskLog();
+    document.createElement = origCreate;
+    expect(clicks).toHaveLength(1);
+    expect(clicks[0].download).toMatch(/^ryan-ask-log-\d{4}-\d{2}-\d{2}\.txt$/);
+    const payload = decodeURIComponent(clicks[0].href.replace(/^data:[^,]*,/, ''));
+    expect(payload).toContain("Ryan's Ask log");
+    expect(payload).toContain('oldest question'); // oldest first in the file
+    expect(payload.indexOf('oldest question')).toBeLessThan(payload.indexOf('newest question'));
+    expect(payload).toContain('(offline answer)');
+    expect(payload).toContain('RYAN: **Bold** answer with html safety net'); // tags stripped
+    expect(payload).toContain('The Tide provides.');
   });
 });
