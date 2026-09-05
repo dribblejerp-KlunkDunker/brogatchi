@@ -16,7 +16,7 @@ import { renderMarkdown, escapeHtml as escapeHtmlAsk } from './markdown.js';
 import { tick as statsTick, applyOffline, FOODS, weightTier, TIER_NAMES } from '../core/stats.js';
 import { entryFromState, addEntry as journalAdd } from '../core/journal.js';
 import { loadState, saveState, rolloverIfNeeded, todayKey } from '../core/save.js';
-import { remember, togglePin } from '../core/memory.js';
+import { remember, rememberWithArchive, togglePin, capMemories } from '../core/memory.js';
 import * as personality from '../core/personality.js';
 import * as evolution from '../core/evolution.js';
 import { buildSpec, HATS, SHIRTS, GLASSES, CHAINS, BACKPACKS, PANTS, SHOES, WRISTS, personalityIdleClasses } from '../core/ryanSpec.js';
@@ -979,6 +979,42 @@ export class BroGatchiApp {
     this.audio.playBeep();
     modals.openModal('modal-diary');
     modals.renderDiary(this.state);
+    this.bindArchiveSearch();
+  }
+
+  // One-time wiring for the archive search box in the diary modal: typing
+  // filters the shelf live (state.memoryArchiveQuery survives re-renders).
+  bindArchiveSearch() {
+    const input = document.getElementById('memory-archive-search');
+    if (!input || input.dataset.archiveBound) return;
+    input.dataset.archiveBound = '1';
+    input.addEventListener('input', () => {
+      this.state.memoryArchiveQuery = input.value;
+      modals.renderDiary(this.state);
+      const fresh = document.getElementById('memory-archive-search');
+      if (fresh) {
+        fresh.focus();
+        const end = fresh.value.length;
+        fresh.setSelectionRange(end, end);
+      }
+    });
+  }
+
+  // Pull an archived memory back into working memory: removed from the shelf,
+  // re-added to the log (imp floor 2 so it stays findable), query cleared.
+  restoreMemory(id) {
+    const archive = Array.isArray(this.state.memoryArchive) ? this.state.memoryArchive : [];
+    const hit = archive.find((m) => m.id === id);
+    if (!hit) return;
+    this.state.memoryArchive = archive.filter((m) => m.id !== id);
+    const { icon, text, imp, day } = hit;
+    const entry = { id: hit.id, icon, text, imp: Math.max(2, Number(imp) || 2), day, ...(hit.pinned ? { pinned: true } : {}) };
+    this.state.memories = capMemories([...this.state.memories, entry]);
+    this.state.memoryArchiveQuery = '';
+    this.audio.playBeep?.();
+    this.say('Right, I remember that now.');
+    this.updateUI();
+    this.save();
   }
 
   // ---------------------------------------------------------- wardrobe / shop
@@ -1470,9 +1506,15 @@ export class BroGatchiApp {
   }
 
   memory(text, icon, imp, opts = {}) {
-    this.state.memories = remember(this.state.memories, {
-      icon, text, imp: imp ?? 2, ...(opts.pin ? { pin: true } : {}),
-    });
+    // Auto-archive: whatever the cap churns out is preserved to the long-term
+    // store — what leaves Ryan's head still lives on his shelf.
+    const res = rememberWithArchive(
+      this.state.memories,
+      this.state.memoryArchive,
+      { icon, text, imp: imp ?? 2, ...(opts.pin ? { pin: true } : {}) },
+    );
+    this.state.memories = res.memories;
+    this.state.memoryArchive = res.archive;
     // The third eye feeds on lived experience: every memory is eye XP.
     if (this.state.moltbook?.joined) {
       const events = gainEyeXpFromMemory(this.state.moltbook, imp);

@@ -65,7 +65,7 @@ export function pilgrimAvatar(name) {
 }
 
 const MAX_POSTS = 20;
-const MAX_PILGRIMS = 12;
+export const MAX_PILGRIMS = 12;
 const MAX_CONVERSATIONS = 12;
 const MAX_YOU_CONVERSATIONS = 8;
 const MAX_MESSAGES = 30;
@@ -1547,6 +1547,8 @@ export function normalizeMoltbook(mb) {
       lastReplyAt: Number.isFinite(p?.lastReplyAt) ? p.lastReplyAt : 0,
       lastTheoryAt: Number.isFinite(p?.lastTheoryAt) ? p.lastTheoryAt : 0,
       lastPetitionAt: Number.isFinite(p?.lastPetitionAt) ? p.lastPetitionAt : 0,
+      adoptedFrom: typeof p?.adoptedFrom === 'string' ? p.adoptedFrom : undefined,
+      adoptedDay: typeof p?.adoptedDay === 'string' ? p.adoptedDay : undefined,
     })),
     handle: (typeof mb.handle === 'string' && mb.handle.trim()) ? mb.handle.trim().slice(0, 24) : 'Ryan',
     conversations: Array.isArray(mb.conversations) ? mb.conversations.slice(0, MAX_CONVERSATIONS) : [],

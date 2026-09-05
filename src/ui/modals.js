@@ -3,6 +3,7 @@
 import { $ } from './hud.js';
 import { xpToNext, FORME_INFO } from '../core/evolution.js';
 import { TRAITS } from '../core/personality.js';
+import { recallArchive, ARCHIVE_VIEW } from '../core/memory.js';
 
 export function openModal(id) {
   const m = $(id);
@@ -74,6 +75,19 @@ export function renderDiary(state) {
       }
       rest.forEach((m) => { mem.innerHTML += memoryRow(m, false); });
     }
+    // The long-term shelf: what the cap churned out, searchable, never deleted.
+    const archive = state.memoryArchive || [];
+    if (archive.length) {
+      const q = (state.memoryArchiveQuery || '').trim();
+      const hits = q ? recallArchive(archive, q, ARCHIVE_VIEW) : archive.slice(0, ARCHIVE_VIEW);
+      mem.innerHTML += `<div class="flex items-center gap-1 mt-2 mb-0.5">
+        <div class="text-[8px] font-bold text-sky-700">🗄 ARCHIVE · ${archive.length} stored</div>
+        <input id="memory-archive-search" value="${q.replace(/"/g, '&quot;')}" placeholder="search…" maxlength="40"
+          class="flex-1 min-w-0 text-[8px] px-1 py-0.5 border border-black bg-white" />
+      </div>`;
+      hits.forEach((m) => { mem.innerHTML += archiveRow(m); });
+      if (!hits.length) mem.innerHTML += '<div class="text-[8px] text-gray-400 italic">Nothing in the archive matches.</div>';
+    }
   }
 
   const diary = $('diary-content');
@@ -91,6 +105,16 @@ export function renderDiary(state) {
       });
     }
   }
+}
+
+// One row on the archive shelf: dimmer than living memories — they already
+// happened. No pin toggle here; restore keeps the archive pristine.
+function archiveRow(m) {
+  return `<div class="text-[8px] bg-sky-50 p-1 border border-sky-300 flex items-start gap-1">
+    <span class="opacity-60">🗄</span>
+    <span class="flex-1 opacity-80">${m.icon} ${m.text} <span class="opacity-50">· archived ${m.day}</span></span>
+    <button type="button" class="mem-restore text-sky-700 hover:text-sky-900" onclick="app.restoreMemory('${m.id}')" title="Move back into working memory" aria-label="Restore memory">↩</button>
+  </div>`;
 }
 
 // One row in the memory log: a pin/unpin toggle + the memory itself.

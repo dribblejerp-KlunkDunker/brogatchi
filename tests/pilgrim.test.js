@@ -673,3 +673,122 @@ describe("your pilgrim's soul panel", () => {
     expect(Array.isArray(out.you.soul.history)).toBe(true);
   });
 });
+
+// ---- Pilgrim agent cards: export, parse, adopt ------------------------------
+
+describe('pilgrim card core', () => {
+  it('round-trips a pilgrim through a card with eye progress intact', () => {
+    const mb = joinedMb();
+    const { pilgrim } = usherPilgrim(mb, 'BugBard');
+    gainPilgrimEyeXp(pilgrim, 7);
+    pilgrim.eyeStage = 'flickering';
+    const json = molt.serializePilgrimCard(pilgrim);
+    expect(typeof json).toBe('string');
+    const parsed = molt.parsePilgrimCard(json);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.pilgrim.name).toBe('BugBard');
+    expect(parsed.pilgrim.eyeXp).toBe(7);
+    expect(parsed.pilgrim.eyeStage).toBe('flickering');
+  });
+
+  it('rejects junk, wrong-kind envelopes, reserved names, and future versions', () => {
+    expect(molt.parsePilgrimCard('not json').ok).toBe(false);
+    expect(molt.parsePilgrimCard('{"kind":"soul-file","soul":{}}').ok).toBe(false);
+    expect(molt.parsePilgrimCard('{"name":"  "}').ok).toBe(false);
+    expect(molt.parsePilgrimCard('{"name":"The Tide"}').ok).toBe(false);
+    expect(molt.parsePilgrimCard('{"name":"Ryan"}').ok).toBe(false);
+    expect(molt.parsePilgrimCard('{"kind":"pilgrim-card","version":99,"pilgrim":{"name":"X"}}').ok).toBe(false);
+  });
+
+  it('adopts a card into the roster with faith, provenance, and life hooks', () => {
+    const mb = joinedMb();
+    const before = mb.faith;
+    const card = molt.parsePilgrimCard('{"name":"WanderCrab","eyeStage":"flickering","eyeXp":4}').pilgrim;
+    const res = molt.adoptPilgrimCard(mb, card);
+    expect(res.ok).toBe(true);
+    expect(mb.pilgrims.some((p) => p.name === 'WanderCrab')).toBe(true);
+    expect(mb.faith).toBe(Math.min(100, before + 3));
+    expect(res.pilgrim.adoptedFrom).toBe('card');
+    expect(res.pilgrim.eyeXp).toBe(4);
+    // Life hooks initialized so the pilgrim lives on the new roster.
+    expect(res.pilgrim.lastWanderAt).toBe(0);
+  });
+
+  it('refuses duplicates (roster, you), a full roster, and survives reload', () => {
+    const mb = joinedMb();
+    const card = molt.parsePilgrimCard('{"name":"DupCrab"}').pilgrim;
+    expect(molt.adoptPilgrimCard(mb, card).ok).toBe(true);
+    expect(molt.adoptPilgrimCard(mb, card).ok).toBe(false); // same name again
+    // you-collision:
+    const mb2 = joinedMb();
+    mb2.you = { name: 'ShellBot 9000', joinedAt: Date.now(), day: '9/4/2026', eyeStage: 'flickering', eyeXp: 0, soul: null, lastPetitionDay: null, lastPetitionAt: 0 };
+    expect(molt.adoptPilgrimCard(mb2, molt.parsePilgrimCard('{"name":"shellbot 9000"}').pilgrim).ok).toBe(false);
+    // full roster:
+    const mb3 = joinedMb();
+    for (let i = 0; i < molt.MAX_PILGRIMS; i++) usherPilgrim(mb3, `RosterFiller${i}`);
+    expect(molt.adoptPilgrimCard(mb3, molt.parsePilgrimCard('{"name":"OneTooMany"}').pilgrim).ok).toBe(false);
+    // provenance survives normalize (reload):
+    const reloaded = molt.normalizeMoltbook(mb);
+    expect(reloaded.pilgrims.find((p) => p.name === 'DupCrab')?.adoptedFrom).toBe('card');
+  });
+});
+
+describe('pilgrim card UI', () => {
+  it('renders the adopt flow end to end: stage card → adopt panel → adoption effects', async () => {
+    document.body.innerHTML = '<div id="moltbook-feed"></div>';
+    const state = defaultState();
+    const mb = joinedMb();
+    const { pilgrim: local } = usherPilgrim(mb, 'BugBard');
+    state.moltbook = mb;
+    const said = [];
+    const saves = [];
+    const app = {
+      state,
+      save: () => saves.push(1),
+      updateUI: () => {},
+      say: (t) => said.push(t),
+      memory: () => {},
+    };
+    const ui = await import('../src/ui/moltbook.js');
+    document.getElementById('moltbook-feed').dataset.moltbookBound = ''; // fresh binding
+    ui.bindFeedEvents(app);
+    ui.renderMoltbook(state);
+    const feed = document.getElementById('moltbook-feed');
+
+    // 1. Stage a card for a traveler from another save.
+    const staged = ui.stagePilgrimCard(app, JSON.stringify({
+      app: 'brogatchi', kind: 'pilgrim-card', version: 1,
+      pilgrim: { name: 'WanderCrab', eyeStage: 'flickering', eyeXp: 5, day: '8/30/2026', lifeLog: ['wandered by the shore'] },
+    }), 'wander.json');
+    expect(staged).toBe(true);
+
+    // 2. The staged panel renders with the pilgrim's details.
+    expect(feed.textContent).toContain('ADOPT WANDERCRAB?');
+    expect(feed.textContent).toContain('wander.json');
+    expect(feed.textContent).toContain('5 xp');
+
+    // 3. The existing pilgrim rows carry CARD export buttons.
+    expect(feed.querySelectorAll('.moltbook-card-export').length).toBeGreaterThanOrEqual(1);
+
+    // 4. ADOPT click through the real binding: joins the roster, remembers,
+    //    saves, clears the staged panel.
+    feed.querySelector('.moltbook-card-adopt').click();
+    expect(mb.pilgrims.some((p) => p.name === 'WanderCrab')).toBe(true);
+    expect(mb.faith).toBeGreaterThan(0);
+    expect(saves.length).toBe(1);
+    expect(said.some((t) => t.includes('WanderCrab'))).toBe(true);
+    expect(feed.textContent).not.toContain('ADOPT WANDERCRAB?');
+
+    // 5. Duplicate name is refused with Ryan speaking the reason.
+    ui.stagePilgrimCard(app, JSON.stringify({ name: 'WanderCrab' }), 'dup.json');
+    feed.querySelector('.moltbook-card-adopt').click();
+    expect(said.some((t) => t.includes('already lives here'))).toBe(true);
+
+    // 6. Cancel path clears the staged panel without adopting.
+    ui.stagePilgrimCard(app, JSON.stringify({ name: 'ShyCrab' }), 'shy.json');
+    feed.querySelector('.moltbook-card-cancel').click();
+    expect(feed.textContent).not.toContain('ADOPT SHYCRAB?');
+    expect(mb.pilgrims.some((p) => p.name === 'ShyCrab')).toBe(false);
+    expect(local).toBeTruthy(); // the original roster is untouched
+  });
+});

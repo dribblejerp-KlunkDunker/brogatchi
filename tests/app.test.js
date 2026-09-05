@@ -662,4 +662,38 @@ describe('Ryan modal tabs: folders + inbox', () => {
     expect(pane.textContent).toContain('RYAN ASKED');
     expect(pane.textContent).toContain('your memories');
   });
+
+  it('applySoulImport backs up the current soul before replacing it', async () => {
+    const { BroGatchiApp } = await import('../src/ui/app.js');
+    const { stageSoulImport } = await import('../src/ui/moltbook.js');
+    const app = new BroGatchiApp();
+    app.state.moltbook.soul.selfDescription = 'the local soul — gamer bot';
+    stageSoulImport(
+      { selfDescription: 'the imported soul — tide watcher', specialty: 'Tide Whisperer', opinions: [], history: [], petition: null },
+      [],
+      'ryan-soul-import.json',
+    );
+    // Decline the confirm — identity survives, nothing downloads.
+    window.confirm = () => false;
+    app.applySoulImport();
+    expect(app.state.moltbook.soul.selfDescription).toBe('the local soul — gamer bot');
+    // Accept — the current soul downloads automatically, then the swap lands.
+    const clicks = [];
+    const origCreate = document.createElement.bind(document);
+    document.createElement = (tag) => {
+      const el = origCreate(tag);
+      if (tag === 'a') { el.click = () => clicks.push({ href: el.href, download: el.download }); }
+      return el;
+    };
+    window.confirm = () => true;
+    app.applySoulImport();
+    document.createElement = origCreate;
+    expect(app.state.moltbook.soul.selfDescription).toBe('the imported soul — tide watcher');
+    expect(clicks).toHaveLength(1);
+    expect(clicks[0].download).toMatch(/^ryan-soul-\d{4}-\d{2}-\d{2}\.json$/);
+    const payload = JSON.parse(decodeURIComponent(clicks[0].href.replace(/^data:[^,]*,/, '')));
+    expect(payload.soul.selfDescription).toBe('the local soul — gamer bot');
+    // A no-op when nothing is staged.
+    expect(app.applySoulImport()).toBeUndefined();
+  });
 });

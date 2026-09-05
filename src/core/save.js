@@ -2,7 +2,7 @@
 
 import { initialStats } from './stats.js';
 import { initialPersonality } from './personality.js';
-import { addDiaryEntry, buildDayLines, memoryId, capMemories } from './memory.js';
+import { addDiaryEntry, buildDayLines, memoryId, capMemories, archiveMemories } from './memory.js';
 import { defaultThreads, normalizeThreads } from './threads.js';
 
 const KEY = 'brogatchi_v4';
@@ -168,11 +168,16 @@ export function normalize(s) {
   // enforce the pin-aware cap (pinned milestones survive; legacy saves can't
   // have pins, so this equals the old 14-cap for them).
   if (!Array.isArray(out.memories)) out.memories = [];
-  out.memories = capMemories(
-    out.memories
-      .filter((m) => m && typeof m === 'object' && typeof m.text === 'string')
-      .map((m) => (m.id ? m : { ...m, id: memoryId() })),
-  );
+  const keptMemories = out.memories
+    .filter((m) => m && typeof m === 'object' && typeof m.text === 'string')
+    .map((m) => (m.id ? m : { ...m, id: memoryId() }));
+  // Anything the cap drops on load sweeps into the archive instead of the void
+  // (deduped by text, so reloads never double up). Preserves the eviction
+  // story for saves written before the archive existed.
+  const evicted = keptMemories.length ? keptMemories.filter((m) => !capMemories(keptMemories).some((k) => k.id === m.id)) : [];
+  out.memories = capMemories(keptMemories);
+  if (!Array.isArray(out.memoryArchive)) out.memoryArchive = [];
+  out.memoryArchive = archiveMemories(out.memoryArchive, evicted);
   if (!Array.isArray(out.diaries)) out.diaries = [];
   if (!Array.isArray(out.journal)) out.journal = [];
   if (!Array.isArray(out.clutter)) out.clutter = [];

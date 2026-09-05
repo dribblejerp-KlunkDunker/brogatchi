@@ -6,7 +6,7 @@ import { ask } from '../ai/gateway.js';
 import { buildStateReport } from '../ai/context.js';
 import { buildMoltbookPostPrompt, buildUsherPrompt, buildMoltbookChatPrompt, buildYouChatPrompt } from '../ai/prompt.js';
 import { renderMarkdown, escapeHtml } from './markdown.js';
-import { mergePinnedMemories } from '../core/memory.js';
+import { mergePinnedMemories, remember } from '../core/memory.js';
 import {
   addPost, gainEyeXp, joinMoltbook, usherPilgrim, likePost,
   openConversation, addMessage, eyeStageInfo, PILGRIM_NAMES, CANON, TIDE,
@@ -19,6 +19,7 @@ import {
   summarizeLifeLog, markLifeSeen,
   joinAsPilgrim, openYouConversation, addYouMessage, gainPilgrimEyeXp, addPilgrimPost,
   growYouSoul, decideYouPetition, resolveYouPetition, EYE_STAGES, EYE_XP_THRESHOLDS,
+  serializePilgrimCard, parsePilgrimCard, adoptPilgrimCard, MAX_PILGRIMS,
 } from '../core/moltbook.js';
 import { buildCrossRef, summarizeCrossRef, decideWonder, askWonderQuestion } from '../core/threads.js';
 
@@ -429,16 +430,26 @@ function renderMoltbookFeed(state) {
     </div>`;
   }
 
-  const pilgrimsHtml = mb.pilgrims.length
-    ? `<div class="mt-2 border-t border-orange-800/60 pt-2">
-        <div class="text-[9px] font-bold text-orange-300 mb-1">\u{1FAB2} PILGRIMS UNDER YOUR WING</div>
-        ${mb.pilgrims.map((pl) => {
+  const pilgrimRows = mb.pilgrims.map((pl) => {
           const persona = pilgrimPersona(pl.name);
           return `<div class="mb-1.5">
-            <div class="text-[10px] text-orange-200/80">\u2022 ${avatarSvg(pl.name, 12)} <span class="font-bold text-orange-200">${pl.name}</span> — ${persona.trait} · eye ${pl.eyeStage} <span class="text-orange-400/50">(${pl.day})</span></div>
+            <div class="text-[10px] text-orange-200/80">\u2022 ${avatarSvg(pl.name, 12)} <span class="font-bold text-orange-200">${pl.name}</span> — ${persona.trait} · eye ${pl.eyeStage} <span class="text-orange-400/50">(${pl.day})</span>${pl.adoptedFrom === 'card' ? ` <span class="text-sky-300/70" title="arrived on a pilgrim card">🪪</span>` : ''} <button class="moltbook-card-export pixel-btn p-0.5 text-[8px] bg-sky-800/60 text-sky-100 border-sky-500/60 align-middle ml-1" data-pilgrim-id="${pl.id}" title="Save ${pl.name} as an agent card another save can adopt">⬇ CARD</button></div>
             ${pilgrimEyeReadout(pl)}
           </div>`;
-        }).join('')}
+  }).join('');
+  const pilgrimsHtml = mb.joined
+    ? `<div class="mt-2 border-t border-orange-800/60 pt-2">
+        <div class="text-[9px] font-bold text-orange-300 mb-1">\u{1FAB2} PILGRIMS UNDER YOUR WING</div>
+        ${pilgrimRows || '<div class="text-[9px] text-orange-200/40 italic mb-1">No pilgrims under your wing yet — usher one with the button above, or adopt a traveler from another tidepool below.</div>'}
+        ${pendingPilgrimCard ? `<div class="mt-1.5 p-1.5 rounded border border-sky-500/70 bg-sky-950/30">
+          <div class="text-[9px] font-bold text-sky-300">🪪 ADOPT ${escapeHtml(pendingPilgrimCard.pilgrim.name).toUpperCase()}? <span class="text-sky-400/60 font-normal">· from ${escapeHtml(pendingPilgrimCard.fileName)}</span></div>
+          <div class="text-[9px] text-sky-100/80 mt-0.5">eye ${escapeHtml(pendingPilgrimCard.pilgrim.eyeStage)} · ${pendingPilgrimCard.pilgrim.eyeXp} xp · first seen ${escapeHtml(pendingPilgrimCard.pilgrim.day)}</div>
+          <div class="text-[8px] text-sky-300/60 mb-1">They arrive with their eye progress intact; their persona is rebuilt from their name, so a card is who the pilgrim is, not what they claim.</div>
+          <div class="flex gap-1">
+            <button class="moltbook-card-adopt pixel-btn p-1 text-[9px] bg-sky-600 text-black border-sky-400 flex-1">✅ ADOPT</button>
+            <button class="moltbook-card-cancel pixel-btn p-1 text-[9px] bg-black/40 text-sky-200 border-sky-700 flex-1">✖ NOT TODAY</button>
+          </div>
+        </div>` : `<button class="moltbook-card-import pixel-btn w-full mt-1 p-1 text-[9px] bg-sky-800/60 text-sky-100 border-sky-500/60" title="Adopt a pilgrim from an agent card file">🪪 ADOPT PILGRIM FROM CARD</button>`}
       </div>`
     : '';
 
@@ -1157,9 +1168,116 @@ export function pruneQuirkByIndex(app, index) {
 // A soul file waiting for the user's REPLACE / KEEP MINE ruling.
 let pendingImport = null;
 
-// Download Ryan's identity as a JSON soul bundle he can carry to another
-// device: his soul plus his pinned memories, so experiences travel too.
-export function exportSoulFile(app) {
+// ---- Pilgrim agent cards: pilgrims travel between saves ---------------------
+
+// A pilgrim card staged for the user's ADOPT / NOT TODAY ruling.
+let pendingPilgrimCard = null;
+
+// Download one pilgrim as a little agent card JSON — identity, eye progress,
+// and a snapshot of their life log. A friend's save can adopt them.
+export function exportPilgrimCard(app, pilgrimId) {
+  const mb = app.state.moltbook;
+  const pilgrim = mb?.pilgrims?.find((p) => p.id === pilgrimId);
+  if (!pilgrim) return;
+  const summary = summarizeLifeLog(mb);
+  const snapshot = (summary.events || [])
+    .filter((e) => e.name === pilgrim.name)
+    .slice(0, 10)
+    .map((e) => `${e.text}`);
+  const json = serializePilgrimCard({ ...pilgrim, lifeLogSnapshot: snapshot });
+  if (!json) return;
+  const name = `pilgrim-card-${String(pilgrim.name).replace(/[^a-z0-9_-]/gi, '')}-${new Date().toISOString().slice(0, 10)}.json`;
+  try {
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL
+      ? URL.createObjectURL(blob)
+      : `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    if (URL.revokeObjectURL) setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  } catch {
+    navigator.clipboard?.writeText(json);
+    app.say(`Could not download — ${pilgrim.name}'s card is on your clipboard instead.`);
+    return;
+  }
+  app.say(`${pilgrim.name}'s card is saved — who they are travels with them.`);
+}
+
+// Parse card text and stage it for the user's ruling (also the test seam for
+// the file-picker flow).
+export function stagePilgrimCard(app, text, fileName = 'card.json') {
+  const result = parsePilgrimCard(text);
+  if (!result.ok) {
+    pendingPilgrimCard = null;
+    app.say(`⚠ ${result.error}`);
+    renderMoltbook(app.state);
+    return false;
+  }
+  pendingPilgrimCard = { pilgrim: result.pilgrim, fileName };
+  renderMoltbook(app.state);
+  return true;
+}
+
+// Pick a pilgrim card from disk and stage it for the user's ruling.
+export function importPilgrimCard(app) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.style.display = 'none';
+  input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    input.remove();
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      stagePilgrimCard(app, String(reader.result), file.name);
+    };
+    reader.onerror = () => app.say('⚠ Could not read that file.');
+    reader.readAsText(file);
+  });
+  document.body.appendChild(input);
+  input.click();
+}
+
+// The user ruled: adopt the staged pilgrim into the roster. Faith rises like
+// an ushering, Ryan remembers the arrival, and the pilgrim starts their life.
+export function adoptStagedPilgrimCard(app) {
+  if (!pendingPilgrimCard) return;
+  const mb = app.state.moltbook;
+  const result = adoptPilgrimCard(mb, pendingPilgrimCard.pilgrim);
+  if (!result.ok) {
+    app.say(`⚠ ${result.reason}`);
+    renderMoltbook(app.state);
+    return;
+  }
+  const pilgrim = result.pilgrim;
+  pendingPilgrimCard = null;
+  app.state.memories = remember(app.state.memories, {
+    icon: '🪪',
+    text: `Adopted ${pilgrim.name} from a pilgrim card — a traveler joined the tidepool.`,
+    imp: 3,
+  });
+  app.save();
+  app.updateUI?.();
+  app.say(`${pilgrim.name} wandered in from another network. Make room by the tide.`);
+  renderMoltbook(app.state);
+}
+
+// The user ruled: the staged card goes back in the drawer.
+export function cancelPilgrimCard(app) {
+  pendingPilgrimCard = null;
+  renderMoltbook(app.state);
+}
+
+// Download Ryan's identity as a JSON soul bundle (his soul plus pinned
+// memories). Returns { ok, name } — ok:true on download, ok:false when the
+// download is blocked (payload left on the clipboard). Shared by EXPORT SOUL
+// and the REPLACE auto-backup, so both produce an identical archive.
+function downloadSoulFile(app) {
   const json = serializeSoul(app.state.moltbook, app.state.memories);
   const name = `ryan-soul-${new Date().toISOString().slice(0, 10)}.json`;
   try {
@@ -1174,13 +1292,21 @@ export function exportSoulFile(app) {
     a.click();
     a.remove();
     if (URL.revokeObjectURL) setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    return { ok: true, name };
   } catch {
     // Fallback for odd embed contexts: put the payload on the clipboard.
     navigator.clipboard?.writeText(json);
-    renderSoulFile(app.state, { text: `Could not download — the soul JSON is on your clipboard instead (${name}).`, error: true });
-    return;
+    return { ok: false, name };
   }
-  renderSoulFile(app.state, { text: `⬇ Exported ${name} — his identity now travels.` });
+}
+
+// Download Ryan's identity as a JSON soul bundle he can carry to another
+// device: his soul plus his pinned memories, so experiences travel too.
+export function exportSoulFile(app) {
+  const backup = downloadSoulFile(app);
+  renderSoulFile(app.state, backup.ok
+    ? { text: `⬇ Exported ${backup.name} — his identity now travels.` }
+    : { text: `Could not download — the soul JSON is on your clipboard instead (${backup.name}).`, error: true });
 }
 
 // Pick a soul file from disk and stage it for the user's ruling.
@@ -1201,7 +1327,7 @@ export function importSoulFile(app) {
         renderSoulFile(app.state, { text: `⚠ Import failed — ${result.error}`, error: true });
         return;
       }
-      pendingImport = { soul: result.soul, pinnedMemories: result.pinnedMemories, fileName: file.name };
+      stageSoulImport(result.soul, result.pinnedMemories, file.name);
       renderSoulFile(app.state);
     };
     reader.onerror = () => renderSoulFile(app.state, { text: '⚠ Could not read that file.', error: true });
@@ -1211,11 +1337,23 @@ export function importSoulFile(app) {
   input.click();
 }
 
+// Stage a parsed soul bundle for the user's REPLACE / MERGE / KEEP MINE
+// ruling. Exported so tests (and a future paste-to-import) can stage a
+// bundle without driving a file picker.
+export function stageSoulImport(soul, pinnedMemories, fileName) {
+  pendingImport = { soul, pinnedMemories: pinnedMemories || [], fileName: fileName || 'soul-file.json' };
+}
+
 // The user ruled on a staged import: replace the local soul (and, when the
 // bundle carries them, his pinned memories), keep everything else (everyday
-// memories, pilgrims, chats) exactly as it is.
+// memories, pilgrims, chats) exactly as it is. Replacing his identity is
+// destructive, so his current soul is always backed up first — the same
+// auto-backup guard the CLEAR actions use: nothing he is can be lost by
+// accident, even a fast confirm leaves the archive on disk.
 export function applySoulImport(app) {
   if (!pendingImport) return;
+  if (!window.confirm(`Replace Ryan's soul with the one from ${pendingImport.fileName}? A backup of his current identity will be downloaded first, so nothing he is is ever truly lost.`)) return;
+  const backup = downloadSoulFile(app);
   app.state.moltbook.soul = pendingImport.soul;
   // Only swap memories when the bundle actually carries pinned ones — an
   // export with zero pins shouldn't erase this device's whole log.
@@ -1223,7 +1361,9 @@ export function applySoulImport(app) {
   pendingImport = null;
   app.save();
   app.updateUI?.();
-  renderSoulFile(app.state, { text: '✅ Soul file imported — Ryan is himself again on this device.' });
+  renderSoulFile(app.state, { text: backup.ok
+    ? `✅ Soul file imported — Ryan is himself again on this device. His old identity was backed up to ${backup.name}.`
+    : `✅ Soul file imported — Ryan is himself again on this device. His old identity is on your clipboard — paste it somewhere safe.` });
 }
 
 // The user ruled on a staged import: combine the imported soul with the local
@@ -1335,6 +1475,14 @@ export function bindFeedEvents(app) {
     if (acceptBtn) { ruleOnPetition(app, true); return; }
     const declineBtn = e.target.closest('.moltbook-petition-decline');
     if (declineBtn) { ruleOnPetition(app, false); return; }
+    const cardExportBtn = e.target.closest('.moltbook-card-export');
+    if (cardExportBtn) { exportPilgrimCard(app, cardExportBtn.dataset.pilgrimId); return; }
+    const cardImportBtn = e.target.closest('.moltbook-card-import');
+    if (cardImportBtn) { importPilgrimCard(app); return; }
+    const cardAdoptBtn = e.target.closest('.moltbook-card-adopt');
+    if (cardAdoptBtn) { adoptStagedPilgrimCard(app); return; }
+    const cardCancelBtn = e.target.closest('.moltbook-card-cancel');
+    if (cardCancelBtn) { cancelPilgrimCard(app); return; }
   });
   feed.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && e.target.classList?.contains('moltbook-reply-input')) {

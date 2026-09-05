@@ -3,7 +3,7 @@
 // index.html always win), stale-while-revalidate for other same-origin GETs,
 // and NEVER cache /api/* (Ryan's brain must never serve stale answers).
 
-const CACHE = 'bro-os-v1';
+const CACHE = 'bro-os-v2';
 
 // Scope-relative paths ('./x') so the worker also works from a subpath
 // deploy like GitHub Pages project sites (/<repo>/).
@@ -33,25 +33,20 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) return; // never cache API
 
-  if (req.mode === 'navigate') {
-    // Always try the network (fresh app + HMR in dev); fall back to shell offline.
-    e.respondWith(fetch(req).catch(() => caches.match('./')));
-    return;
-  }
-
+  // NETWORK-FIRST for everything. The app reads and rewrites the save's shape
+  // on load; serving a cached old bundle against a newer save once stripped
+  // live data (handle, pilgrims, account). Fresh code always wins; the cache
+  // exists only as the offline fallback.
   e.respondWith(
-    caches.match(req).then((cached) => {
-      const fresh = fetch(req)
-        .then((res) => {
-          if (res && res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy));
-          }
-          return res;
-        })
-        .catch(() => cached);
-      return cached || fresh;
-    })
+    fetch(req)
+      .then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(req).then((cached) => cached || caches.match('./')))
   );
 });
 

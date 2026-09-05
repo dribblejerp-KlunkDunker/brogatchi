@@ -2,6 +2,7 @@
 // theories are grounded in his own stats, history, and real web results.
 
 import { weightTier, TIER_NAMES } from '../core/stats.js';
+import { recallArchive } from '../core/memory.js';
 
 // How much of Ryan's working memory each AI prompt carries. His working
 // memory is effectively unlimited now (MAX_MEMORIES = 200), so the recall
@@ -17,6 +18,11 @@ export function buildStateReport(state) {
   // Importance-ranked, so the report is correct no matter how memories were appended.
   const memories = [...state.memories].sort((a, b) => b.imp - a.imp).slice(0, RECALL_WINDOW).map((m) => `${m.icon} ${m.text}`);
   const lastDiary = state.diaries[0];
+  // Long-term recall: a few items matching the current focus keyword from the
+  // archive, so things that churned out of working memory can still surface.
+  const archiveRecall = (state.memoryArchive || []).length
+    ? recallArchive(state.memoryArchive, state.focusKeyword || state.pet?.name || '', 4).map((m) => `${m.icon} ${m.text}`)
+    : [];
 
   const report = {
     pet: {
@@ -63,6 +69,7 @@ export function buildStateReport(state) {
       greed: Math.round(state.personality.greed),
     },
     recentMemories: memories,
+    archiveRecall,
     lastDiaryEntry: lastDiary ? lastDiary.lines[0] : null,
     irlQuests: state.irlTasks,
     moltbook: {

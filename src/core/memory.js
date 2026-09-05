@@ -5,6 +5,10 @@
 
 export const MAX_MEMORIES = 200;
 const MAX_DIARIES = 7;
+// The long-term archive: memories evicted by the working-memory cap land here
+// and are never auto-deleted — what leaves his head still lives on his shelf.
+export const MAX_ARCHIVE = 600;
+export const ARCHIVE_VIEW = 8;
 
 function dayString() {
   return new Date().toLocaleDateString();
@@ -38,6 +42,54 @@ export function remember(memories, { icon = '🪙', text, imp = 2, pin = false }
   if (!text) return memories;
   const entry = { id: memoryId(), icon, text, imp, day: dayString(), ...(pin ? { pinned: true } : {}) };
   return capMemories([...memories, entry]);
+}
+
+// remember() + auto-archive: returns { memories, archive, evicted } where any
+// memory the cap pushed out is preserved into `archive` (deduped by text, so
+// normalize sweeps and re-adds never double up). Pinned entries never evict,
+// so they never archive either. Non-breaking companion to remember().
+export function rememberWithArchive(memories, archive, opts) {
+  const next = remember(memories, opts || {});
+  const kept = new Set(next.map((m) => m.id));
+  const evicted = (Array.isArray(memories) ? memories : []).filter((m) => !kept.has(m.id));
+  return { memories: next, archive: archiveMemories(archive, evicted), evicted };
+}
+
+// Move memories into the long-term archive: newest-first, tagged with the
+// time they left working memory, deduped by text, capped at MAX_ARCHIVE.
+export function archiveMemories(archive, memories) {
+  const base = Array.isArray(archive) ? archive : [];
+  if (!Array.isArray(memories) || !memories.length) return base;
+  const seen = new Set(base.map((m) => m.text));
+  const additions = [];
+  for (const m of memories) {
+    if (m && typeof m.text === 'string' && m.text.trim() && !seen.has(m.text)) {
+      additions.push({ ...m, archivedAt: Date.now() });
+      seen.add(m.text); // dedupe within the batch too, not just against the shelf
+    }
+  }
+  return [...additions, ...base].slice(0, MAX_ARCHIVE);
+}
+
+// Recall from the archive without burning AI budget: every query word that
+// appears in a memory's text scores a hit; rank by hits, then most recently
+// archived. Empty/no-match queries return the newest entries.
+export function recallArchive(archive, query, k = ARCHIVE_VIEW) {
+  const base = Array.isArray(archive) ? archive : [];
+  const words = String(query || '').toLowerCase().split(/[^a-z0-9']+/).filter((w) => w.length > 1);
+  if (!words.length) return base.slice(0, k);
+  return base
+    .map((m) => {
+      const hay = String(m.text).toLowerCase();
+      // Total occurrences, not just presence — a memory that hammers the
+      // keyword outranks one that mentions it once.
+      const hits = words.reduce((n, w) => n + (hay.split(w).length - 1), 0);
+      return { m, hits };
+    })
+    .filter((x) => x.hits > 0)
+    .sort((a, b) => b.hits - a.hits || (b.m.archivedAt || 0) - (a.m.archivedAt || 0))
+    .slice(0, k)
+    .map((x) => x.m);
 }
 
 // Toggle a memory's pin by id. Returns a freshly sorted array (unchanged
