@@ -1,9 +1,5 @@
 node_modules/
+dist-preview/
 .env
 *.local
 .DS_Store
-
-# bridge runtime artifacts (his life on the real network lives here)
-bridge/actions.log
-bridge/memory.jsonl
-bridge/state.json

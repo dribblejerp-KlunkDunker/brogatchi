@@ -1,7 +1,10 @@
-// Generates the Bro OS PWA icons — zero dependencies, pure Node.
-// Draws pixel-Ryan on a 24x24 grid, nearest-neighbor upscaled, navy background
-// sized to stay inside the maskable safe zone (80%).
-// Usage: node scripts/gen-icons.mjs   (writes public/icon-*.png)
+#!/usr/bin/env node
+// ═══════════════════════════════════════════════════════════════
+// scripts/gen-icons.mjs — PWA icon generator for Bro OS 3.0
+// Zero dependencies: renders a pixel-art terminal icon into raw
+// RGBA, then hand-encodes a valid PNG (IHDR/IDAT/IEND + CRC32).
+// Run: npm run icons  →  public/icon-192.png + public/icon-512.png
+// ═══════════════════════════════════════════════════════════════
 
 import { deflateSync } from 'node:zlib';
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -9,10 +12,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const outDir = join(root, 'public');
-mkdirSync(outDir, { recursive: true });
 
-// ---- minimal PNG encoder (RGBA, 8-bit) ----
+/* ── minimal PNG encoder ── */
+
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -38,93 +40,69 @@ function chunk(type, data) {
   return Buffer.concat([len, body, crc]);
 }
 
-function png(size, get) {
-  const raw = Buffer.alloc((size * 4 + 1) * size);
-  for (let y = 0; y < size; y++) {
-    raw[y * (size * 4 + 1)] = 0; // filter: none
-    for (let x = 0; x < size; x++) {
-      const [r, g, b, a] = get(x, y);
-      const o = y * (size * 4 + 1) + 1 + x * 4;
-      raw[o] = r; raw[o + 1] = g; raw[o + 2] = b; raw[o + 3] = a;
-    }
-  }
+function encodePNG(width, height, rgba) {
+  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8;  // bit depth
-  ihdr[9] = 6;  // color type: RGBA
+  ihdr[9] = 6;  // RGBA
+  const raw = Buffer.alloc((width * 4 + 1) * height);
+  for (let y = 0; y < height; y++) {
+    raw[y * (width * 4 + 1)] = 0; // filter: none
+    rgba.copy(raw, y * (width * 4 + 1) + 1, y * width * 4, (y + 1) * width * 4);
+  }
   return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    sig,
     chunk('IHDR', ihdr),
     chunk('IDAT', deflateSync(raw, { level: 9 })),
     chunk('IEND', Buffer.alloc(0)),
   ]);
 }
 
-// ---- art: pixel Ryan, 24x24, '.' = navy background ----
-const NAVY = [15, 23, 42];
-const HAIR = [31, 41, 55];
-const SKIN = [252, 211, 77];
-const EYE = [255, 255, 255];
-const PUPIL = [17, 24, 39];
-const SHIRT = [59, 130, 246];
-const SHIRT_LINE = [29, 78, 216];
+/* ── pixel-art icon: a tiny cyberpunk terminal window ── */
 
-const G = 24; // art grid
-const ART = [
-  '........................',
-  '........................',
-  '........................',
-  '......HHHHHHHHHHHH......',
-  '.....HHHHHHHHHHHHHH.....',
-  '.....HSSSSSSSSSSSSH.....',
-  '.....HSSSSSSSSSSSSH.....',
-  '.....HSSWKSSSKWSSSH.....',
-  '.....HSSSSSSSSSSSSH.....',
-  '.....HSSSMMSSMMSSSH.....',
-  '.....HSSSSSSSSSSSSH.....',
-  '.....HSSSSSSSSSSSSH.....',
-  '.....HBBBBBBBBBBBBH.....',
-  '.....HBBBBBBBBBBBBH.....',
-  '.....HBBKBBBBBBKBBH.....',
-  '.....HBBBBBBBBBBBBH.....',
-  '.....HBBBBBBBBBBBBH.....',
-  '.....HBBBBBBBBBBBBH.....',
-  '.....HHHHHHHHHHHHHH.....',
-  '........................',
-  '........................',
-  '........................',
-  '........................',
-  '........................',
-];
+function makeIcon(size) {
+  const px = Buffer.alloc(size * size * 4);
+  const s = size / 512;
+  const pxAt = (x, y) => (y * size + x) * 4;
 
-const PAL = {
-  H: HAIR,
-  S: SKIN,
-  W: EYE,
-  K: PUPIL,
-  B: SHIRT,
-  M: SHIRT_LINE,
-};
+  function fill(x, y, w, h, [r, g, b, a = 255]) {
+    const x0 = Math.max(0, Math.round(x * s)), y0 = Math.max(0, Math.round(y * s));
+    const x1 = Math.min(size, Math.round((x + w) * s)), y1 = Math.min(size, Math.round((y + h) * s));
+    for (let yy = y0; yy < y1; yy++) {
+      for (let xx = x0; xx < x1; xx++) {
+        const i = pxAt(xx, yy);
+        px[i] = r; px[i + 1] = g; px[i + 2] = b; px[i + 3] = a;
+      }
+    }
+  }
+  function ring(x, y, w, h, t, color) {
+    fill(x, y, w, t, color); fill(x, y + h - t, w, t, color);
+    fill(x, y, t, h, color); fill(x + w - t, y, t, h, color);
+  }
 
-// nearest-neighbor sampling keeps the pixels crisp at any size
-function render(size) {
-  return png(size, (x, y) => {
-    const gx = Math.floor((x * G) / size);
-    const gy = Math.floor((y * G) / size);
-    const ch = ART[gy][gx];
-    const px = PAL[ch] || NAVY;
-    return [px[0], px[1], px[2], ch === '.' ? 0 : 255];
-  });
+  const VOID = [4, 5, 10], BORDER = [26, 29, 51], CYAN = [0, 240, 255],
+    MAGENTA = [255, 0, 60], AMBER = [255, 208, 0], GREEN = [0, 255, 157], MUTED = [100, 116, 139];
+
+  fill(0, 0, 512, 512, VOID);
+  for (let i = 64; i < 512; i += 64) { // faint circuit grid
+    fill(i, 0, 2, 512, BORDER); fill(0, i, 512, 2, BORDER);
+  }
+  ring(32, 32, 448, 448, 20, CYAN);              // window frame
+  fill(72, 64, 24, 24, MAGENTA);                 // header dots
+  fill(112, 64, 24, 24, AMBER);
+  fill(152, 64, 24, 24, GREEN);
+  fill(96, 176, 72, 192, CYAN);                  // terminal cursor █
+  fill(216, 200, 216, 16, MUTED);                // data lines
+  fill(216, 244, 168, 16, MUTED);
+  fill(216, 288, 192, 16, MUTED);
+  fill(392, 392, 48, 48, AMBER);                 // coin
+
+  return encodePNG(size, size, px);
 }
 
-const targets = [
-  ['icon-192.png', 192],
-  ['icon-512.png', 512],
-  ['icon-180.png', 180],
-];
-
-for (const [name, size] of targets) {
-  writeFileSync(join(outDir, name), render(size));
-  console.log(`wrote public/${name} (${size}x${size})`);
-}
+mkdirSync(join(root, 'public'), { recursive: true });
+writeFileSync(join(root, 'public', 'icon-192.png'), makeIcon(192));
+writeFileSync(join(root, 'public', 'icon-512.png'), makeIcon(512));
+console.log('[icons] wrote public/icon-192.png + public/icon-512.png');

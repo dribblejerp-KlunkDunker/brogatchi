@@ -7,16 +7,16 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const apiKey = env.GEMINI_API_KEY || '';
 
-  // LAN mode (npm run dev:lan): bind all interfaces so a phone on the same
-  // Wi-Fi can play. Plain http by default (works everywhere, incl. iOS where
-  // self-signed HTTPS is blocked); LAN=2 adds an auto-generated self-signed
-  // cert for browsers that allow clicking through (Android Chrome/desktop),
-  // which unlocks true PWA install via the service worker.
+  // LAN mode: set LAN=1 to bind all interfaces so a phone on the same Wi-Fi
+  // can play; LAN=2 adds an auto-generated self-signed cert (Android
+  // Chrome/desktop) which unlocks true PWA install via service worker.
   const lanMode = process.env.LAN || '';
   const lan = lanMode !== '';
 
   // Inline plugin: serves the API proxy on the dev/preview server so
-  // `npm run dev` runs the app + /api in one process.
+  // `npm run dev` runs the app + /api in one process. Without a
+  // GEMINI_API_KEY the proxy answers 503 and Ryan falls back to his
+  // offline dialogue brain — the OS still fully works.
   const proxyPlugin = {
     name: 'bro-os-api-proxy',
     configureServer(server) {
@@ -31,8 +31,8 @@ export default defineConfig(({ mode }) => {
   if (lanMode === '2') plugins.push(basicSsl());
 
   return {
-    // Relative base so the tracked dist/ deploys anywhere — GitHub Pages
-    // project sites serve it from /<repo>/, where absolute /assets/ would 404.
+    // Relative base so the built bundle deploys anywhere (GitHub Pages
+    // project sites serve from /<repo>/, where absolute /assets/ would 404).
     base: './',
     plugins,
     server: {

@@ -1,20 +1,17 @@
 {
   "name": "bro-os",
   "private": true,
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
-  "description": "My Bro'gatchi: Ultimate Edition — rebuilt as a modular Vite app with a Gemini proxy",
+  "description": "Bro OS 3.0 — Cyberpunk Utility rebuild of My Bro'gatchi: a windowed desktop OS shell with Ryan AI terminal, chiptune synth, arcade, mining & the tidepool network",
   "scripts": {
     "dev": "vite",
-    "dev:lan": "node scripts/lan.mjs",
-    "dev:lan:https": "node scripts/lan.mjs https",
     "build": "vite build",
-    "build:commit": "node scripts/build-dist.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "icons": "node scripts/gen-icons.mjs",
-    "proxy": "node server/proxy.mjs"
+    "preview:app": "node scripts/build-preview.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",
