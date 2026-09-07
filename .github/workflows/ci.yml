@@ -1,0 +1,56 @@
+# CI: run the vitest suite and build on every push so regressions are
+# caught before they can ship. The GitHub Pages deploy (.github/workflows/
+# deploy-pages.yml) is triggered by this workflow's success instead of by
+# pushes directly — a red build can no longer reach the live site.
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Vitest suite (app + bridge)
+        run: npm test
+
+      - name: Build (includes bridge-memory-log postbuild hook)
+        run: npm run build
+
+      # Deploy-pages expects the tracked dist/ to be fresh; on CI we have a
+      # freshly built dist/ in the workspace, so prove the freshness guard
+      # would pass before declaring success.
+      - name: Verify dist/ is present and fresh
+        run: |
+          test -f dist/index.html || { echo "::error::dist/index.html missing"; exit 1; }
+          test -f dist/bridge-memory-log.json || { echo "::error::bridge-memory-log snapshot missing from dist/"; exit 1; }
+          last_src=$(git log -1 --format=%ct -- index.html src public vite.config.js)
+          last_dist=$(git log -1 --format=%ct -- dist)
+          if [ "$last_src" -gt "$last_dist" ]; then
+            echo "::error::tracked dist/ is stale (source newer than bundle) — run 'npm run build' and commit the result."
+            exit 1
+          fi
+          echo "dist/ present, fresh (bundle $(git log -1 --format=%h -- dist)), snapshot shipped."

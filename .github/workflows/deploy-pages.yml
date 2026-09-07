@@ -1,12 +1,16 @@
-# Deploy the tracked dist/ bundle to GitHub Pages on every push to master.
-# Pages serves the repo site from /<repo>/ — the build uses a relative base
-# ('./') so the same bundle works at the repo root, in the preview server,
-# and on Pages with no rebuild step. The /api AI proxy is not available on
-# Pages (static hosting); the app plays in its offline soul-aware voice there.
+# Deploy the tracked dist/ bundle to GitHub Pages. Triggered only after a
+# green CI run (test + build), so a failing suite blocks the deploy instead
+# of shipping regressions. Pages serves the repo site from /<repo>/ — the
+# build uses a relative base ('./') so the same bundle works at the repo
+# root, in the preview server, and on Pages with no rebuild step. The /api
+# AI proxy is not available on Pages (static hosting); the app plays in its
+# offline soul-aware voice there.
 name: Deploy to GitHub Pages
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [master]
   workflow_dispatch:
 
@@ -21,6 +25,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
