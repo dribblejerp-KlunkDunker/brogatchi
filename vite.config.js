@@ -3,6 +3,7 @@ import tailwindcss from '@tailwindcss/vite';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 import { createChatMiddleware } from './server/proxy.mjs';
 import { createBridgeSoulMiddleware } from './server/bridge-soul.mjs';
+import { createBridgeStatusMiddleware } from './server/bridge-status.mjs';
 import fs from 'node:fs';
 
 export default defineConfig(({ mode }) => {
@@ -24,10 +25,12 @@ export default defineConfig(({ mode }) => {
     configureServer(server) {
       server.middlewares.use('/api', createChatMiddleware(apiKey));
       server.middlewares.use('/api', createBridgeSoulMiddleware());
+      server.middlewares.use('/api', createBridgeStatusMiddleware());
     },
     configurePreviewServer(server) {
       server.middlewares.use('/api', createChatMiddleware(apiKey));
       server.middlewares.use('/api', createBridgeSoulMiddleware());
+      server.middlewares.use('/api', createBridgeStatusMiddleware());
     },
   };
 

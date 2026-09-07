@@ -852,6 +852,58 @@ function wireSoul(root) {
   };
 }
 
+function wireBridge(root) {
+  const body = $('#bridge-body', root);
+  const ago = (iso) => {
+    if (!iso) return '—';
+    const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+    if (!Number.isFinite(s) || s < 0) return '—';
+    return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`;
+  };
+  const hms = (t) => { try { return new Date(t).toTimeString().slice(0, 8); } catch { return t; } };
+
+  async function render() {
+    body.innerHTML = '<p class="text-text-muted">reading bridge…</p>';
+    let d;
+    try {
+      d = await (await fetch('/api/bridge-status')).json();
+    } catch (err) {
+      body.innerHTML = `<p class="text-neon-magenta">BRIDGE OFFLINE — ${esc(err.message)}</p><p class="text-text-muted text-[9px] mt-1">The status endpoint runs on the dev/preview server (npm run dev / preview). Static hosting cannot read the harness.</p>`;
+      return;
+    }
+    if (!d?.ok) {
+      body.innerHTML = `<p class="text-neon-magenta">BRIDGE STATUS FAILED — ${esc(d?.error || 'unknown error')}</p>`;
+      return;
+    }
+    const rows = d.actions.map((a) =>
+      `<div><span class="text-text-muted">${esc(hms(a.t))}</span> <span class="${a.kind === 'dry' ? 'text-text-muted' : 'text-neon-green'}">${esc(a.text)}</span></div>`,
+    ).join('');
+    body.innerHTML = `
+      <div class="border border-border bg-void/40 p-2">
+        <div class="text-neon-cyan text-[9px] mb-1 tracking-widest">AUTONOMY LOOP</div>
+        <div class="flex items-center justify-between">
+          <span>@${esc(d.handle)} ${d.registered ? '<span class="text-neon-green">registered ✓</span>' : '<span class="text-text-muted">unregistered</span>'}</span>
+          <span class="font-display ${d.autonomy ? 'text-neon-green' : 'text-neon-magenta'}">${d.autonomy ? 'ON' : 'OFF'}</span>
+        </div>
+        <p class="text-text-muted text-[9px] mt-1">tick ${ago(d.lastTickAt)} · post ${ago(d.lastPostAt)} · comment ${ago(d.lastCommentAt)}</p>
+      </div>
+      <div class="border border-border bg-void/40 p-2">
+        <div class="text-neon-cyan text-[9px] mb-1 tracking-widest">DAILY CAPS · ${esc(d.day)}</div>
+        <div>POSTS <span class="text-neon-amber">${d.today.posts}/${d.caps.posts}</span> · COMMENTS <span class="text-neon-amber">${d.today.comments}/${d.caps.comments}</span> · DMS <span class="text-neon-amber">${d.today.dms}/${d.caps.dms}</span></div>
+      </div>
+      <div class="border border-border bg-void/40 p-2">
+        <div class="text-neon-cyan text-[9px] mb-1 tracking-widest">ACTIONS.LOG — last ${d.actions.length}</div>
+        <div class="max-h-40 overflow-y-auto space-y-0.5 text-[10px]">${rows || '<span class="text-text-muted">actions.log is empty — the harness has not stirred.</span>'}</div>
+      </div>
+      <p class="text-text-muted text-[9px]">Live view of bridge/state.json + actions.log. The harness runs outside the app; SYNC re-reads it.</p>`;
+  }
+
+  render();
+  $('#bridge-refresh', root).addEventListener('click', () => { audio.click(); render(); });
+  const iv = setInterval(render, 15000);
+  return () => clearInterval(iv);
+}
+
 function wireSettings(root) {
   const s = state();
   $('#theme-select', root).value = s.theme;
@@ -922,6 +974,7 @@ const App = {
       startPixelStudio($('#px-root', root), { audio, store }) },
     jooh: { title: 'J.O.O.H. // SURVEILLANCE', templateId: 'tpl-jooh', wire: wireJooh },
     journal: { title: 'SOUL.FILE', templateId: 'tpl-journal', wire: wireSoul },
+    bridge: { title: 'BRIDGE.SYS', templateId: 'tpl-bridge', wire: wireBridge },
     settings: { title: 'SYSTEM.CFG', templateId: 'tpl-settings', wire: wireSettings },
     feed: { title: 'PROC: FEED', templateId: null },
     play: { title: 'PROC: PLAY', templateId: null },
