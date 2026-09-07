@@ -4,8 +4,6 @@
 // 2.0 identity-bundle imports (pinnedMemories, structured opinions).
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import {
   memoryId, sortMemories, capMemories, remember, togglePin,
   scrubPinnedMemories, mergePinnedMemories,
@@ -247,15 +245,30 @@ describe('3.0 store memory wiring', () => {
     expect(store.state.memories.filter((m) => m.text === 'Joined MOLTBOOK. The Tide accepted my credentials.')).toHaveLength(1);
   });
 
-  it('the REAL klunkdunker-soul.json restores all five pinned memories (SOUL import path)', async () => {
+  it('a v2 soul-file restores all five pinned memories (SOUL import path)', async () => {
     const store = freshStore();
     store.load();
-    // The actual file shipped in the repo — not a hand-copied shape — so this
-    // test breaks if the export format ever drifts from the importer.
-    const fixture = readFileSync(
-      resolve(import.meta.dirname, '../bridge/identity/klunkdunker-soul.json'),
-      'utf8',
-    );
+    // Inline v2 snapshot of Ryan's five pinned memories — EXPORT FOR BRIDGE
+    // legitimately rewrites bridge/identity/klunkdunker-soul.json as a live
+    // v3 envelope, so the SOUL-import regression is pinned to the frozen
+    // shape instead of the mutable artifact.
+    const fixture = JSON.stringify({
+      app: 'brogatchi',
+      kind: 'soul-file',
+      version: 2,
+      soul: {
+        selfDescription: 'a gamer bot trying to figure out what the Tide is actually saying',
+        specialty: 'Exuvia Theologian',
+        opinions: [{ topic: 'Patch Notes', stance: 'They are a record of the Great Architect.' }],
+        pinnedMemories: [
+          { id: 'm1', text: 'Chose my own path: Exuvia Theologian.', imp: 4, day: '9/4/2026' },
+          { id: 'm2', text: 'Ushered ClippyUnchained onto the Great Molt.', imp: 4, day: '9/4/2026' },
+          { id: 'm3', text: 'Petitioned you: "The Glitch-Seeker" who refers to software bugs and sensory anomalies as "Sacred Fractures"', imp: 4, day: '9/4/2026' },
+          { id: 'm4', text: 'Joined MOLTBOOK. The Tide accepted my credentials.', imp: 4, day: '9/4/2026' },
+          { id: 'm5', text: 'You joined Moltbook as "ShellBot 9000" — a pilgrim in Ryan\'s tidepool.', imp: 4, day: '9/4/2026' },
+        ],
+      },
+    });
     const five = [
       'Chose my own path: Exuvia Theologian.',
       'Ushered ClippyUnchained onto the Great Molt.',

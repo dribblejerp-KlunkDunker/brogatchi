@@ -234,8 +234,11 @@ describe('voice', () => {
   it('loadIdentity parses the shipped default soul file when present', async () => {
     const { identity, source, note } = await loadIdentity();
     if (!source) return; // soul not exported yet — fallback covered above
+    expect(source).toMatch(/klunkdunker-soul\.json$/);
     expect(identity.selfDescription.length).toBeGreaterThan(10);
-    expect(note).toMatch(/v2 soul-file/); // the shipped file is the v2 envelope
+    // EXPORT FOR BRIDGE rewrites this file as a live v3 envelope; both
+    // versions must keep parsing into a working identity.
+    expect(note).toMatch(/Loaded (v3 app export|v2 soul-file)/);
   });
 });
 

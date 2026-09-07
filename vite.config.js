@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 import { createChatMiddleware } from './server/proxy.mjs';
+import { createBridgeSoulMiddleware } from './server/bridge-soul.mjs';
 import fs from 'node:fs';
 
 export default defineConfig(({ mode }) => {
@@ -22,9 +23,11 @@ export default defineConfig(({ mode }) => {
     name: 'bro-os-api-proxy',
     configureServer(server) {
       server.middlewares.use('/api', createChatMiddleware(apiKey));
+      server.middlewares.use('/api', createBridgeSoulMiddleware());
     },
     configurePreviewServer(server) {
       server.middlewares.use('/api', createChatMiddleware(apiKey));
+      server.middlewares.use('/api', createBridgeSoulMiddleware());
     },
   };
 

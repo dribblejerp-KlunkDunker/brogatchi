@@ -692,6 +692,7 @@ function wireSoul(root) {
     body.innerHTML = `
       <div class="flex gap-2 mb-3">
         <button id="soul-export" class="btn-cyber text-[9px]">⬇ EXPORT SOUL</button>
+        <button id="soul-export-bridge" class="btn-cyber text-[9px]">🤝 EXPORT FOR BRIDGE</button>
         <button id="soul-import-btn" class="btn-cyber text-[9px]">⬆ IMPORT</button>
       </div>
       <div id="soul-io" class="hidden mb-3">
@@ -761,6 +762,32 @@ function wireSoul(root) {
       downloadJSON(json, `ryan-soul-${new Date().toISOString().slice(0, 10)}.json`);
       audio.click();
       toast('SOUL EXPORTED — his memories travel now', 'ok');
+    });
+    // Hand the live v3 soul to the autonomy harness: the dev/preview server
+    // writes bridge/identity/klunkdunker-soul.json directly; static hosting
+    // has no endpoint, so fall back to a download the user drops in place.
+    $('#soul-export-bridge', root).addEventListener('click', async () => {
+      const json = store.exportState();
+      audio.click();
+      try {
+        const res = await fetch('/api/bridge-soul', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: json,
+        });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok || !out.ok) throw new Error(out.error || `HTTP ${res.status}`);
+        store.rememberEvent('Handed my live soul to the autonomy bridge.', { icon: '🤝', imp: 2 });
+        renderSoul();
+        toast('BRIDGE SOUL UPDATED — the harness speaks with Ryan now', 'ok');
+      } catch {
+        try {
+          downloadJSON(json, 'klunkdunker-soul.json');
+          toast('NO BRIDGE ENDPOINT — downloaded; drop it into bridge/identity/', 'warn');
+        } catch {
+          toast('BRIDGE EXPORT FAILED', 'warn');
+        }
+      }
     });
     $('#soul-import-btn', root).addEventListener('click', () => {
       $('#soul-io', root).classList.toggle('hidden');
