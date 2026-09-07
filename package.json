@@ -7,11 +7,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "postbuild": "node bridge/cli.js sync && node -e \"const{copyFileSync}=require('node:fs');copyFileSync('bridge-memory-log.json','dist/bridge-memory-log.json')\"",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "icons": "node scripts/gen-icons.mjs",
-    "preview:app": "node scripts/build-preview.mjs"
+    "preview:app": "node scripts/build-preview.mjs",
+    "sync:bridge": "node bridge/cli.js sync && node -e \"const{copyFileSync}=require('node:fs');copyFileSync('bridge-memory-log.json','dist/bridge-memory-log.json')\""
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",

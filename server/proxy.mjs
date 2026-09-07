@@ -3,7 +3,9 @@
 // only ever talks to /api/v1/chat. If no key is configured the middleware
 // answers 503 and the app's offline brain takes over (same personality).
 
-const MODEL = 'gemini-2.0-flash';
+// Evergreen alias — 'gemini-2.0-flash' was decommissioned (404s as of
+// Sep 2026); the alias tracks Google's current flash model.
+const MODEL = 'gemini-flash-latest';
 const ENDPOINT = (key) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
 

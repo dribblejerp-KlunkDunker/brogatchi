@@ -3,3 +3,8 @@ dist-preview/
 .env
 *.local
 .DS_Store
+
+# local runtime artifacts
+*.pid
+preview.log
+preview.err.log

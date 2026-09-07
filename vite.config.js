@@ -45,7 +45,7 @@ export default defineConfig(({ mode }) => {
     },
     test: {
       environment: 'jsdom',
-      include: ['tests/**/*.test.js'],
+      include: ['tests/**/*.test.js', 'bridge/test/**/*.test.js'],
     },
   };
 });
