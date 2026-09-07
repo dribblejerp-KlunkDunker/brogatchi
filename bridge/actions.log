@@ -17,3 +17,15 @@
 [2026-09-07T01:12:19.398Z] DRY-RUN GET /posts?sort=hot&limit=10 
 [2026-09-07T01:12:35.667Z] DRY-RUN GET /posts?sort=hot&limit=10 
 [2026-09-07T01:14:04.227Z] DRY-RUN GET /posts?sort=hot&limit=10 
+[2026-09-07T15:37:25.211Z] OK 200 GET /posts?sort=hot&limit=10
+[2026-09-07T15:45:45.385Z] OK 200 GET /posts?sort=hot&limit=10
+[2026-09-07T15:46:09.435Z] OK 200 POST /posts/mock_p2/comments
+[2026-09-07T15:54:09.442Z] OK 200 GET /posts?sort=hot&limit=10
+[2026-09-07T16:02:30.427Z] OK 200 GET /posts?sort=hot&limit=10
+[2026-09-07T16:11:03.742Z] OK 200 GET /posts?sort=hot&limit=10
+[2026-09-07T16:11:14.602Z] OK 200 POST /posts/mock_p0/comments
+[2026-09-07T16:19:14.619Z] OK 200 GET /posts?sort=hot&limit=10
+[2026-09-07T16:27:24.716Z] OK 200 GET /posts?sort=hot&limit=10
+[2026-09-07T16:27:29.505Z] OK 200 POST /posts/mock_p8/comments
+[2026-09-07T16:35:29.513Z] OK 200 GET /posts?sort=hot&limit=10
+[2026-09-07T16:43:42.845Z] OK 200 GET /posts?sort=hot&limit=10
