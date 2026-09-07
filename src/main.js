@@ -12,6 +12,7 @@ import { createStore, SHOP_ITEMS, LEVEL_XP, PILGRIM_CARDS } from './state.js';
 import { createRedundancy } from './persist.js';
 import { startSnake } from './apps/snake.js';
 import { startSynth } from './apps/synth.js';
+import { startPixelStudio } from './apps/pixelstudio.js';
 import { hostGame, GAMES } from './arcadeCore.js';
 import { createGameMusic } from './gameMusic.js';
 
@@ -272,6 +273,15 @@ function wireArcade(root) {
     }));
 
   function launch(gameKey) {
+    if (gameKey === 'pixelstudio') {
+      if (activeStop) { activeStop(); activeStop = null; }
+      gridRoot.innerHTML = `
+        <button id="game-back" class="btn-cyber text-[9px] mb-2 shrink-0">◀ BACK TO ARCADE</button>
+        <div id="studio-stage" class="w-full"></div>`;
+      $('#game-back', root).addEventListener('click', () => { audio.click(); resetGrid(); });
+      activeStop = startPixelStudio($('#studio-stage', root), { audio, store });
+      return;
+    }
     if (activeStop) { activeStop(); activeStop = null; }
     activeKey = gameKey;
     gridRoot.innerHTML = `
@@ -290,10 +300,11 @@ function wireArcade(root) {
   function payout(key, score, coins, xp) {
     if (coins > 0) store.addCoins(coins);
     const leveled = store.xpGain(xp);
+    const prevBest = store.state.best[key] || 0;
     const newBest = store.setGameBest(key, score);
-    // 2.0 soul-feed: trait nudges (ego +4, greed +1), the win memory,
-    // and the first-ever-win pinned milestone — all via the store.
-    store.recordArcadeRun({ key, label: GAME_NAMES[key] || key, score });
+    // 2.0 soul-feed: trait nudges (ego +4, greed +1; records double ego), the
+    // win memory, the 🌟 record memory, and the first-win pinned milestone.
+    store.recordArcadeRun({ key, label: GAME_NAMES[key] || key, score, newBest });
     gameMusic.stopMusic(); // 2.0 behavior: the loop ends with the run
     audio._bgmActive = false;
     if (leveled) celebrateLevel();
@@ -301,10 +312,16 @@ function wireArcade(root) {
     log('SYS', `${key} run: ${score} pts · +${coins} CR`);
     renderAll();
     activeStop = null;
+    // 2.0 game-over copy, verbatim cadence:
+    const runMsg = prevBest > 0 && newBest
+      ? 'NEW BEST. The simulation audibly gasped.'
+      : prevBest > 0
+        ? 'Solid run. The sim has seen better.'
+        : 'First run on record. History starts NOW.';
     gridRoot.innerHTML = `
       <div class="border border-neon-green/40 bg-void/40 p-4 text-center font-mono text-[11px]">
         <p class="text-neon-green text-glow-green mb-1">RUN COMPLETE</p>
-        ${newBest ? '<p class="text-neon-amber mb-1">NEW BEST. The simulation audibly gasped.</p>' : ''}
+        <p class="text-neon-amber mb-1">${runMsg}</p>
         <p class="text-text-main mb-3">${GAME_NAMES[key] || key} · SCORE ${score} · +${coins} CR · +${xp} XP</p>
         <div class="flex gap-2 justify-center">
           <button id="game-again" class="btn-cyber text-[9px]">RE-RUN</button>
@@ -874,6 +891,8 @@ const App = {
       return stop;
     } },
     moltbook: { title: 'MOLTBOOK // TIDEPOOL', templateId: 'tpl-moltbook', wire: wireMoltbook },
+    pixelstudio: { title: 'PIXEL.STUDIO', templateId: 'tpl-pixelstudio', wire: (root) =>
+      startPixelStudio($('#px-root', root), { audio, store }) },
     jooh: { title: 'J.O.O.H. // SURVEILLANCE', templateId: 'tpl-jooh', wire: wireJooh },
     journal: { title: 'SOUL.FILE', templateId: 'tpl-journal', wire: wireSoul },
     settings: { title: 'SYSTEM.CFG', templateId: 'tpl-settings', wire: wireSettings },

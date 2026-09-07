@@ -337,6 +337,9 @@ html[data-scanlines='off'] body::after { display: none; }
   box-shadow: 0 0 20px rgba(0, 240, 255, 0.08), 0 8px 32px rgba(0, 0, 0, 0.6);
 }
 .os-window:not(.focused) { opacity: 0.82; }
+
+/* Runtime-toggled (not scanned by Tailwind): selected state in PIXEL.STUDIO */
+.px-selected { border-color: var(--color-neon-magenta, #ff2ea6) !important; }
 .window-btn-close, .window-btn-min, .window-btn-max {
   background: none;
   border: none;

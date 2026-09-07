@@ -95,12 +95,12 @@ afterEach(() => {
 });
 
 describe('arcade cabinet grid', () => {
-  it('shows 6 playable cabinets + 2 sealed slots, each with a best-score readout', async () => {
+  it('shows 6 playable cabinets + PIXEL.STUDIO + 1 sealed slot, each game with a best-score readout', async () => {
     await bootShell();
     const c = arcadeContent();
     const playable = [...c.querySelectorAll('button[data-game]')].map((b) => b.dataset.game);
-    expect(playable.sort()).toEqual(['breaker', 'flappy', 'loot', 'mario', 'rpg', 'snake']);
-    expect(c.querySelectorAll('[data-game]').length).toBe(6); // buttons only (sealed slots are divs without the attr)
+    expect(playable.sort()).toEqual(['breaker', 'flappy', 'loot', 'mario', 'pixelstudio', 'rpg', 'snake']);
+    expect(c.querySelectorAll('[data-game]').length).toBe(7); // buttons only (the sealed ??? slot is a div without the attr)
     expect(c.querySelectorAll('.arcade-best').length).toBe(6);
     expect(c.textContent).toContain('6 CORES RESTORED');
   });

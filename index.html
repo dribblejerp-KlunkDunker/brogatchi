@@ -284,11 +284,11 @@
           <span class="font-mono text-[10px] text-text-main">LOOT SHOWER</span>
           <div class="font-mono text-[8px] text-text-muted mt-1">BEST: <span class="arcade-best" data-best="loot">0</span></div>
         </button>
-        <div class="border border-border bg-void/50 p-3 text-center opacity-40 cursor-not-allowed" aria-disabled="true">
-          <div class="text-2xl mb-1" aria-hidden="true">🔒</div>
-          <span class="font-mono text-[10px] text-text-muted">PIXEL.STUDIO</span>
-          <div class="font-mono text-[8px] text-text-muted mt-1">J.O.O.H. LICENSE PENDING</div>
-        </div>
+        <button data-game="pixelstudio" class="border border-border bg-void/50 p-3 text-center hover:border-neon-magenta transition-colors cursor-pointer">
+          <div class="text-2xl mb-1" aria-hidden="true">🎨</div>
+          <span class="font-mono text-[10px] text-text-main">PIXEL.STUDIO</span>
+          <div class="font-mono text-[8px] text-text-muted mt-1">LICENSE FORGED — NOW OPEN</div>
+        </button>
         <div class="border border-border bg-void/50 p-3 text-center opacity-40 cursor-not-allowed" aria-disabled="true">
           <div class="text-2xl mb-1" aria-hidden="true">🔒</div>
           <span class="font-mono text-[10px] text-text-muted">??? .EXE</span>
@@ -296,6 +296,11 @@
         </div>
       </div>
     </div>
+  </template>
+
+  <!-- Pixel Studio: sprite editor (opens from its arcade cabinet) -->
+  <template id="tpl-pixelstudio">
+    <div id="px-root" class="w-full"></div>
   </template>
 
   <!-- Shop: Market Terminal -->
