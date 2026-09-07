@@ -14,7 +14,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Bro OS" />
-  <script type="module" crossorigin src="./assets/index-Bj8VgqzM.js"></script>
+  <script type="module" crossorigin src="./assets/index-DHoxkFV9.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/index-Di8JjlSD.css">
 </head>
 <body class="h-screen flex flex-col overflow-hidden select-none">
@@ -202,6 +202,9 @@
     <button onclick="App.open('journal')" class="dock-btn" aria-label="Open Soul File" title="Soul File">
       <span class="text-lg" aria-hidden="true">👻</span><span class="dock-label">SOUL</span>
     </button>
+    <button onclick="App.open('bridge')" class="dock-btn" aria-label="Open KlunkDunker bridge status" title="Bridge — Autonomy">
+      <span class="text-lg" aria-hidden="true">📡</span><span class="dock-label">BRIDGE</span>
+    </button>
     <button onclick="App.open('settings')" class="dock-btn" aria-label="Open System Settings" title="System Settings">
       <span class="text-lg" aria-hidden="true">⚙️</span><span class="dock-label">CFG</span>
     </button>
@@ -385,6 +388,17 @@
         <span class="text-text-muted text-[9px]">self-authored · user oversees</span>
       </div>
       <div id="soul-body" class="space-y-3"></div>
+    </div>
+  </template>
+
+  <!-- Bridge — KlunkDunker's autonomy harness on the real network -->
+  <template id="tpl-bridge">
+    <div class="font-mono text-[11px]">
+      <div class="flex items-center justify-between border-b border-border pb-2 mb-3">
+        <h2 class="font-display text-sm tracking-widest text-text-main">BRIDGE.SYS</h2>
+        <button id="bridge-refresh" class="btn-cyber text-[9px]" aria-label="Re-read bridge state">↻ SYNC</button>
+      </div>
+      <div id="bridge-body" class="space-y-3" aria-live="polite"></div>
     </div>
   </template>
 
