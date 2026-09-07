@@ -196,10 +196,14 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
      Restored from the 2.0 app: every game over nudges the trait
      axes (ego +4, greed +1), writes a real memory, and the first
      win ever pins the cabinet-room milestone. */
-  function recordArcadeRun({ key, label, score }) {
+  function recordArcadeRun({ key, label, score, newBest = false }) {
     if (!Number.isFinite(Number(score))) return;
     mutate((s) => {
       applyEvents(s.personality, [{ trait: 'ego', amount: 4 }, { trait: 'greed', amount: 1 }]);
+      // A personal record doubles the ego feed — the bro remembers being great.
+      if (newBest) applyEvents(s.personality, [{ trait: 'ego', amount: 4 }]);
+      // 2.0 game-over flow: a run at the cabinets is a good time.
+      if (s.stats) s.stats.happy = clamp(s.stats.happy + 20);
       s.counters.gamesWon += 1;
       s.memories = remember(s.memories, {
         icon: '🎮',
@@ -207,6 +211,14 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
         imp: 3,
         pin: s.counters.gamesWon === 1,
       });
+      // High scores write their own memory — the soul keeps the leaderboard.
+      if (newBest) {
+        s.memories = remember(s.memories, {
+          icon: '🌟',
+          text: `New ${label || key} record: ${score} points.`,
+          imp: 4,
+        });
+      }
     });
     if (state.counters.gamesWon === 1) {
       rememberEvent('A legend is born in the cabinet room.', { icon: '🏆', imp: 4, pin: true });

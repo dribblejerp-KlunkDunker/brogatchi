@@ -466,6 +466,48 @@ describe('2.0 arcade soul-feed (recordArcadeRun)', () => {
     expect(store.state.counters.gamesWon).toBe(2);
   });
 
+  it('a new high score writes its own 🌟 record memory and doubles the ego feed', () => {
+    const store = freshStore();
+    store.load();
+    const egoBefore = store.state.personality.ego;
+
+    store.recordArcadeRun({ key: 'loot', label: 'Loot Shower', score: 37, newBest: true });
+
+    const rec = store.state.memories.find((m) => m.text === 'New Loot Shower record: 37 points.');
+    expect(rec).toBeTruthy();
+    expect(rec.icon).toBe('🌟');
+    expect(rec.imp).toBe(4); // records are remembered more vividly than wins
+    // ego: +4 base +4 record bonus; greed: +1
+    expect(store.state.personality.ego).toBe(egoBefore + 8);
+    expect(store.state.personality.greed).toBe(11);
+  });
+
+  it('a non-record run shifts only the base traits and writes no record memory', () => {
+    const store = freshStore();
+    store.load();
+    const egoBefore = store.state.personality.ego;
+
+    store.recordArcadeRun({ key: 'loot', label: 'Loot Shower', score: 5, newBest: false });
+
+    expect(store.state.personality.ego).toBe(egoBefore + 4);
+    expect(store.state.memories.some((m) => m.icon === '🌟')).toBe(false);
+    expect(store.state.memories.some((m) => (m.text || '').startsWith('New '))).toBe(false);
+  });
+
+  it('every run lifts happiness +20 like the 2.0 game-over flow', () => {
+    const store = freshStore();
+    store.load();
+    store.state.stats.happy = 40;
+    store.recordArcadeRun({ key: 'snake', label: 'SNAKE.EXE', score: 9, newBest: true });
+    expect(store.state.stats.happy).toBe(60);
+    store.recordArcadeRun({ key: 'snake', label: 'SNAKE.EXE', score: 9, newBest: false });
+    expect(store.state.stats.happy).toBe(80);
+    // clamped at 100
+    store.state.stats.happy = 95;
+    store.recordArcadeRun({ key: 'snake', label: 'SNAKE.EXE', score: 9, newBest: false });
+    expect(store.state.stats.happy).toBe(100);
+  });
+
   it('run memories flow through the engine: capped, deduped, pinned-first sorted', () => {
     const store = freshStore();
     store.load();
