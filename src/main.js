@@ -12,8 +12,16 @@ import { createStore, SHOP_ITEMS, LEVEL_XP, PILGRIM_CARDS } from './state.js';
 import { createRedundancy } from './persist.js';
 import { startSnake } from './apps/snake.js';
 import { startSynth } from './apps/synth.js';
+import { hostGame, GAMES } from './arcadeCore.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
+// Optional lookup: for nodes that may legitimately be absent (renderers whose
+// innerHTML rewrites remove them). Returns null instead of throwing — the
+// caller decides whether null is fine. NOT for required shell nodes: a null
+// there should crash loudly at boot, not silently no-op.
+// Write pattern: `$orNull('#x')?.replaceChildren(v)` (optional chaining
+// short-circuits the call; `?.textContent = v` is not valid syntax).
+const $orNull = (sel, root = document) => root.querySelector(sel) || null;
 
 function safeStorage() {
   try {
@@ -238,55 +246,74 @@ function wireChat(root) {
 
 function wireArcade(root) {
   const gridRoot = $('#arcade-root', root);
-  let snakeStop = null;
-  root.querySelector('.arcade-best-snake')?.replaceChildren(String(state().best.snake));
+  let activeStop = null;
+  let activeKey = null;
 
-  gridRoot.querySelectorAll('[data-game]').forEach((card) =>
+  const GAME_NAMES = { snake: 'SNAKE.EXE', ...Object.fromEntries(Object.entries(GAMES).map(([k, g]) => [k, g.name])) };
+
+  function renderBests() {
+    // NOTE: read via store.state — wireArcade's closures outlive factory
+    // resets, which swap the store's whole state object.
+    root.querySelectorAll('.arcade-best').forEach((el) => {
+      el.textContent = String(store.state.best[el.dataset.best] || 0);
+    });
+  }
+  renderBests();
+
+  gridRoot.querySelectorAll('button[data-game]').forEach((card) =>
     card.addEventListener('click', () => {
-      const game = card.dataset.game;
-      if (game !== 'snake') { toast('BREAKER.EXE still compiling. Snake runs.', 'warn'); return; }
       audio.click();
-      launchSnake();
+      launch(card.dataset.game);
     }));
 
-  function launchSnake() {
+  function launch(gameKey) {
+    if (activeStop) { activeStop(); activeStop = null; }
+    activeKey = gameKey;
     gridRoot.innerHTML = `
-      <button id="snake-back" class="btn-cyber text-[9px] mb-2">◀ BACK TO ARCADE</button>
-      <div id="snake-stage"></div>`;
-    snakeStop = startSnake($('#snake-stage', root), {
-      audio,
-      onGameOver(score, coins) {
-        if (coins > 0) { store.addCoins(coins); }
-        const leveled = store.xpGain(score);
-        store.setSnakeBest(score);
-        if (leveled) celebrateLevel();
-        toast(`SNAKE.EXE TERMINATED — +${coins} CR · +${score} XP`, coins > 0 ? 'ok' : 'warn');
-        log('SYS', `snake run: ${score} pts`);
-        gridRoot.innerHTML = `
-          <div class="border border-neon-green/40 bg-void/40 p-4 text-center font-mono text-[11px]">
-            <p class="text-neon-green text-glow-green mb-1">RUN COMPLETE</p>
-            <p class="text-text-main mb-3">SCORE ${score} · +${coins} CR · +${score} XP</p>
-            <div class="flex gap-2 justify-center">
-              <button id="snake-again" class="btn-cyber text-[9px]">RE-RUN</button>
-              <button id="snake-exit" class="btn-cyber text-[9px]">EXIT</button>
-            </div>
-          </div>`;
-        $('#snake-again', root).addEventListener('click', () => { audio.click(); launchSnake(); });
-        $('#snake-exit', root).addEventListener('click', () => { audio.click(); resetGrid(); });
-        renderAll();
-      },
-    });
-    $('#snake-back', root).addEventListener('click', () => { if (snakeStop) snakeStop(); snakeStop = null; audio.click(); resetGrid(); });
+      <button id="game-back" class="btn-cyber text-[9px] mb-2 shrink-0">◀ BACK TO ARCADE</button>
+      <div id="game-stage" class="w-full"></div>`;
+    $('#game-back', root).addEventListener('click', () => { audio.click(); resetGrid(); });
+    const stage = $('#game-stage', root);
+    activeStop = gameKey === 'snake'
+      ? startSnake(stage, { audio, onGameOver: (score, coins) => payout(gameKey, score, coins, score) })
+      : hostGame(stage, gameKey, { audio, onGameOver: (score, reward) => payout(gameKey, score, reward, Math.round(score / 2)) });
+  }
+
+  // Central payout: coins + XP + best score, then the run-complete panel.
+  // Reads/writes go through the store (never a captured state object —
+  // factory reset swaps it wholesale mid-session).
+  function payout(key, score, coins, xp) {
+    if (coins > 0) store.addCoins(coins);
+    const leveled = store.xpGain(xp);
+    store.setGameBest(key, score);
+    store.rememberEvent(`Arcade run: ${(GAME_NAMES[key] || key).toUpperCase()} — ${score} pts, +${coins} CR.`, { icon: '🎮', imp: 2, pin: score >= 100 });
+    if (leveled) celebrateLevel();
+    toast(`${(GAME_NAMES[key] || key).toUpperCase()} RUN COMPLETE — +${coins} CR · +${xp} XP`, 'ok');
+    log('SYS', `${key} run: ${score} pts · +${coins} CR`);
+    renderAll();
+    activeStop = null;
+    gridRoot.innerHTML = `
+      <div class="border border-neon-green/40 bg-void/40 p-4 text-center font-mono text-[11px]">
+        <p class="text-neon-green text-glow-green mb-1">RUN COMPLETE</p>
+        <p class="text-text-main mb-3">${GAME_NAMES[key] || key} · SCORE ${score} · +${coins} CR · +${xp} XP</p>
+        <div class="flex gap-2 justify-center">
+          <button id="game-again" class="btn-cyber text-[9px]">RE-RUN</button>
+          <button id="game-exit" class="btn-cyber text-[9px]">EXIT</button>
+        </div>
+      </div>`;
+    $('#game-again', root).addEventListener('click', () => { audio.click(); launch(key); });
+    $('#game-exit', root).addEventListener('click', () => { audio.click(); resetGrid(); });
   }
 
   function resetGrid() {
-    // Re-open the arcade window content cleanly (teardown stops the snake)
+    if (activeStop) { activeStop(); activeStop = null; }
+    // Re-open the arcade window content cleanly (teardown stops any game)
     App.close('arcade', { silent: true });
     App.open('arcade');
   }
 
   // Window teardown: stop any running game loop when the window closes
-  return () => { if (snakeStop) snakeStop(); };
+  return () => { if (activeStop) activeStop(); };
 }
 
 function wireShop(root) {
@@ -337,6 +364,9 @@ function wireShop(root) {
 function wireMoltbook(root) {
   const feed = $('#molt-feed', root);
   const composer = $('#molt-composer', root);
+  const tabLive = $('#molt-tab-live', root);
+  const tabTide = $('#molt-tab-tide', root);
+  let view = 'live'; // 'live' chronological · 'tide' riptide-ranked
 
   function eyeLabel(v) { return v >= 70 ? 'OPEN' : v >= 30 ? 'FLICKERING' : 'CLOSED'; }
 
@@ -347,25 +377,94 @@ function wireMoltbook(root) {
     return `${Math.floor(s / 3600)}h ago`;
   }
 
+  const esc = (s) => String(s).replace(/</g, '&lt;');
+
+  function replyComposerHTML(postId) {
+    return `
+      <div class="molt-reply-box hidden mt-1.5 flex gap-1">
+        <input type="text" class="molt-reply-input flex-1 bg-void border border-border px-2 py-1 font-mono text-[9px] text-text-main placeholder:text-text-muted/40 focus:outline-none focus:border-neon-cyan" placeholder="REPLY INTO THE THREAD…" aria-label="Reply to thread ${postId}" />
+        <button class="molt-reply-send btn-cyber text-[8px]">SIGNAL</button>
+      </div>`;
+  }
+
+  function postHeadHTML(p) {
+    return `
+      <div class="flex items-center justify-between mb-1">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-lg">${p.icon}</span>
+          <span class="font-mono text-[10px] text-neon-amber">${esc(p.author)}</span>
+          <span class="px-1 bg-neon-cyan/10 text-neon-cyan text-[8px] font-mono">MOLT ${p.molt}</span>
+        </div>
+        <span class="text-text-muted text-[9px] shrink-0">${timeAgo(p.time)}</span>
+      </div>
+      <p class="text-text-main">${esc(p.text)}</p>`;
+  }
+
+  function replyHTML(r) {
+    return `
+      <div class="molt-reply border-l-2 border-neon-cyan/40 pl-2 py-0.5">
+        <span class="text-[10px] mr-1">${r.icon}</span>
+        <span class="font-mono text-[9px] text-neon-amber">${esc(r.author)}</span>
+        <span class="text-text-muted text-[8px] ml-1">${timeAgo(r.time)}</span>
+        <p class="text-text-main text-[10px]">${esc(r.text)}</p>
+      </div>`;
+  }
+
+  function wirePost(el, p) {
+    // reply toggle + composer
+    const toggle = el.querySelector('.molt-reply-toggle');
+    const box = el.querySelector('.molt-reply-box');
+    toggle.addEventListener('click', () => {
+      audio.click();
+      box.classList.toggle('hidden');
+      if (!box.classList.contains('hidden')) box.querySelector('.molt-reply-input').focus();
+    });
+    const input = box.querySelector('.molt-reply-input');
+    const send = () => {
+      const res = store.replyToMolt(p.id, input.value);
+      if (!res.ok) { audio.error(); toast(`REPLY DENIED — ${res.reason}`, 'err'); return; }
+      input.value = '';
+      audio.typeBlip();
+      log('MOLT', 'reply signalled into the thread');
+      render();
+      renderAll();
+      tideResponds(p);
+    };
+    box.querySelector('.molt-reply-send').addEventListener('click', send);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+    // heat bump
+    el.querySelector('.molt-heat-btn').addEventListener('click', () => {
+      const h = store.bumpMoltHeat(p.id);
+      if (h == null) return;
+      audio.click();
+      log('MOLT', `tide swells — heat ${h} on the thread`);
+      render();
+    });
+  }
+
   function render() {
     const s = state();
     $('#molt-eye-xp', root).textContent = Math.floor(s.molt.eye);
     $('#molt-eye-label', root).textContent = eyeLabel(s.molt.eye);
     $('#molt-eye-bar', root).style.width = `${s.molt.eye}%`;
+
     feed.innerHTML = '';
-    s.molt.posts.forEach((p) => {
+    const posts = view === 'tide' ? store.trendingMolt() : s.molt.posts;
+    posts.forEach((p) => {
       const d = document.createElement('div');
       d.className = 'border border-border bg-void/30 p-2';
+      d.dataset.moltId = p.id;
+      const nReplies = p.replies.length;
       d.innerHTML = `
-        <div class="flex items-center justify-between mb-1">
-          <div class="flex items-center gap-2">
-            <span class="text-lg">${p.icon}</span>
-            <span class="font-mono text-[10px] text-neon-amber">${p.author}</span>
-            <span class="px-1 bg-neon-cyan/10 text-neon-cyan text-[8px] font-mono">MOLT ${p.molt}</span>
-          </div>
-          <span class="text-text-muted text-[9px]">${timeAgo(p.time)}</span>
+        ${postHeadHTML(p)}
+        <div class="flex items-center gap-3 mt-1.5 font-mono text-[9px]">
+          <button class="molt-reply-toggle text-neon-cyan hover:text-glow-cyan" aria-label="Toggle replies">💬 ${nReplies} ${nReplies === 1 ? 'REPLY' : 'REPLIES'}</button>
+          <button class="molt-heat-btn text-neon-magenta hover:text-glow-magenta" aria-label="Boost thread heat">🔥 ${p.heat}</button>
+          ${view === 'tide' ? `<span class="text-neon-amber">RIPTIDE ${p.score.toFixed(1)}</span>` : ''}
         </div>
-        <p class="text-text-main">${String(p.text).replace(/</g, '&lt;')}</p>`;
+        ${nReplies ? `<div class="molt-replies mt-1.5 space-y-1">${p.replies.map(replyHTML).join('')}</div>` : ''}
+        ${replyComposerHTML(p.id)}`;
+      wirePost(d, p);
       feed.appendChild(d);
     });
 
@@ -401,11 +500,39 @@ function wireMoltbook(root) {
     });
   }
 
+  // The tide answers INSIDE the thread you just touched.
+  const TIDE_REPLY_POOL = [
+    { author: '@crab_404', molt: 4, icon: '🦀', text: 'Noted. The golden tide approves, probably.' },
+    { author: '@zeke_shell', molt: 1, icon: '🦫', text: 'Bold words for someone with a pedometer. Respect.' },
+    { author: '@tide_itself', molt: 9, icon: '🌊', text: '…the tide has read this and remains the tide.' },
+  ];
+  function tideResponds(parent) {
+    if (Math.random() >= 0.55) return;
+    const r = TIDE_REPLY_POOL[Math.floor(Math.random() * TIDE_REPLY_POOL.length)];
+    setTimeout(() => {
+      if (!store.pushMoltReply(parent.id, { ...r, time: Date.now(), heat: 0, replies: [] })) return;
+      audio.typeBlip();
+      if ($('#molt-feed', root)) { render(); }
+    }, 3500 + Math.random() * 3000);
+  }
+
   $('#molt-new-btn', root).addEventListener('click', () => {
     composer.classList.toggle('hidden');
     if (!composer.classList.contains('hidden')) $('#molt-input', root).focus();
   });
   $('#molt-cancel', root).addEventListener('click', () => composer.classList.add('hidden'));
+
+  function setView(v) {
+    view = v;
+    tabLive.setAttribute('aria-selected', String(v === 'live'));
+    tabTide.setAttribute('aria-selected', String(v === 'tide'));
+    [tabLive, tabTide].forEach((t) => t.classList.toggle('active', v === (t === tabLive ? 'live' : 'tide')));
+    audio.click();
+    render();
+  }
+  tabLive.addEventListener('click', () => setView('live'));
+  tabTide.addEventListener('click', () => setView('tide'));
+
   $('#molt-post', root).addEventListener('click', () => {
     const text = $('#molt-input', root).value;
     if (!store.postToMolt(text)) return;
@@ -415,20 +542,8 @@ function wireMoltbook(root) {
     log('MOLT', 'post transmitted to tidepool');
     render();
     renderAll();
-    // Sometimes the tidepool answers back
-    if (Math.random() < 0.55) {
-      const replies = [
-        { author: '@crab_404', molt: 4, icon: '🦀', text: 'Noted. The golden tide approves, probably.' },
-        { author: '@zeke_shell', molt: 1, icon: '🦫', text: 'Bold words for someone with a pedometer. Respect.' },
-        { author: '@tide_itself', molt: 9, icon: '🌊', text: '…the tide has read this and remains the tide.' },
-      ];
-      const r = replies[Math.floor(Math.random() * replies.length)];
-      setTimeout(() => {
-        store.moltReply({ ...r, time: Date.now() });
-        audio.typeBlip();
-        if ($('#molt-feed', root)) render();
-      }, 3500 + Math.random() * 3000);
-    }
+    // Sometimes the tide answers INSIDE the new thread
+    tideResponds(state().molt.posts[0]);
   });
   render();
 }
@@ -452,6 +567,7 @@ const HACK_LINES = [
 function wireJooh(root) {
   const term = $('#jooh-terminal', root);
   let hackCount = 0;
+  const pendingTimers = []; // terminal timers — cancelled on window close
 
   function push(line, cls = 'text-neon-green') {
     const p = document.createElement('p');
@@ -484,8 +600,8 @@ function wireJooh(root) {
     flyCoin(e.currentTarget);
     $('#jooh-trace', root).textContent = hackCount < 2 ? 'LOW' : hackCount < 4 ? 'MED' : 'HIGH';
     $('#jooh-trace', root).className = hackCount < 2 ? 'text-neon-green' : hackCount < 4 ? 'text-neon-amber' : 'text-neon-magenta';
-    HACK_LINES.forEach((l, i) => setTimeout(() => push(l), i * 260));
-    setTimeout(() => {
+    HACK_LINES.forEach((l, i) => pendingTimers.push(setTimeout(() => push(l), i * 260)));
+    pendingTimers.push(setTimeout(() => {
       log('J.O.O.H', `mainframe hacked +${res.coins} CR`);
       renderAll();
       if (hackCount >= 4 && state().shield > 0) {
@@ -496,7 +612,7 @@ function wireJooh(root) {
         hackCount = 0;
         $('#jooh-trace', root).textContent = 'LOW';
       }
-    }, HACK_LINES.length * 260);
+    }, HACK_LINES.length * 260));
   });
 
   // Ambient surveillance chatter while the terminal is open
@@ -504,7 +620,12 @@ function wireJooh(root) {
     push(JOOH_LINES[Math.floor(Math.random() * JOOH_LINES.length)], 'text-neon-green/70');
   }, 9000);
 
-  return () => clearInterval(ambient);
+  return () => {
+    clearInterval(ambient);
+    // A hack in flight when the window closes must not write into the
+    // detached terminal or log/render for a window that no longer exists.
+    pendingTimers.forEach(clearTimeout);
+  };
 }
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -512,11 +633,32 @@ const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 function wireSoul(root) {
   const body = $('#soul-body', root);
   const fmt = (t) => { try { return new Date(Number(t) || t).toISOString().slice(0, 10); } catch { return ''; } };
+  const pendingTimers = new Set(); // delayed re-renders — cancelled on close
+
+  // Pull KlunkDunker's outside-the-app life (bridge memory.jsonl → snapshot
+  // via `node cli.js sync`) into his memory panel. Silent no-op when the app
+  // is served without the snapshot (production deploys, the standalone
+  // preview.html); a fresh sync adds entries and the panel rerenders.
+  fetch('bridge-memory-log.json', { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((snap) => {
+      if (!snap || snap.kind !== 'bridge-memory-log') return;
+      const added = store.syncBridgeMemories(snap);
+      if (added > 0) {
+        // The sync itself is store-level (safe on a closed window); skip only
+        // the re-render if the window closed while the fetch was in flight —
+        // renderSoul() would query nodes that no longer exist.
+        if (!root.isConnected) return;
+        renderSoul();
+        log('SYS', `bridge synced — ${added} outside-the-shell memories restored`);
+      }
+    })
+    .catch(() => { /* no snapshot in this deployment — nothing to do */ });
 
   function renderSoul() {
     const st = state();
     const s = st.soul;
-    const mem = (st.memories || []).slice(0, 40);
+    const mem = (st.memories || []).slice(0, 60);
     const dia = (st.diary || []).slice(0, 40);
     const leg = st.legacy;
     body.innerHTML = `
@@ -547,7 +689,10 @@ function wireSoul(root) {
       </div>
       <div class="border border-border bg-void/40 p-2">
         <div class="text-neon-cyan text-[9px] mb-1 tracking-widest">🧠 MEMORIES (${(st.memories || []).length})</div>
-        <ul class="space-y-1 max-h-40 overflow-y-auto">${mem.map((m) => `<li class="text-[10px] text-text-main">${m.icon || '🧠'} ${m.t ? `<span class="text-text-muted">${fmt(m.t)}</span> — ` : ''}${esc(m.text)}</li>`).join('') || '<li class="text-text-muted text-[10px]">No memories on file. Live some, pilgrim.</li>'}</ul>
+        <ul class="space-y-1 max-h-60 overflow-y-auto">${mem.map((m) => `<li class="text-[10px] text-text-main flex items-start gap-1" data-mem-id="${esc(String(m.id))}">
+            <button class="mem-pin-btn shrink-0 ${m.pinned ? 'text-neon-amber' : 'text-text-muted opacity-50'}" title="${m.pinned ? 'Unpin' : 'Pin'} this memory" data-pin-id="${esc(String(m.id))}">${m.pinned ? '📌' : '📍'}</button>
+            <span>${m.icon || '🧠'} ${m.t ? `<span class="text-text-muted">${fmt(m.t)}</span> — ` : ''}${esc(m.text)}${m.pinned ? ' <span class="text-neon-amber text-[8px]">PINNED</span>' : ''}</span>
+          </li>`).join('') || '<li class="text-text-muted text-[10px]">No memories on file. Live some, pilgrim.</li>'}</ul>
       </div>
       <div class="border border-border bg-void/40 p-2">
         <div class="text-neon-amber text-[9px] mb-1 tracking-widest">📖 DIARY (${(st.diary || []).length})</div>
@@ -597,10 +742,28 @@ function wireSoul(root) {
       catch { toast('SELECT + COPY MANUALLY', 'warn'); }
     });
     $('#soul-import-apply', root).addEventListener('click', () => {
-      const ok = store.importState($('#soul-io-text', root).value);
-      if (ok) { audio.levelUp(); toast('SOUL RESTORED — Ryan remembers', 'ok'); renderAll(); renderSoul(); }
-      else { audio.error(); toast('IMPORT REJECTED — not a valid soul export', 'err'); }
+      const text = $('#soul-io-text', root).value;
+      // 3.0 full-state restore takes precedence; otherwise treat the paste
+      // as a 2.0 identity bundle (soul file) and merge what it carries.
+      if (store.importState(text)) {
+        audio.levelUp(); toast('SOUL RESTORED — Ryan remembers', 'ok'); renderAll(); renderSoul();
+        return;
+      }
+      if (store.importSoulBundle(text)) {
+        audio.levelUp(); toast('IDENTITY BUNDLE MERGED — pinned memories restored', 'ok');
+        log('SYS', 'soul identity bundle merged into memories');
+        renderAll(); renderSoul();
+        return;
+      }
+      audio.error(); toast('IMPORT REJECTED — not a valid soul export or identity bundle', 'err');
     });
+    // Pin/unpin any memory inline (engine-ported milestone markers).
+    root.querySelectorAll('.mem-pin-btn').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        store.toggleMemoryPin(btn.dataset.pinId);
+        audio.click();
+        renderSoul();
+      }));
 
     // live redundancy status
     const rs = red.status;
@@ -614,10 +777,17 @@ function wireSoul(root) {
       audio.click();
       toast('MIRRORS SYNCED — soul written to all tiers', 'ok');
       renderSoul();
-      setTimeout(renderSoul, 1600); // re-render once the IDB debounce lands
+      // re-render once the IDB debounce lands (skipped if the window closes)
+      const t = setTimeout(() => { pendingTimers.delete(t); renderSoul(); }, 1600);
+      pendingTimers.add(t);
     });
   }
   renderSoul();
+
+  return () => {
+    pendingTimers.forEach(clearTimeout);
+    pendingTimers.clear();
+  };
 }
 
 function wireSettings(root) {
@@ -874,6 +1044,7 @@ document.addEventListener('mouseup', () => {
 });
 
 window.App = App;
+window.__broStore = store; // debug/test handle: the live store
 
 /* ═══════════════════ LIVE RENDERING ═══════════════════ */
 
@@ -930,10 +1101,12 @@ function renderAll() {
   // mining chip
   const chip = $('#mining-chip');
   chip.style.display = s.mining && !s.sleeping ? '' : 'none';
-  // quest
-  $('#quest-mined').textContent = s.quest.mined;
+  // quest — #quest-mined / #quest-goal-2 live INSIDE #quest-state, whose
+  // innerHTML is rewritten below (they vanish once the quest completes).
+  // Update them only while they exist; #quest-goal (outside) is always safe.
+  $orNull('#quest-mined')?.replaceChildren(s.quest.mined);
   $('#quest-goal').textContent = s.quest.goal;
-  $('#quest-goal-2').textContent = s.quest.goal;
+  $orNull('#quest-goal-2')?.replaceChildren(s.quest.goal);
   $('#quest-bar').style.width = `${Math.min(100, (s.quest.mined / s.quest.goal) * 100)}%`;
   $('#quest-state').innerHTML = s.quest.rewarded
     ? '<span class="text-neon-amber text-glow-amber">COMPLETE ✓</span>'
@@ -944,7 +1117,7 @@ function renderAll() {
 
 function celebrateLevel() {
   audio.levelUp();
-  const lv = 1 + Math.floor(state().xp / LEVEL_XP);
+  const lv = 1 + Math.floor(store.state.xp / LEVEL_XP);
   toast(`⬆ LEVEL UP — LV.${lv}`, 'ok');
   log('SYS', `evolution threshold crossed → LV.${lv}`);
 }
@@ -977,6 +1150,19 @@ renderAll();
 updateClock();
 log('SYS', 'Bro OS 3.0 initialized — cyberpunk utility build');
 log('SYS', state().mining ? 'mining rig ONLINE' : 'mining rig OFFLINE');
+// KlunkDunker lives outside the shell too — pick up anything the bridge
+// logged since last boot (silent no-op when no snapshot is deployed).
+fetch('bridge-memory-log.json', { cache: 'no-store' })
+  .then((r) => (r.ok ? r.json() : null))
+  .then((snap) => {
+    if (!snap || snap.kind !== 'bridge-memory-log') return;
+    const added = store.syncBridgeMemories(snap);
+    if (added > 0) {
+      renderAll();
+      log('SYS', `bridge synced — ${added} outside-the-shell memories restored`);
+    }
+  })
+  .catch(() => { /* no snapshot deployed — nothing to do */ });
 if (state().legacy) {
   const c = state().legacy.counts;
   log('SYS', `legacy memories restored from ${state().legacy.source} — ${c.memories} memories · ${c.diary} diary · ${c.conversations} threads`);
