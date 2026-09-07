@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 import { createChatMiddleware } from './server/proxy.mjs';
+import fs from 'node:fs';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -28,6 +29,20 @@ export default defineConfig(({ mode }) => {
   };
 
   const plugins = [tailwindcss(), proxyPlugin];
+
+  // sw.js is emitted as a bundle asset (not copied from public/) so every
+  // build stamps it: the bytes change per deploy → the browser reinstalls the
+  // worker → activate() prunes every previous shell cache. Without this the
+  // cache grows forever (statics are SWR-cached under one never-changing name).
+  const stampSwPlugin = {
+    name: 'bro-os-stamp-sw',
+    generateBundle() {
+      const stamp = Date.now().toString(36);
+      const source = fs.readFileSync('src/sw.js', 'utf8').replaceAll('__BUILD_STAMP__', stamp);
+      this.emitFile({ type: 'asset', fileName: 'sw.js', source });
+    },
+  };
+  plugins.push(stampSwPlugin);
   if (lanMode === '2') plugins.push(basicSsl());
 
   return {
