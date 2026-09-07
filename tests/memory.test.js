@@ -561,3 +561,54 @@ describe('2.0 arcade soul-feed (recordArcadeRun)', () => {
 function freshStoreWith(storage) {
   return createStore({ storage });
 }
+
+describe('2.0 gameplay memory call sites (reconciled-tree port)', () => {
+  it('shop purchases write the 🛍️ "Bought the X. Worth it." memory (2.0 line verbatim)', () => {
+    const store = freshStore();
+    store.load();
+    const before = store.state.memories.length;
+    const res = store.buy('pizza');
+    expect(res.ok).toBe(true);
+    const mem = store.state.memories.find((m) => m.text === 'Bought the PIZZA.SLC. Worth it.');
+    expect(mem).toBeTruthy();
+    expect(mem.icon).toBe('🛍️');
+    expect(mem.imp).toBe(2);
+    expect(store.state.memories.length).toBe(before + 1);
+  });
+
+  it('a failed purchase writes nothing', () => {
+    const store = freshStore();
+    store.load();
+    const before = store.state.memories.length;
+    const res = store.buy('goldshell'); // 500 CR — fresh bros are broke
+    expect(res.ok).toBe(false);
+    expect(store.state.memories.length).toBe(before);
+  });
+
+  it('deploying the mining rig writes the ⛏️ memory; stowing does not', () => {
+    const store = freshStore();
+    store.load();
+    store.toggleMine();                 // default is ON in 3.0 — stow first
+    expect(store.toggleMine()).toBe(true); // ...and deploy again
+    const mem = store.state.memories.find((m) => m.text === 'Deployed the mining rig. Passive income go brrr.');
+    expect(mem).toBeTruthy();
+    expect(mem.icon).toBe('⛏️');
+    expect(mem.imp).toBe(3);
+    expect(store.state.memories.filter((m) => (m.text || '').includes('mining rig'))).toHaveLength(1);
+  });
+
+  it('completing the daily quest pins the ✅ 2.0 milestone — exactly once', () => {
+    const store = freshStore();
+    store.load();
+    if (!store.state.mining) store.toggleMine(); // rig must be running
+    store.state.quest.mined = store.state.quest.goal - 1; // one extraction from done
+    store.tick(6.5); // MINE_INTERVAL_MS = 6000 → one extraction, quest completes
+    const mem = store.state.memories.find((m) => m.text === 'Finished a real-life quest. The sim shakes.');
+    expect(mem).toBeTruthy();
+    expect(mem.icon).toBe('✅');
+    expect(mem.pinned).toBe(true);
+    expect(store.state.quest.rewarded).toBe(true);
+    store.tick(7); // more mining after completion must not re-fire
+    expect(store.state.memories.filter((m) => m.text === 'Finished a real-life quest. The sim shakes.')).toHaveLength(1);
+  });
+});
