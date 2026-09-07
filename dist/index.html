@@ -14,8 +14,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Bro OS" />
-  <script type="module" crossorigin src="./assets/index-Bq4LlkRc.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-CHTO2glD.css">
+  <script type="module" crossorigin src="./assets/index-DbN4AolQ.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BYs9wVaI.css">
 </head>
 <body class="h-screen flex flex-col overflow-hidden select-none">
 
@@ -250,29 +250,51 @@
     </div>
   </template>
 
-  <!-- Arcade -->
+  <!-- Arcade: 8 cabinets — snake (3.0) + the restored 2.0 engine suite -->
   <template id="tpl-arcade">
     <div id="arcade-root" class="h-full">
       <h2 class="font-display text-sm tracking-widest text-neon-cyan text-glow-cyan mb-1">ARCADE.SYS</h2>
-      <p class="font-mono text-[9px] text-text-muted mb-3">FIXED-TIMESTEP CORES · REWARDS PAID IN CR</p>
+      <p class="font-mono text-[9px] text-text-muted mb-3">FIXED-TIMESTEP CORES · REWARDS PAID IN CR · <span class="text-neon-green">6 CORES RESTORED FROM THE 2.0 VAULT</span></p>
       <div id="arcade-grid" class="grid grid-cols-2 gap-2">
         <button data-game="snake" class="border border-border bg-void/50 p-3 text-center hover:border-neon-green transition-colors cursor-pointer">
-          <div class="text-2xl mb-1">🐍</div>
+          <div class="text-2xl mb-1" aria-hidden="true">🐍</div>
           <span class="font-mono text-[10px] text-neon-green">SNAKE.EXE</span>
-          <div class="font-mono text-[8px] text-text-muted mt-1">BEST: <span class="arcade-best-snake">0</span></div>
+          <div class="font-mono text-[8px] text-text-muted mt-1">BEST: <span class="arcade-best" data-best="snake">0</span></div>
         </button>
-        <div class="border border-border bg-void/50 p-3 text-center hover:border-neon-cyan transition-colors cursor-pointer" data-game="breaker">
-          <div class="text-2xl mb-1">🧱</div>
-          <span class="font-mono text-[10px]">BREAKER.EXE</span>
-          <div class="font-mono text-[8px] text-neon-amber mt-1">BUILDING…</div>
+        <button data-game="flappy" class="border border-border bg-void/50 p-3 text-center hover:border-neon-cyan transition-colors cursor-pointer">
+          <div class="text-2xl mb-1" aria-hidden="true">🐦</div>
+          <span class="font-mono text-[10px] text-text-main">FLAPPY.BRO</span>
+          <div class="font-mono text-[8px] text-text-muted mt-1">BEST: <span class="arcade-best" data-best="flappy">0</span></div>
+        </button>
+        <button data-game="breaker" class="border border-border bg-void/50 p-3 text-center hover:border-neon-magenta transition-colors cursor-pointer">
+          <div class="text-2xl mb-1" aria-hidden="true">🧱</div>
+          <span class="font-mono text-[10px] text-text-main">BREAKER.EXE</span>
+          <div class="font-mono text-[8px] text-text-muted mt-1">BEST: <span class="arcade-best" data-best="breaker">0</span></div>
+        </button>
+        <button data-game="mario" class="border border-border bg-void/50 p-3 text-center hover:border-neon-amber transition-colors cursor-pointer">
+          <div class="text-2xl mb-1" aria-hidden="true">🍄</div>
+          <span class="font-mono text-[10px] text-text-main">SUPER BRO LAND</span>
+          <div class="font-mono text-[8px] text-text-muted mt-1">BEST: <span class="arcade-best" data-best="mario">0</span></div>
+        </button>
+        <button data-game="rpg" class="border border-border bg-void/50 p-3 text-center hover:border-neon-magenta transition-colors cursor-pointer">
+          <div class="text-2xl mb-1" aria-hidden="true">⚔️</div>
+          <span class="font-mono text-[10px] text-text-main">FINAL BRO-TASY</span>
+          <div class="font-mono text-[8px] text-text-muted mt-1">BEST: <span class="arcade-best" data-best="rpg">0</span></div>
+        </button>
+        <button data-game="loot" class="border border-border bg-void/50 p-3 text-center hover:border-neon-amber transition-colors cursor-pointer">
+          <div class="text-2xl mb-1" aria-hidden="true">🪙</div>
+          <span class="font-mono text-[10px] text-text-main">LOOT SHOWER</span>
+          <div class="font-mono text-[8px] text-text-muted mt-1">BEST: <span class="arcade-best" data-best="loot">0</span></div>
+        </button>
+        <div class="border border-border bg-void/50 p-3 text-center opacity-40 cursor-not-allowed" aria-disabled="true">
+          <div class="text-2xl mb-1" aria-hidden="true">🔒</div>
+          <span class="font-mono text-[10px] text-text-muted">PIXEL.STUDIO</span>
+          <div class="font-mono text-[8px] text-text-muted mt-1">J.O.O.H. LICENSE PENDING</div>
         </div>
-        <div class="border border-border bg-void/50 p-3 text-center opacity-40 cursor-not-allowed">
-          <div class="text-2xl mb-1">🔒</div>
-          <span class="font-mono text-[10px] text-text-muted">DUNGEON.EXE</span>
-        </div>
-        <div class="border border-border bg-void/50 p-3 text-center opacity-40 cursor-not-allowed">
-          <div class="text-2xl mb-1">🔒</div>
-          <span class="font-mono text-[10px] text-text-muted">FLAPPY.BRO</span>
+        <div class="border border-border bg-void/50 p-3 text-center opacity-40 cursor-not-allowed" aria-disabled="true">
+          <div class="text-2xl mb-1" aria-hidden="true">🔒</div>
+          <span class="font-mono text-[10px] text-text-muted">??? .EXE</span>
+          <div class="font-mono text-[8px] text-text-muted mt-1">SIGNAL NOT FOUND</div>
         </div>
       </div>
     </div>
@@ -300,7 +322,13 @@
     <div class="font-sans text-[11px] flex flex-col h-full">
       <div class="flex items-center justify-between mb-1 shrink-0">
         <h2 class="font-display text-sm tracking-widest text-neon-cyan text-glow-cyan">MOLTBOOK</h2>
-        <button id="molt-new-btn" class="btn-cyber text-[8px]">+ NEW POST</button>
+        <div class="flex items-center gap-1">
+          <div role="tablist" aria-label="Moltbook view" class="flex border border-border">
+            <button id="molt-tab-live" class="btn-cyber text-[8px]" role="tab" aria-selected="true">LIVE</button>
+            <button id="molt-tab-tide" class="btn-cyber text-[8px]" role="tab" aria-selected="false">RIPTIDE 🔥</button>
+          </div>
+          <button id="molt-new-btn" class="btn-cyber text-[8px]">+ NEW POST</button>
+        </div>
       </div>
       <div class="flex items-center justify-between font-mono text-[9px] text-text-muted mb-2 border-b border-border pb-2 shrink-0">
         <span>the tidepool network · est. shell 0</span>
@@ -317,7 +345,7 @@
           <button id="molt-cancel" class="btn-cyber text-[9px] border-border text-text-muted">ABORT</button>
         </div>
       </div>
-      <div id="molt-feed" class="flex-1 overflow-y-auto space-y-3 pr-1"></div>
+      <div id="molt-feed" class="flex-1 overflow-y-auto space-y-3 pr-1" role="tabpanel" aria-label="Moltbook feed"></div>
       <div class="mt-2 pt-2 border-t border-border shrink-0">
         <div class="flex items-center justify-between mb-1">
           <span class="font-display text-[9px] tracking-widest text-neon-amber text-glow-amber">PILGRIM CARDS // ADOPT</span>
@@ -408,6 +436,6 @@
 
   <!-- Toast layer -->
   <div id="toast-layer" class="fixed top-11 right-3 z-[9997] flex flex-col gap-2 pointer-events-none" aria-live="assertive"></div>
-
+
 </body>
 </html>
