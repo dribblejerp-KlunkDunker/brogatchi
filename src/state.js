@@ -515,7 +515,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
         if (!state.quest.rewarded && state.quest.mined >= state.quest.goal) {
           state.quest.rewarded = true;
           state.coins += 50;
-          // 2.0 gameplay memory: quests are pinned milestones in the soul.
+          // 2.0 quest milestone — pinned.
           rememberEvent('Finished a real-life quest. The sim shakes.', { icon: '✅', imp: 4, pin: true });
           events.push({ tag: 'QUEST', text: 'DAILY.QUEST complete — GOLDEN.SHELL fund +50 CR', questDone: true });
         }
@@ -573,7 +573,6 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
 
   function toggleMine() {
     mutate((s) => { s.mining = !s.mining; });
-    // 2.0 gameplay memory: deploying the rig is a diary-worthy event.
     if (state.mining) {
       rememberEvent('Deployed the mining rig. Passive income go brrr.', { icon: '⛏️', imp: 3 });
     }
@@ -609,7 +608,6 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     if (item.id === 'goldshell' && state.goldenShell) return { ok: false, reason: 'ALREADY PLATED' };
     mutate((s) => { s.coins -= item.cost; item.apply(s); });
     if (item.id === 'pizza') state.counters.pizzas += 1;
-    // 2.0 gameplay memory: the shop remembers what the bro bought.
     rememberEvent(`Bought the ${item.name}. Worth it.`, { icon: '🛍️', imp: 2 });
     return { ok: true, item };
   }

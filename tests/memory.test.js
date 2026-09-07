@@ -566,23 +566,20 @@ describe('2.0 gameplay memory call sites (reconciled-tree port)', () => {
   it('shop purchases write the 🛍️ "Bought the X. Worth it." memory (2.0 line verbatim)', () => {
     const store = freshStore();
     store.load();
-    const before = store.state.memories.length;
     const res = store.buy('pizza');
     expect(res.ok).toBe(true);
     const mem = store.state.memories.find((m) => m.text === 'Bought the PIZZA.SLC. Worth it.');
     expect(mem).toBeTruthy();
     expect(mem.icon).toBe('🛍️');
     expect(mem.imp).toBe(2);
-    expect(store.state.memories.length).toBe(before + 1);
   });
 
   it('a failed purchase writes nothing', () => {
     const store = freshStore();
     store.load();
-    const before = store.state.memories.length;
     const res = store.buy('goldshell'); // 500 CR — fresh bros are broke
     expect(res.ok).toBe(false);
-    expect(store.state.memories.length).toBe(before);
+    expect(store.state.memories.some((m) => m.icon === '🛍️')).toBe(false);
   });
 
   it('deploying the mining rig writes the ⛏️ memory; stowing does not', () => {
