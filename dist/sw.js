@@ -1,11 +1,13 @@
 /* ═══════════════════════════════════════════════════════════
-   BRO_OS 3.0 // public/sw.js — OFFLINE SHELL SERVICE WORKER
-   Network-first for navigations (fresh deploys win, hard refresh
-   picks them up), stale-while-revalidate for same-origin statics.
+   BRO_OS 3.0 // src/sw.js — OFFLINE SHELL SERVICE WORKER
+   Emitted to dist/sw.js by the stamp-sw plugin in vite.config.js,
+   which replaces mtr1kdqh per build: the bytes change on
+   every deploy, the browser reinstalls, and activate() prunes
+   every previous shell cache. No manual version bumps, ever.
    Registered only in production builds (see src/main.js).
    ═══════════════════════════════════════════════════════════ */
 
-const CACHE = 'bro-os-3-shell-v1';
+const CACHE = 'bro-os-3-shell-mtr1kdqh';
 const CORE = ['./', './index.html', './manifest.json', './favicon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -19,7 +21,10 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(
+        keys.filter((k) => k.startsWith('bro-os-3-shell-') && k !== CACHE)
+            .map((k) => caches.delete(k))
+      ))
       .then(() => self.clients.claim())
   );
 });
