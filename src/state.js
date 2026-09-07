@@ -15,6 +15,7 @@ export const levelFor = (xp) => 1 + Math.floor(Math.max(0, xp) / LEVEL_XP);
 
 // Gameplay events write real memories (ported 2.0 engine — src/memory.js).
 import { remember, togglePin, mergePinnedMemories, scrubQuirk, scrubOpinion, scrubHistory, buildDayLines, appendDiaryLines, capMemories, sortMemories } from './memory.js';
+import { initialPersonality, applyEvents, minuteDrift, dominant as dominantTrait, describe as describeTraits } from './personality.js';
 
 /** Riptide ranking: heat + conversation, decayed by age. Pure + injectable clock. */
 export function moltScore(post, nowMs = Date.now()) {
@@ -98,10 +99,11 @@ function defaultState(now = Date.now()) {
     memories: [],      // lived in 3.0 via the memory engine, or imported from 2.0
     diary: [],         // flat { t, icon, text } rows written at day rollover
     conversations: [], // pilgrim/tide threads carried over from 2.0
-    counters: { posts: 0, hacks: 0, pizzas: 0, adopts: 0 }, // today's tally → diary
+    counters: { posts: 0, hacks: 0, pizzas: 0, adopts: 0, gamesWon: 0 }, // today's tally → diary
     dailyDiaryDone: todayStr(now),   // last date the rollover diary was written
     roster: [],        // adopted pilgrim agent-cards
     legacy: null,      // { source, importedAt, counts } after a 2.0 migration
+    personality: initialPersonality(), // 2.0 trait core — nudged by arcade/meal/quest events
     lastTick: now,
   };
 }
@@ -173,10 +175,47 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   }
   normalizeMemories();
 
+  // 2.0 trait core: heal saves from before the personality port and
+  // fill any axis that slipped through (imports, hand-edited saves).
+  function normalizePersonality() {
+    const base = initialPersonality();
+    state.personality = { ...base, ...(state.personality && typeof state.personality === 'object' ? state.personality : {}) };
+    for (const t of Object.keys(base)) {
+      const v = Number(state.personality[t]);
+      state.personality[t] = Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : base[t];
+    }
+  }
+  normalizePersonality();
+
   /** Record a gameplay event as a real memory. pin: milestone. */
   function rememberEvent(text, { icon = '🧠', imp = 2, pin = false } = {}) {
     mutate((s) => { s.memories = remember(s.memories, { icon, text, imp, pin }); });
   }
+
+  /* ─────────── 2.0 personality & arcade soul-feed ───────────
+     Restored from the 2.0 app: every game over nudges the trait
+     axes (ego +4, greed +1), writes a real memory, and the first
+     win ever pins the cabinet-room milestone. */
+  function recordArcadeRun({ key, label, score }) {
+    if (!Number.isFinite(Number(score))) return;
+    mutate((s) => {
+      applyEvents(s.personality, [{ trait: 'ego', amount: 4 }, { trait: 'greed', amount: 1 }]);
+      s.counters.gamesWon += 1;
+      s.memories = remember(s.memories, {
+        icon: '🎮',
+        text: `Won ${label || key} with ${score} points.`,
+        imp: 3,
+        pin: s.counters.gamesWon === 1,
+      });
+    });
+    if (state.counters.gamesWon === 1) {
+      rememberEvent('A legend is born in the cabinet room.', { icon: '🏆', imp: 4, pin: true });
+    }
+  }
+
+  /** Trait summary for the SOUL viewer ("Ego 34% · Greed 12% …"). */
+  function personalityDescribe() { return describeTraits(state.personality); }
+  function personalityDominant() { return dominantTrait(state.personality); }
 
   /** Pin/unpin a memory by id. */
   function toggleMemoryPin(id) {
@@ -277,7 +316,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     if (state.dailyDiaryDone) {
       state.diary = appendDiaryLines(state.diary, buildDayLines(state));
     }
-    state.counters = { posts: 0, hacks: 0, pizzas: 0, adopts: 0 };
+    state.counters = { posts: 0, hacks: 0, pizzas: 0, adopts: 0, gamesWon: 0 };
     state.dailyDiaryDone = today;
   }
 
@@ -448,6 +487,12 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     const events = [];
     applyDecay(dtSec);
     maybeRolloverDiary();
+    // 2.0 personality ambient drift, on its original per-minute cadence.
+    state._persAcc = (state._persAcc || 0) + dtSec * 1000;
+    while (state._persAcc >= 60000) {
+      state._persAcc -= 60000;
+      minuteDrift(state.personality, state);
+    }
     state._mineAcc = (state._mineAcc || 0) + dtSec * 1000;
     if (state.mining && !state.sleeping && state.stats.energy > 1) {
       while (state._mineAcc >= MINE_INTERVAL_MS) {
@@ -649,9 +694,14 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   function setVol(bus, v) { mutate((s) => { s.vol[bus] = clamp(v * 100, 0, 100) / 100; }); }
   function setSnakeBest(score) { mutate((s) => { if (score > s.best.snake) s.best.snake = score; }); }
   // Generic best-score writer for the arcade suite (flappy/breaker/mario/rpg/loot).
+  // Returns true when this run set a NEW best (2.0 onGameOver semantic).
   function setGameBest(key, score) {
-    if (!key) return;
-    mutate((s) => { if (score > (s.best[key] || 0)) s.best[key] = score; });
+    if (!key) return false;
+    let isNew = false;
+    mutate((s) => {
+      if (score > (s.best[key] || 0)) { s.best[key] = score; isNew = true; }
+    });
+    return isNew;
   }
   function addSteps(n) { mutate((s) => { s.steps += n; }); }
   function reset() {
@@ -675,6 +725,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     hackMainframe, buy, postToMolt, moltReply, replyToMolt, pushMoltReply, bumpMoltHeat, trendingMolt,
     adoptPilgrim, exportRoster,
     rememberEvent, toggleMemoryPin, importSoulBundle, syncBridgeMemories,
+    recordArcadeRun, personalityDescribe, personalityDominant,
     setTheme, setScanlines, setVol, setSnakeBest, setGameBest, addSteps, reset,
     exportState, importState,
   };

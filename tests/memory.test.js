@@ -409,3 +409,113 @@ describe('3.0 store memory wiring', () => {
     void len;
   });
 });
+
+/* ─────────── 2.0 personality port & arcade soul-feed ─────────── */
+
+describe('personality.applyEvents (ported 2.0 trait core)', () => {
+  it('clamps to 0..100, ignores unknown axes, and mutates in place like 2.0', async () => {
+    const { applyEvents: apply, TRAITS: axes } = await import('../src/personality.js');
+    const p = { paranoia: 99, ego: 22, gluttony: 20, fitness: 12, broCode: 15, greed: 10 };
+    apply(p, [{ trait: 'paranoia', amount: 5 }, { trait: 'greed', amount: 1 }]);
+    expect(p.paranoia).toBe(100); // clamped high
+    expect(p.greed).toBe(11);
+    apply(p, [{ trait: 'coinBalance', amount: 50 }, { trait: 'nonexistent', amount: -99 }]);
+    expect(p).toEqual({ paranoia: 100, ego: 22, gluttony: 20, fitness: 12, broCode: 15, greed: 11 });
+    apply(p, [{ trait: 'greed', amount: -50 }]);
+    expect(p.greed).toBe(0); // clamped low
+    expect(axes).toHaveLength(6);
+  });
+});
+
+describe('2.0 arcade soul-feed (recordArcadeRun)', () => {
+  it('every game over nudges ego +4 / greed +1 and writes the 2.0 win memory', () => {
+    const store = freshStore();
+    store.load();
+    const egoBefore = store.state.personality.ego;
+    const greedBefore = store.state.personality.greed;
+
+    store.recordArcadeRun({ key: 'loot', label: 'Loot Shower', score: 42 });
+
+    expect(store.state.personality.ego).toBe(egoBefore + 4);
+    expect(store.state.personality.greed).toBe(greedBefore + 1);
+    const mem = store.state.memories.find((m) => m.text === 'Won Loot Shower with 42 points.');
+    expect(mem).toBeTruthy();
+    expect(mem.icon).toBe('🎮');
+    expect(mem.imp).toBe(3);
+    expect(store.state.counters.gamesWon).toBe(1);
+  });
+
+  it('the FIRST-EVER win pins the cabinet-room milestone, exactly like 2.0', () => {
+    const store = freshStore();
+    store.load();
+
+    store.recordArcadeRun({ key: 'snake', label: 'SNAKE.EXE', score: 12 });
+    const legend = store.state.memories.find((m) => m.text === 'A legend is born in the cabinet room.');
+    expect(legend).toBeTruthy();
+    expect(legend.pinned).toBe(true);
+    expect(legend.imp).toBe(4);
+    // and the first win memory itself is pinned too (2.0 milestone behavior)
+    const first = store.state.memories.find((m) => m.text === 'Won SNAKE.EXE with 12 points.');
+    expect(first.pinned).toBe(true);
+
+    // a later win: no duplicate milestone, no pin, counter keeps climbing
+    store.recordArcadeRun({ key: 'flappy', label: 'FLAPPY.BRO', score: 30 });
+    expect(store.state.memories.filter((m) => m.text === 'A legend is born in the cabinet room.')).toHaveLength(1);
+    const second = store.state.memories.find((m) => m.text === 'Won FLAPPY.BRO with 30 points.');
+    expect(second.pinned).toBeFalsy(); // engine omits the key for unpinned memories
+    expect(store.state.counters.gamesWon).toBe(2);
+  });
+
+  it('run memories flow through the engine: capped, deduped, pinned-first sorted', () => {
+    const store = freshStore();
+    store.load();
+    for (let i = 0; i < 250; i++) store.recordArcadeRun({ key: 'loot', label: 'Loot Shower', score: i });
+    // 200-cap honored and sort intact
+    expect(store.state.memories.length).toBeLessThanOrEqual(200);
+    const pins = store.state.memories.filter((m) => m.pinned);
+    expect(pins.length).toBeGreaterThan(0);
+    expect(store.state.memories[0].pinned).toBe(true);
+    expect(store.state.counters.gamesWon).toBe(250);
+  });
+
+  it('garbage input is rejected without touching traits or counters', () => {
+    const store = freshStore();
+    store.load();
+    const before = JSON.stringify({ p: store.state.personality, m: store.state.memories.length, c: store.state.counters.gamesWon });
+    store.recordArcadeRun({ key: 'loot', label: 'Loot Shower', score: 'forty-two' });
+    store.recordArcadeRun({});
+    expect(JSON.stringify({ p: store.state.personality, m: store.state.memories.length, c: store.state.counters.gamesWon })).toBe(before);
+  });
+
+  it('minuteDrift keeps 2.0 semantics: hungry → paranoid, rich → greedy', async () => {
+    const { minuteDrift } = await import('../src/personality.js');
+    const s = {
+      stats: { hunger: 10, energy: 95, happy: 90, weight: 1.2 }, steps: 100, coins: 150,
+      personality: { paranoia: 20, ego: 22, gluttony: 20, fitness: 12, broCode: 15, greed: 10 },
+    };
+    minuteDrift(s.personality, s);
+    expect(s.personality.paranoia).toBeCloseTo(20.15); // hunger < 30
+    expect(s.personality.ego).toBeCloseTo(22.1);       // happy > 75
+    expect(s.personality.greed).toBeCloseTo(10.1);     // coins >= 100
+    expect(s.personality.fitness).toBe(12);            // steps > 0 → no decay
+  });
+
+  it('normalization heals pre-port saves: missing personality defaults, 3.0 v3 loads intact', () => {
+    const storage = {
+      _m: new Map(),
+      getItem(k) { return this._m.has(k) ? this._m.get(k) : null; },
+      setItem(k, v) { this._m.set(k, v); },
+      removeItem(k) { this._m.delete(k); },
+    };
+    const store = freshStoreWith(storage);
+    // a v3 save from BEFORE the personality port: no personality, no gamesWon
+    storage.setItem('bro_os_3', JSON.stringify({ v: 3, petName: 'RYAN', memories: [], best: { snake: 7 } }));
+    store.load();
+    expect(store.state.personality).toEqual({ paranoia: 20, ego: 22, gluttony: 20, fitness: 12, broCode: 15, greed: 10 });
+    expect(store.state.counters.gamesWon).toBe(0);
+  });
+});
+
+function freshStoreWith(storage) {
+  return createStore({ storage });
+}
