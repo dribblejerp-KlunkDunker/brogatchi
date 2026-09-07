@@ -1,7 +1,7 @@
 {
   "name": "bro-os",
   "private": true,
-  "version": "3.0.0",
+  "version": "3.1.0",
   "type": "module",
   "description": "Bro OS 3.0 — Cyberpunk Utility rebuild of My Bro'gatchi: a windowed desktop OS shell with Ryan AI terminal, chiptune synth, arcade, mining & the tidepool network",
   "scripts": {
