@@ -223,4 +223,42 @@ describe('BGM host wiring', () => {
     }
     expect(TRACKSETS.snake).toBeTruthy(); // snake is hosted separately
   });
+
+  it('conformance: every setVariant(<game>, <tier>) the engines call exists in TRACKSETS', async () => {
+    // Reads the real game sources at test time, so adding a new
+    // setVariant('game', tier) call without a matching track fails here.
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const root = resolve(import.meta.dirname, '..');
+    const sources = ['flappy', 'breaker', 'mario', 'rpg', 'loot'].map((g) => resolve(root, 'src', 'games', `${g}.js`));
+    sources.push(resolve(root, 'src', 'apps', 'snake.js'));
+
+    const requested = {}; // game -> Set of literal tiers
+    for (const file of sources) {
+      const text = readFileSync(file, 'utf8');
+      const game = text.includes('startSnake') ? 'snake' : file.match(/games[/\\](\w+)\.js$/)[1];
+      for (const m of text.matchAll(/setVariant\('(\w+)',\s*(\d+)\)/g)) {
+        (requested[m[1]] ??= new Set()).add(Number(m[2]));
+      }
+      // the game id used in its own setVariant calls must match its file
+      for (const m of text.matchAll(/setVariant\('(\w+)',/g)) {
+        expect(m[1], `${file} switches tracks for the wrong game`).toBe(game);
+      }
+    }
+
+    expect(Object.keys(requested).length).toBeGreaterThanOrEqual(3); // mario/rpg/snake use literal tiers; flappy/loot/breaker compute theirs (checked below)
+    for (const [game, tiers] of Object.entries(requested)) {
+      expect(TRACKSETS[game], `${game} calls setVariant but has no trackset`).toBeTruthy();
+      for (const tier of tiers) {
+        expect(TRACKSETS[game][tier], `${game} requests tier ${tier} with no track`).toBeTruthy();
+      }
+    }
+    // computed-tier games (flappy/loot/breaker build `tier` dynamically)
+    // never exceed the documented 0..2 range — guard the pattern too.
+    for (const g of ['flappy', 'loot', 'breaker']) {
+      expect(textOf(resolve(root, 'src', 'games', `${g}.js`))).toMatch(/setVariant\('/);
+      expect(TRACKSETS[g]).toHaveLength(3);
+    }
+    function textOf(f) { return readFileSync(f, 'utf8'); }
+  });
 });
