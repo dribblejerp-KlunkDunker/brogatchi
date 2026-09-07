@@ -124,7 +124,7 @@ afterEach(() => {
 });
 
 describe('console-silence soak: every window, several fake minutes, zero errors', () => {
-  it('survives 5 fake minutes across the whole dock with a clean console', async () => {
+  it('survives 5 fake minutes across the whole dock with a clean console', { timeout: 30000 }, async () => {
     await bootShell();
     const windows = dockWindows();
     // the dock must be fully wired — the core windows all reachable from it

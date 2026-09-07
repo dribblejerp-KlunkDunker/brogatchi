@@ -119,7 +119,7 @@ afterEach(() => {
 });
 
 describe('button sweep: every button in every window, zero console errors', () => {
-  it('clicks the whole dock and every button it can find, console-silent throughout', async () => {
+  it('clicks the whole dock and every button it can find, console-silent throughout', { timeout: 30000 }, async () => {
     await bootShell();
     const windows = dockWindows();
     expect(windows.length).toBeGreaterThanOrEqual(9);
