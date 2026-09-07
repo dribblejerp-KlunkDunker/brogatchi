@@ -6,7 +6,7 @@
 
 const COLS = 20, ROWS = 15, CELL = 16;
 
-export function startSnake(container, { onGameOver, audio }) {
+export function startSnake(container, { onGameOver, audio, music = null }) {
   container.innerHTML = `
     <div class="flex flex-col items-center gap-2 h-full">
       <div class="w-full flex justify-between font-mono text-[10px]">
@@ -110,7 +110,12 @@ export function startSnake(container, { onGameOver, audio }) {
       score += 10;
       scoreEl.textContent = score;
       audio?.coin();
-      if (stepMs > 70) stepMs -= 3;
+      if (stepMs > 70) {
+        stepMs -= 3;
+        // Speed tier: like the 2.0 games' setVariant milestones, the loop
+        // switches to the sprint variant once the pace ramps up.
+        if (stepMs <= 100 && music && !music.getVariant('snake')) music.setVariant('snake', 1);
+      }
       placeFood();
     } else {
       snake.pop();
@@ -151,10 +156,19 @@ export function startSnake(container, { onGameOver, audio }) {
 
   resetRun();
   raf = requestAnimationFrame(loop);
+  // Per-game chiptune loop (2.0 host behavior): base tier at launch;
+  // the speed tier kicks in when the pace ramps up.
+  if (music && music.startMusic('snake')) {
+    audio._bgmActive = true;
+  }
 
   // public teardown (window close / back button)
   return function stop() {
     cancelAnimationFrame(raf);
     document.removeEventListener('keydown', onKey);
+    if (music) {
+      music.stopMusic();
+      audio._bgmActive = false;
+    }
   };
 }

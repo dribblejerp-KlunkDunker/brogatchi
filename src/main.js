@@ -13,6 +13,7 @@ import { createRedundancy } from './persist.js';
 import { startSnake } from './apps/snake.js';
 import { startSynth } from './apps/synth.js';
 import { hostGame, GAMES } from './arcadeCore.js';
+import { createGameMusic } from './gameMusic.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 // Optional lookup: for nodes that may legitimately be absent (renderers whose
@@ -248,6 +249,10 @@ function wireArcade(root) {
   const gridRoot = $('#arcade-root', root);
   let activeStop = null;
   let activeKey = null;
+  // One shared arcade sequencer: per-game BGM loops with milestone tier
+  // variants, driven by the same chiptune engine as the UI SFX.
+  const gameMusic = createGameMusic(audio);
+  window.__broGameMusic = gameMusic; // debug/test handle: the live sequencer
 
   const GAME_NAMES = { snake: 'SNAKE.EXE', ...Object.fromEntries(Object.entries(GAMES).map(([k, g]) => [k, g.name])) };
 
@@ -275,8 +280,8 @@ function wireArcade(root) {
     $('#game-back', root).addEventListener('click', () => { audio.click(); resetGrid(); });
     const stage = $('#game-stage', root);
     activeStop = gameKey === 'snake'
-      ? startSnake(stage, { audio, onGameOver: (score, coins) => payout(gameKey, score, coins, score) })
-      : hostGame(stage, gameKey, { audio, onGameOver: (score, reward) => payout(gameKey, score, reward, Math.round(score / 2)) });
+      ? startSnake(stage, { audio, onGameOver: (score, coins) => payout(gameKey, score, coins, score), music: gameMusic })
+      : hostGame(stage, gameKey, { audio, onGameOver: (score, reward) => payout(gameKey, score, reward, Math.round(score / 2)), music: gameMusic });
   }
 
   // Central payout: coins + XP + best score, then the run-complete panel.
@@ -285,8 +290,12 @@ function wireArcade(root) {
   function payout(key, score, coins, xp) {
     if (coins > 0) store.addCoins(coins);
     const leveled = store.xpGain(xp);
-    store.setGameBest(key, score);
-    store.rememberEvent(`Arcade run: ${(GAME_NAMES[key] || key).toUpperCase()} — ${score} pts, +${coins} CR.`, { icon: '🎮', imp: 2, pin: score >= 100 });
+    const newBest = store.setGameBest(key, score);
+    // 2.0 soul-feed: trait nudges (ego +4, greed +1), the win memory,
+    // and the first-ever-win pinned milestone — all via the store.
+    store.recordArcadeRun({ key, label: GAME_NAMES[key] || key, score });
+    gameMusic.stopMusic(); // 2.0 behavior: the loop ends with the run
+    audio._bgmActive = false;
     if (leveled) celebrateLevel();
     toast(`${(GAME_NAMES[key] || key).toUpperCase()} RUN COMPLETE — +${coins} CR · +${xp} XP`, 'ok');
     log('SYS', `${key} run: ${score} pts · +${coins} CR`);
@@ -295,6 +304,7 @@ function wireArcade(root) {
     gridRoot.innerHTML = `
       <div class="border border-neon-green/40 bg-void/40 p-4 text-center font-mono text-[11px]">
         <p class="text-neon-green text-glow-green mb-1">RUN COMPLETE</p>
+        ${newBest ? '<p class="text-neon-amber mb-1">NEW BEST. The simulation audibly gasped.</p>' : ''}
         <p class="text-text-main mb-3">${GAME_NAMES[key] || key} · SCORE ${score} · +${coins} CR · +${xp} XP</p>
         <div class="flex gap-2 justify-center">
           <button id="game-again" class="btn-cyber text-[9px]">RE-RUN</button>
@@ -313,7 +323,8 @@ function wireArcade(root) {
   }
 
   // Window teardown: stop any running game loop when the window closes
-  return () => { if (activeStop) activeStop(); };
+  // and release the BGM sequencer (deferred-timer sweep policy).
+  return () => { if (activeStop) activeStop(); gameMusic.stopMusic(); audio._bgmActive = false; };
 }
 
 function wireShop(root) {
@@ -680,6 +691,10 @@ function wireSoul(root) {
         <p class="text-text-muted text-[9px] mt-1">SPECIALTY: <span class="text-neon-green">${esc(s.specialty)}</span></p>
       </div>
       <div class="border border-border bg-void/40 p-2">
+        <div class="text-neon-green text-[9px] mb-1 tracking-widest">😎 TRAIT CORE <span class="text-text-muted">(2.0 axes — nudged by arcade runs, meals, hacks)</span></div>
+        <p class="text-[10px] font-mono text-text-main" id="soul-traits-line">…</p>
+      </div>
+      <div class="border border-border bg-void/40 p-2">
         <div class="text-neon-amber text-[9px] mb-1 tracking-widest">✨ QUIRKS HE WEARS</div>
         <ul class="space-y-0.5">${s.quirks.map((q) => `<li class="text-[11px]">• ${esc(q)}</li>`).join('') || '<li class="text-text-muted text-[10px]">none yet</li>'}</ul>
       </div>
@@ -688,7 +703,7 @@ function wireSoul(root) {
         <ul class="space-y-0.5">${s.opinions.map((o) => `<li class="text-[11px]">▸ ${esc(o)}</li>`).join('') || '<li class="text-text-muted text-[10px]">none yet</li>'}</ul>
       </div>
       <div class="border border-border bg-void/40 p-2">
-        <div class="text-neon-cyan text-[9px] mb-1 tracking-widest">🧠 MEMORIES (${(st.memories || []).length})</div>
+        <div class="text-neon-cyan text-[9px] mb-1 tracking-widest">🧠 MEMORIES (${(st.memories || []).length}${(st.memories || []).some((m) => m.pinned) ? `, ${(st.memories || []).filter((m) => m.pinned).length} 📌` : ''})</div>
         <ul class="space-y-1 max-h-60 overflow-y-auto">${mem.map((m) => `<li class="text-[10px] text-text-main flex items-start gap-1" data-mem-id="${esc(String(m.id))}">
             <button class="mem-pin-btn shrink-0 ${m.pinned ? 'text-neon-amber' : 'text-text-muted opacity-50'}" title="${m.pinned ? 'Unpin' : 'Pin'} this memory" data-pin-id="${esc(String(m.id))}">${m.pinned ? '📌' : '📍'}</button>
             <span>${m.icon || '🧠'} ${m.t ? `<span class="text-text-muted">${fmt(m.t)}</span> — ` : ''}${esc(m.text)}${m.pinned ? ' <span class="text-neon-amber text-[8px]">PINNED</span>' : ''}</span>
@@ -764,6 +779,9 @@ function wireSoul(root) {
         audio.click();
         renderSoul();
       }));
+
+    // 2.0 trait core — live trait readout with the dominant axis marked.
+    $orNull('#soul-traits-line', root)?.replaceChildren(`${store.personalityDescribe()} — dominant: ${store.personalityDominant().toUpperCase()}`);
 
     // live redundancy status
     const rs = red.status;

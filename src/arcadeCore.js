@@ -13,6 +13,7 @@ import { BreakerGame } from './games/breaker.js';
 import { MarioGame } from './games/mario.js';
 import { RPGGame } from './games/rpg.js';
 import { LootGame } from './games/loot.js';
+import { createGameMusic } from './gameMusic.js';
 
 export const GAMES = {
   flappy: { cls: FlappyGame, name: 'FLAPPY.BRO', icon: '🐦', pad: false },
@@ -23,10 +24,13 @@ export const GAMES = {
 };
 
 // The 2.0 games call a richer audio API than 3.0's engine exposes.
-// This adapter maps every call onto the existing chiptune presets —
-// no new sounds needed, just routing. `variant` changes (music tiers)
-// are acknowledged silently: 3.0's synth has no per-game BGM loops yet.
-function adaptAudio(audio) {
+// This adapter maps every call onto the 3.0 chiptune engine — SFX
+// presets for the juice, and the gameMusic sequencer for BGM:
+// startMusic/setVariant/stopMusic drive the per-game chiptune loop
+// with milestone tier variants (bar-boundary seamless switches).
+// `music` is the shared createGameMusic() instance owned by the
+// arcade window; stop() on the run releases the loop.
+function adaptAudio(audio, music) {
   return {
     playJump: () => audio.pet(),
     playCoin: () => audio.coin(),
@@ -35,15 +39,25 @@ function adaptAudio(audio) {
     playBeep: () => audio.typeBlip(),
     playWin: () => audio.levelUp(),
     playLevelUp: () => audio.levelUp(),
-    setVariant: () => {},           // music tier switch — no-op on 3.0
-    startMusic: () => {}, stopMusic: () => {},
+    // BGM: 2.0 semantics — the host starts the loop at the base tier;
+    // the games raise tiers via setVariant (bar-boundary switches).
+    startMusic: (id, variant = 0) => {
+      const started = music.startMusic(id, variant);
+      audio._bgmActive = started;
+      return started;
+    },
+    setVariant: (id, idx) => music.setVariant(id, idx),
+    stopMusic: () => {
+      music.stopMusic();
+      audio._bgmActive = false;
+    },
     init: () => audio.init(),
   };
 }
 
 // Host one run of `gameKey` inside `container`. Returns a stop() teardown
 // that cancels the loop, unbinds input, and restores the OS keyboard.
-export function hostGame(container, gameKey, { audio, onGameOver }) {
+export function hostGame(container, gameKey, { audio, onGameOver, music = null }) {
   const def = GAMES[gameKey];
   if (!def) return () => {};
 
@@ -77,7 +91,7 @@ export function hostGame(container, gameKey, { audio, onGameOver }) {
   // GameBase calls app.onGameOver(key, score, reward) — normalize to the
   // documented host callback contract onGameOver(score, reward).
   const game = new def.cls(
-    { audio: adaptAudio(audio), onGameOver: (key, score, reward) => onGameOver(score, reward) },
+    { audio: adaptAudio(audio, music), onGameOver: (key, score, reward) => onGameOver(score, reward) },
     cvs,
   );
   // Debug/test hook: lets the shell (and vitest) reach the live instance.
@@ -107,9 +121,21 @@ export function hostGame(container, gameKey, { audio, onGameOver }) {
   document.addEventListener('keydown', swallow, true);
 
   game.start();
+  // Per-game chiptune loop, exactly as the 2.0 host did: launch at the
+  // base tier; the engine raises tiers via setVariant as it plays.
+  if (music && music.startMusic(gameKey)) {
+    audio._bgmActive = true;
+  }
 
   return function stop() {
     game.stop();
+    // Release the BGM loop with the run (game engines do NOT call
+    // stopMusic themselves — the 2.0 host stopped music on game-over
+    // teardown, and we mirror that here).
+    if (music) {
+      music.stopMusic();
+      audio._bgmActive = false;
+    }
     cvs.removeEventListener('pointerdown', onDown);
     cvs.removeEventListener('pointermove', onMove);
     document.removeEventListener('keydown', swallow, true);

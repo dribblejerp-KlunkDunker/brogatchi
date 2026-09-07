@@ -4,6 +4,9 @@
 // generated on the fly — no MP3s, just square waves and memories.
 // ═══════════════════════════════════════════════════════════
 
+// Arcade BGM bus level (music voices; scaled by vol.bgm at voice time).
+const MUSIC_LEVEL = 0.16;
+
 class AudioEngine {
   constructor() {
     this.ctx = null;
@@ -19,6 +22,14 @@ class AudioEngine {
       if (AC) this.ctx = new AC();
     }
     if (this.ctx?.state === 'suspended') this.ctx.resume();
+    // Dedicated music bus: arcade BGM routes here so SFX can duck it.
+    if (this.ctx && !this.musicGain) {
+      try {
+        this.musicGain = this.ctx.createGain();
+        this.musicGain.gain.value = 1;
+        this.musicGain.connect(this.ctx.destination);
+      } catch { this.musicGain = null; }
+    }
   }
 
   setSfxVolume(v) { this.sfxVolume = Math.min(1, Math.max(0, v)); }
@@ -45,6 +56,7 @@ class AudioEngine {
   // SFX voice: preset volume × user SFX volume
   sfx(freq, type, dur, base) {
     this.playTone(freq, type, dur, base * this.sfxVolume);
+    this.duckMusic(); // juice: BGM ducks briefly under every SFX
   }
 
   /* ─────────── UI SFX PRESETS ─────────── */
@@ -96,6 +108,73 @@ class AudioEngine {
   // Sequencer note (bgm bus)
   note(freq, dur = 0.15) {
     this.playTone(freq, 'square', dur, 0.06 * this.bgmVolume);
+  }
+
+  /* ─────────── ARCADE MUSIC VOICES ───────────
+     Driven by the gameMusic sequencer (src/gameMusic.js): the
+     arcade BGM loops route through these voices on the dedicated
+     music bus, so SFX can duck the loop without touching it.
+     `at` lets the sequencer schedule on the AudioContext clock. */
+
+  leadNote(freq, dur = 0.15, at = null) {
+    this._musicTone(freq, 'square', dur, 1, at);
+  }
+
+  bassNote(freq, dur = 0.25, at = null) {
+    this._musicTone(freq, 'triangle', dur, 0.7, at);
+  }
+
+  hat(vol = 0.5, at = null) {
+    if (!this.enabled || !this.ctx) return;
+    try {
+      const t = at ?? this.ctx.currentTime;
+      const sr = this.ctx.sampleRate;
+      const len = Math.floor(sr * 0.05);
+      const buf = this.ctx.createBuffer(1, len, sr);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      const g = this.ctx.createGain();
+      g.gain.value = vol * MUSIC_LEVEL * this.bgmVolume;
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 6000;
+      src.connect(hp);
+      hp.connect(g);
+      g.connect(this.musicGain || this.ctx.destination);
+      src.start(t);
+    } catch { /* audio is decoration — never let it crash the OS */ }
+  }
+
+  _musicTone(freq, type, dur, rel, at = null) {
+    if (!this.enabled || !this.ctx) return;
+    try {
+      const t = at ?? this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t);
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(MUSIC_LEVEL * rel * this.bgmVolume, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.01, t + dur);
+      osc.connect(g);
+      g.connect(this.musicGain || this.ctx.destination);
+      osc.start(t);
+      osc.stop(t + dur + 0.02);
+    } catch { /* audio is decoration — never let it crash the OS */ }
+  }
+
+  // Duck the BGM bus under an SFX for a beat (2.0 juicing behavior).
+  // No-op unless the arcade sequencer has flagged music as active.
+  duckMusic() {
+    if (!this.ctx || !this.musicGain || !this._bgmActive) return;
+    try {
+      const t = this.ctx.currentTime;
+      this.musicGain.gain.cancelScheduledValues(t);
+      this.musicGain.gain.setTargetAtTime(0.3, t, 0.02);
+      this.musicGain.gain.setTargetAtTime(1, t + 0.22, 0.1);
+    } catch { /* non-fatal */ }
   }
 }
 
