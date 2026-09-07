@@ -171,6 +171,7 @@ function ryanReply(text) {
 
 async function askRyan(text) {
   // Try the wired brain first (needs GEMINI_API_KEY + `npm run dev`).
+  let friendly = null;
   try {
     const res = await fetch('api/v1/chat', {
       method: 'POST',
@@ -181,10 +182,11 @@ async function askRyan(text) {
       }),
     });
     const data = await res.json().catch(() => ({}));
-    if (data?.ok && data.text) return data.text;
+    if (data?.ok && data.text) return { text: data.text, wired: true, friendly: null };
+    friendly = data?.friendly || null; // the proxy curates these on failure
   } catch { /* offline brain it is */ }
   await new Promise((r) => setTimeout(r, 500 + Math.random() * 900));
-  return ryanReply(text);
+  return { text: ryanReply(text), wired: false, friendly };
 }
 
 /* ═══════════════════ APP MODULE WIRING ═══════════════════ */
@@ -221,6 +223,15 @@ function wireChat(root) {
     msgs.appendChild(d);
     msgs.scrollTop = msgs.scrollHeight;
   }
+  function addSystemLine(text) {
+    // The wire-down notice — server-curated text arrives via textContent
+    // (never innerHTML: it quotes upstream failures, and model output).
+    const d = document.createElement('div');
+    d.className = 'text-neon-amber border-l-2 border-neon-amber pl-2 py-1 font-mono text-[10px]';
+    d.textContent = text;
+    msgs.appendChild(d);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
   function typingIndicator() {
     const d = document.createElement('div');
     d.className = 'typing-indicator flex gap-1 pl-2';
@@ -239,8 +250,11 @@ function wireChat(root) {
     const dots = typingIndicator();
     const reply = await askRyan(text);
     dots.remove();
-    addRyanLine(reply.replace(/</g, '&lt;'));
-    log('CHAT', 'transmission exchanged');
+    // The wired link failing must never look like a normal answer: surface
+    // the degradation once, in-lore, then let firmware Ryan speak.
+    if (!reply.wired) addSystemLine(reply.friendly || '⚠ WIRE LINK DEGRADED — wired brain unreachable. Firmware backup engaged.');
+    addRyanLine(reply.text.replace(/</g, '&lt;'));
+    log('CHAT', reply.wired ? 'transmission exchanged' : 'wired link down — firmware backup engaged');
   }
   sendBtn.addEventListener('click', send);
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
