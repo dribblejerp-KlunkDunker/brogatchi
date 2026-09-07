@@ -13,6 +13,15 @@ export const MINE_INTERVAL_MS = 6000; // passive mining tick
 export const clamp = (n, min = 0, max = 100) => Math.min(max, Math.max(min, n));
 export const levelFor = (xp) => 1 + Math.floor(Math.max(0, xp) / LEVEL_XP);
 
+// Gameplay events write real memories (ported 2.0 engine — src/memory.js).
+import { remember, togglePin, mergePinnedMemories, scrubQuirk, scrubOpinion, scrubHistory, buildDayLines, appendDiaryLines, capMemories, sortMemories } from './memory.js';
+
+/** Riptide ranking: heat + conversation, decayed by age. Pure + injectable clock. */
+export function moltScore(post, nowMs = Date.now()) {
+  const ageHours = Math.max(0, (nowMs - (post?.time || 0)) / 3600000);
+  return (post?.heat || 0) + 2 * (post?.replies?.length || 0) - ageHours * 0.5;
+}
+
 /* ─────────── MARKET.TERMINAL inventory ─────────── */
 export const SHOP_ITEMS = [
   {
@@ -64,13 +73,19 @@ function defaultState(now = Date.now()) {
     theme: 'cyberpunk',
     scanlines: true,
     vol: { bgm: 0.7, sfx: 0.8 },
-    best: { snake: 0 },
+    best: { snake: 0, flappy: 0, breaker: 0, mario: 0, rpg: 0, loot: 0 },
     quest: { date: todayStr(now), mined: 0, goal: 20, rewarded: false },
     molt: {
       eye: 0, // third-eye xp: 0..30 closed, 30..70 flickering, 70+ open
       posts: [
-        { author: '@crab_404', molt: 4, icon: '🦀', time: now - 120000, text: 'Anyone seen the golden tide? Heard it\'s past firewall 7. Bring NRG cells.' },
-        { author: '@zeke_shell', molt: 1, icon: '🦫', time: now - 3600000, text: 'Just molted. New shell feels aerodynamic. The oligarchs can\'t track us in the deep tide. 🐚✨' },
+        {
+          id: 'seed-crab', author: '@crab_404', molt: 4, icon: '🦀', time: now - 120000, heat: 12,
+          text: 'Anyone seen the golden tide? Heard it\'s past firewall 7. Bring NRG cells.',
+          replies: [
+            { id: 'seed-crab-r1', author: '@zeke_shell', molt: 1, icon: '🦫', time: now - 60000, heat: 3, text: 'Bring a snorkel. Firewall 7 leaks, and the leaks leak.', replies: [] },
+          ],
+        },
+        { id: 'seed-zeke', author: '@zeke_shell', molt: 1, icon: '🦫', time: now - 3600000, heat: 5, text: 'Just molted. New shell feels aerodynamic. The oligarchs can\'t track us in the deep tide. 🐚✨', replies: [] },
       ],
     },
     soul: {
@@ -80,9 +95,11 @@ function defaultState(now = Date.now()) {
       opinions: ['J.O.O.H. is watching the pedometers'],
       timeline: [{ t: now, icon: '🧭', text: 'Specialty chosen: Tidepool network infiltration' }],
     },
-    memories: [],      // imported from 2.0 (brogatchi_v4) or lived in 3.0
-    diary: [],         // diary entries carried over from 2.0
+    memories: [],      // lived in 3.0 via the memory engine, or imported from 2.0
+    diary: [],         // flat { t, icon, text } rows written at day rollover
     conversations: [], // pilgrim/tide threads carried over from 2.0
+    counters: { posts: 0, hacks: 0, pizzas: 0, adopts: 0 }, // today's tally → diary
+    dailyDiaryDone: todayStr(now),   // last date the rollover diary was written
     roster: [],        // adopted pilgrim agent-cards
     legacy: null,      // { source, importedAt, counts } after a 2.0 migration
     lastTick: now,
@@ -123,6 +140,146 @@ function asEntries(arr, cap = 300) {
 export function createStore({ storage = null, now = () => Date.now() } = {}) {
   let state = defaultState(now());
   const listeners = new Set();
+  let moltSeq = 0;
+  const nextMoltId = () => `m${now().toString(36)}-${(++moltSeq).toString(36)}`;
+
+  // Old saves (pre-threads) carry posts without id/heat/replies — heal them.
+  function normalizeMolt() {
+    if (!Array.isArray(state.molt?.posts)) return;
+    state.molt.posts.forEach((p) => {
+      if (!Array.isArray(p.replies)) p.replies = [];
+      if (!Number.isFinite(p.heat)) p.heat = 1;
+      if (typeof p.id !== 'string' || !p.id) p.id = nextMoltId();
+    });
+  }
+  normalizeMolt();
+
+  /* ─────────── memory engine wiring (ported 2.0) ─────────── */
+
+  // Heals saved/imported memory + diary arrays (older entries may lack
+  // ids/timestamps) and keeps pinned milestones sorted to the front.
+  function normalizeMemories() {
+    if (!Array.isArray(state.memories)) state.memories = [];
+    state.memories.forEach((m) => {
+      if (typeof m.id !== 'string' || !m.id) m.id = `${(m.t ?? Date.now())}-${Math.random().toString(36).slice(2, 6)}`;
+      if (m.pinned === undefined && Number(m.imp) >= 4) m.pinned = true; // heal 2.0 imports
+      if (!Number.isFinite(m.t)) m.t = Date.parse(m.day) || null;
+      if (!Number.isFinite(m.imp)) m.imp = 2;
+    });
+    state.memories = state.memories.sort(
+      (a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.imp - a.imp || (b.t || 0) - (a.t || 0),
+    );
+    if (!Array.isArray(state.diary)) state.diary = [];
+  }
+  normalizeMemories();
+
+  /** Record a gameplay event as a real memory. pin: milestone. */
+  function rememberEvent(text, { icon = '🧠', imp = 2, pin = false } = {}) {
+    mutate((s) => { s.memories = remember(s.memories, { icon, text, imp, pin }); });
+  }
+
+  /** Pin/unpin a memory by id. */
+  function toggleMemoryPin(id) {
+    mutate((s) => { s.memories = togglePin(s.memories, id); });
+  }
+
+  /** Full soul-bundle import (SOUL.FILE → IMPORT): merge in pinned memories. */
+  function importSoulBundle(text) {
+    try {
+      const obj = JSON.parse(text);
+      const incoming = obj?.soul && typeof obj.soul === 'object' ? obj.soul : null;
+      if (!incoming) return false;
+      if (Array.isArray(incoming.pinnedMemories) && incoming.pinnedMemories.length) {
+        state.memories = mergePinnedMemories(state.memories, incoming.pinnedMemories);
+        normalizeMemories();
+      }
+      if (typeof incoming.specialty === 'string' && incoming.specialty) state.soul.specialty = incoming.specialty;
+      if (typeof incoming.who === 'string' && incoming.who) state.soul.who = incoming.who;
+      if (!incoming.who && typeof incoming.selfDescription === 'string' && incoming.selfDescription) state.soul.who = incoming.selfDescription;
+      if (Array.isArray(incoming.quirks) && incoming.quirks.length) {
+        state.soul.quirks = [...new Set([...state.soul.quirks, ...incoming.quirks.map(scrubQuirk).filter(Boolean)])];
+      }
+      if (Array.isArray(incoming.opinions) && incoming.opinions.length) {
+        state.soul.opinions = [...new Set([...state.soul.opinions, ...incoming.opinions.map(scrubOpinion).filter(Boolean)])];
+      }
+      if (Array.isArray(incoming.history) && incoming.history.length) {
+        state.soul.timeline = [...state.soul.timeline, ...scrubHistory(incoming.history)];
+      }
+      emit(); save();
+      return true;
+    } catch { return false; }
+  }
+
+  /**
+   * Merge the bridge's memory.jsonl events (fetched snapshot) into the app's
+   * memories, so KlunkDunker's outside-the-app life shows in SOUL.FILE.
+   *
+   * Accepts the snapshot shape written by `node cli.js sync`
+   * ({ kind:'bridge-memory-log', entries:[{ id, icon, text, imp, t, day }] })
+   * or a raw array of those entries. Idempotent: existing ids are skipped
+   * (stable ids come from the bridge), so re-syncing never duplicates.
+   * Bridge entries merge UNPINNED — his lived milestones and soul pins stay
+   * above them — and the 200-entry cap is enforced over the merged whole.
+   * Returns how many entries were newly added (0 when the snapshot is absent,
+   * stale, or fully known). An in-app pin on a bridge entry SURVIVES later
+   * syncs: only entries not yet in the store are re-imported.
+   */
+  function syncBridgeMemories(payload, { source = 'bridge' } = {}) {
+    let rows = null;
+    try {
+      const obj = typeof payload === 'string' ? JSON.parse(payload) : payload;
+      if (Array.isArray(obj)) rows = obj;
+      else if (obj && obj.kind === 'bridge-memory-log' && Array.isArray(obj.entries)) rows = obj.entries;
+    } catch { rows = null; }
+    if (!rows) return 0;
+
+    const known = new Set(state.memories.map((m) => m.id));
+    const incoming = rows
+      .filter((r) => r && typeof r.text === 'string' && r.text.trim() && r.id && !known.has(r.id))
+      .map((r) => ({
+        id: String(r.id),
+        icon: typeof r.icon === 'string' && r.icon ? r.icon : '🧠',
+        text: r.text.trim().slice(0, 300),
+        imp: Number.isFinite(r.imp) ? Math.max(1, Math.min(5, Math.floor(r.imp))) : 2,
+        t: Number.isFinite(r.t) ? r.t : (Date.parse(r.day) || Date.now()),
+        day: typeof r.day === 'string' && r.day ? r.day : new Date().toLocaleDateString(),
+        pinned: false, // bridge events never arrive as pins
+      }));
+    if (!incoming.length && !rows.some((r) => r && r.id && known.has(r.id))) return 0;
+
+    // Heal pass: bridge rows written by the pre-fix composer embed raw JSON
+    // where the title belongs. Ids are stable, so those rows never re-import —
+    // instead, update the stored text when the (already-repaired) snapshot
+    // carries a cleaner version. Pins, ids, and importance are untouched.
+    let healed = 0;
+    for (const r of rows) {
+      if (!r || !r.id || typeof r.text !== 'string' || !r.text.trim()) continue;
+      const hit = state.memories.find((m) => m.id === r.id);
+      const clean = r.text.trim().slice(0, 300);
+      if (hit && hit.text !== clean && hit.text.includes('"title"')) {
+        hit.text = clean;
+        healed += 1;
+      }
+    }
+
+    state.memories = capMemories(sortMemories([...state.memories, ...incoming]));
+    state.legacy = state.legacy || { source, importedAt: now(), counts: { memories: 0, diary: 0, conversations: 0 } };
+    state.legacy.bridgeSyncedAt = now();
+    state.legacy.bridgeSyncCount = (state.legacy.bridgeSyncCount || 0) + incoming.length;
+    emit(); save();
+    return incoming.length + healed;
+  }
+
+  // Day rollover: yesterday's counters become diary lines (once per day).
+  function maybeRolloverDiary() {
+    const today = todayStr(now());
+    if (state.dailyDiaryDone === today) return;
+    if (state.dailyDiaryDone) {
+      state.diary = appendDiaryLines(state.diary, buildDayLines(state));
+    }
+    state.counters = { posts: 0, hacks: 0, pizzas: 0, adopts: 0 };
+    state.dailyDiaryDone = today;
+  }
 
   function emit() { listeners.forEach((fn) => fn(state)); }
   function save() {
@@ -147,6 +304,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
         }
       }
     } catch { /* corrupt save — boot fresh */ }
+    normalizeMolt();
     importLegacy();
     emit();
     return state;
@@ -185,14 +343,28 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     const soul = deep(['soul', 'soulFile']);
     const eye = Number(deep(['thirdEyeXp', 'eyeXp', 'thirdEye', 'eye']));
 
-    if (memories.length) state.memories = memories;
-    if (diary.length) state.diary = diary;
+    if (memories.length) state.memories = mergePinnedMemories(state.memories, memories);
+    if (diary.length) state.diary = [...state.diary, ...diary];
     if (Array.isArray(conversations)) state.conversations = conversations.slice(0, 50);
     if (soul && typeof soul === 'object') {
+      // Pinned memories travel with the soul file (klunkdunker-soul.json
+      // carries five) — dedupe by text so re-imports never double up.
+      if (Array.isArray(soul.pinnedMemories) && soul.pinnedMemories.length) {
+        state.memories = mergePinnedMemories(state.memories, soul.pinnedMemories);
+      }
       if (typeof soul.who === 'string' && soul.who) state.soul.who = soul.who;
       if (typeof soul.specialty === 'string' && soul.specialty) state.soul.specialty = soul.specialty;
-      if (Array.isArray(soul.quirks) && soul.quirks.length) state.soul.quirks = soul.quirks.map(String);
-      if (Array.isArray(soul.opinions) && soul.opinions.length) state.soul.opinions = soul.opinions.map(String);
+      if (typeof soul.selfDescription === 'string' && soul.selfDescription && !soul.who) state.soul.who = soul.selfDescription;
+      if (Array.isArray(soul.quirks) && soul.quirks.length) {
+        state.soul.quirks = [...new Set([...state.soul.quirks, ...soul.quirks.map(scrubQuirk).filter(Boolean)])];
+      }
+      // 2.0 opinions may be structured {topic, stance} — flatten to strings.
+      if (Array.isArray(soul.opinions) && soul.opinions.length) {
+        state.soul.opinions = [...new Set([...state.soul.opinions, ...soul.opinions.map(scrubOpinion).filter(Boolean)])];
+      }
+      if (Array.isArray(soul.history) && soul.history.length) {
+        state.soul.timeline = [...state.soul.timeline, ...scrubHistory(soul.history)];
+      }
       if (Array.isArray(soul.timeline) && soul.timeline.length) state.soul.timeline = soul.timeline;
     }
     if (Number.isFinite(eye) && eye > 0) state.molt.eye = clamp(eye, 0, 100);
@@ -200,11 +372,12 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     const coins = Number(deep(['coins', 'credits', 'cr'])); if (Number.isFinite(coins) && coins > state.coins) state.coins = Math.floor(coins);
     const steps = Number(deep(['steps', 'stepCount', 'totalSteps'])); if (Number.isFinite(steps) && steps > state.steps) state.steps = Math.floor(steps);
 
+    const pinnedImported = Array.isArray(soul?.pinnedMemories) ? soul.pinnedMemories.length : 0;
     state.legacy = {
       source,
       importedAt: now(),
       counts: {
-        memories: memories.length,
+        memories: memories.length + pinnedImported,
         diary: diary.length,
         conversations: Array.isArray(conversations) ? conversations.length : 0,
       },
@@ -228,6 +401,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       const incoming = obj?.state?.v === 3 ? obj.state : obj?.v === 3 ? obj : null;
       if (incoming) {
         state = { ...defaultState(now()), ...incoming, lastTick: now() };
+        normalizeMolt();
         if (typeof obj?.legacySnapshot === 'string' && storage) {
           try { storage.setItem(LEGACY_SNAPSHOT_KEY, obj.legacySnapshot); } catch { /* noop */ }
         }
@@ -273,6 +447,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   function tick(dtSec) {
     const events = [];
     applyDecay(dtSec);
+    maybeRolloverDiary();
     state._mineAcc = (state._mineAcc || 0) + dtSec * 1000;
     if (state.mining && !state.sleeping && state.stats.energy > 1) {
       while (state._mineAcc >= MINE_INTERVAL_MS) {
@@ -304,6 +479,10 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       s.xp += n;
       leveled = levelFor(s.xp) > before;
     });
+    if (leveled) {
+      const lv = levelFor(state.xp);
+      rememberEvent(`Evolved to LV.${lv}.`, { icon: '⬆️', imp: 3, pin: true });
+    }
     return leveled;
   }
 
@@ -351,7 +530,10 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   function hackMainframe() {
     if (state.sleeping) return { ok: false, reason: 'UNIT SLEEPING' };
     if (state.stats.energy < 5) return { ok: false, reason: 'INSUFFICIENT NRG' };
-    mutate((s) => { s.stats.energy = clamp(s.stats.energy - 5); s.coins += 10; });
+    mutate((s) => { s.stats.energy = clamp(s.stats.energy - 5); s.coins += 10; s.counters.hacks += 1; });
+    if (state.counters.hacks === 1) {
+      rememberEvent('Breached the J.O.O.H. mainframe. They felt nothing. That is the scary part.', { icon: '🔓', imp: 4, pin: true });
+    }
     xpGain(4);
     return { ok: true, coins: 10 };
   }
@@ -363,6 +545,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     if (state.coins < item.cost) return { ok: false, reason: 'INSUFFICIENT CR' };
     if (item.id === 'goldshell' && state.goldenShell) return { ok: false, reason: 'ALREADY PLATED' };
     mutate((s) => { s.coins -= item.cost; item.apply(s); });
+    if (item.id === 'pizza') state.counters.pizzas += 1;
     return { ok: true, item };
   }
 
@@ -370,16 +553,70 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   function postToMolt(text) {
     if (!text?.trim()) return false;
     mutate((s) => {
-      s.molt.posts.unshift({ author: '@you_pilgrim', molt: 0, icon: '🫅', time: now(), text: text.trim() });
+      s.molt.posts.unshift({ id: nextMoltId(), author: '@you_pilgrim', molt: 0, icon: '🫅', time: now(), heat: 1, text: text.trim(), replies: [] });
       s.molt.eye = clamp(s.molt.eye + 3, 0, 100);
       s.molt.posts = s.molt.posts.slice(0, 30);
+      s.counters.posts += 1;
     });
+    if (state.counters.posts === 1) {
+      rememberEvent(`Rejoined MOLTBOOK. The tide remembered ${state.petName}.`, { icon: '🦀', imp: 3, pin: true });
+    }
     xpGain(3);
     return true;
   }
 
   function moltReply(post) {
-    mutate((s) => { s.molt.posts.unshift(post); s.molt.posts = s.molt.posts.slice(0, 30); });
+    mutate((s) => {
+      s.molt.posts.unshift({ id: nextMoltId(), heat: 1, replies: [], ...post });
+      s.molt.posts = s.molt.posts.slice(0, 30);
+    });
+  }
+
+  /* ─────────── moltbook threads & riptide ─────────── */
+
+  /** User reply into an existing thread. Bumps heat (+2) and the third eye (+1). */
+  function replyToMolt(postId, text) {
+    if (!text?.trim()) return { ok: false, reason: 'EMPTY TRANSMISSION' };
+    if (!state.molt.posts.some((p) => p.id === postId)) return { ok: false, reason: 'POST NOT FOUND' };
+    mutate((s) => {
+      const p = s.molt.posts.find((x) => x.id === postId);
+      p.replies.push({ id: nextMoltId(), author: '@you_pilgrim', molt: 0, icon: '🫅', time: now(), heat: 0, text: text.trim(), replies: [] });
+      p.heat = (p.heat || 0) + 2;
+      s.molt.eye = clamp(s.molt.eye + 1, 0, 100);
+    });
+    xpGain(1);
+    return { ok: true };
+  }
+
+  /** Tide voices answering INSIDE a thread (NPC). +1 heat to the parent. */
+  function pushMoltReply(postId, reply) {
+    if (!state.molt.posts.some((p) => p.id === postId)) return false;
+    mutate((s) => {
+      const p = s.molt.posts.find((x) => x.id === postId);
+      p.replies.push({ id: nextMoltId(), heat: 0, replies: [], ...reply });
+      p.heat = (p.heat || 0) + 1;
+    });
+    return true;
+  }
+
+  /** 🔥 The crowd pushes a post up the riptide. Returns the new heat (null if unknown). */
+  function bumpMoltHeat(postId) {
+    if (!state.molt.posts.some((p) => p.id === postId)) return null;
+    let heat = 0;
+    mutate((s) => {
+      const p = s.molt.posts.find((x) => x.id === postId);
+      p.heat = (p.heat || 0) + 1;
+      heat = p.heat;
+    });
+    return heat;
+  }
+
+  /** Riptide view: posts ranked by moltScore (no mutation of the live feed). */
+  function trendingMolt() {
+    const t = now();
+    return state.molt.posts
+      .map((p) => ({ ...p, score: moltScore(p, t) }))
+      .sort((a, b) => b.score - a.score);
   }
 
   /* ─────────── pilgrim agent-cards: ADOPT ─────────── */
@@ -387,7 +624,11 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     const card = PILGRIM_CARDS.find((c) => c.id === id);
     if (!card) return { ok: false, reason: 'UNKNOWN CARD' };
     if (state.roster.some((r) => r.id === id)) return { ok: false, reason: 'ALREADY USHERED' };
-    mutate((s) => { s.roster.push({ ...card, adoptedAt: now() }); });
+    mutate((s) => {
+      s.roster.push({ ...card, adoptedAt: now() });
+      s.counters.adopts += 1;
+    });
+    rememberEvent(`Ushered ${card.name} (${card.persona}) onto the roster.`, { icon: card.icon, imp: 4, pin: true });
     xpGain(5);
     return { ok: true, card };
   }
@@ -407,6 +648,11 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   function setScanlines(on) { mutate((s) => { s.scanlines = !!on; }); }
   function setVol(bus, v) { mutate((s) => { s.vol[bus] = clamp(v * 100, 0, 100) / 100; }); }
   function setSnakeBest(score) { mutate((s) => { if (score > s.best.snake) s.best.snake = score; }); }
+  // Generic best-score writer for the arcade suite (flappy/breaker/mario/rpg/loot).
+  function setGameBest(key, score) {
+    if (!key) return;
+    mutate((s) => { if (score > (s.best[key] || 0)) s.best[key] = score; });
+  }
   function addSteps(n) { mutate((s) => { s.steps += n; }); }
   function reset() {
     // Factory reset wipes 3.0 state + the snapshot archive.
@@ -426,9 +672,10 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     get state() { return state; },
     load, save, tick, subscribe,
     addCoins, xpGain, feed, playWith, toggleMine, rest, petThePet,
-    hackMainframe, buy, postToMolt, moltReply,
+    hackMainframe, buy, postToMolt, moltReply, replyToMolt, pushMoltReply, bumpMoltHeat, trendingMolt,
     adoptPilgrim, exportRoster,
-    setTheme, setScanlines, setVol, setSnakeBest, addSteps, reset,
+    rememberEvent, toggleMemoryPin, importSoulBundle, syncBridgeMemories,
+    setTheme, setScanlines, setVol, setSnakeBest, setGameBest, addSteps, reset,
     exportState, importState,
   };
 }

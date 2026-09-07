@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createStore, levelFor, clamp, SHOP_ITEMS, LEVEL_XP } from '../src/state.js';
+import { createStore, levelFor, clamp, moltScore, SHOP_ITEMS, LEVEL_XP } from '../src/state.js';
 
 function memStorage() {
   const m = new Map();
@@ -176,7 +176,8 @@ describe('legacy 2.0 → 3.0 memory migration', () => {
     expect(s.memories[0].t).toBe(111);
     expect(s.diary[0].text).toBe('Dear diary: the pizza was a lie');
     expect(s.soul.who).toBe('I am the tide itself');
-    expect(s.soul.quirks).toEqual(['honks']);
+    // quirks MERGE now (default quirks + imported 'honks') — memory-engine policy
+    expect(s.soul.quirks).toContain('honks');
     expect(s.molt.eye).toBe(44);
     expect(s.coins).toBe(500);
     expect(s.xp).toBe(130);
