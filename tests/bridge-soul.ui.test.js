@@ -7,6 +7,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 
 describe('EXPORT FOR BRIDGE (jsdom shell)', () => {
   afterEach(() => {
+    window.__broBootOverlay?.stop?.(); // boot timers must not outlive the env
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });

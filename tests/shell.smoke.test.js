@@ -48,5 +48,8 @@ describe('shell smoke (jsdom)', () => {
       App.close(id);
     }
     expect(App.windows.size).toBe(0);
+
+    // boot-overlay timers must not fire after the environment tears down
+    window.__broBootOverlay?.stop?.();
   }, 20000);
 });

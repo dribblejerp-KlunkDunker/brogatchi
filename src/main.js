@@ -1358,20 +1358,26 @@ setInterval(() => red.sync(), 30000); // heartbeat mirror
   ];
   let i = 0;
   let finished = false;
+  const pending = new Set();
+  const later = (fn, ms) => { const t = setTimeout(() => { pending.delete(t); fn(); }, ms); pending.add(t); return t; };
   function finish() {
     if (finished) return;
     finished = true;
+    clearInterval(timer);
     overlay.classList.add('boot-done');
-    setTimeout(() => overlay.remove(), 450);
+    later(() => overlay.remove(), 450);
     log('SYS', 'boot handshake complete');
   }
   const timer = setInterval(() => {
-    if (i >= lines.length) { clearInterval(timer); setTimeout(finish, 350); return; }
+    if (i >= lines.length) { clearInterval(timer); later(finish, 350); return; }
     const d = document.createElement('div');
     d.textContent = lines[i++];
     linesEl.appendChild(d);
     audio.typeBlip?.();
   }, 240);
+  // Test handle: real-timer suites stop the boot sequence before teardown so
+  // its timers never fire into a torn-down jsdom environment (CI caught it).
+  window.__broBootOverlay = { stop() { clearInterval(timer); pending.forEach(clearTimeout); pending.clear(); finished = true; } };
   overlay.addEventListener('click', finish);
 })();
 
