@@ -95,10 +95,12 @@ const clip = (s, n) => String(s ?? '').slice(0, n);
 //                    opinions:[{topic,stance}], pinnedMemories:[{icon,text}] } }
 //  v3 bro-os-soul-export { v:3, kind:'bro-os-soul-export', state:{ soul:{
 //                    who, specialty, quirks:[], opinions:[string] }, memories:[
-//                    { icon, text, pinned } ] } }
+//                    { icon, text, pinned } ], personality:{ ego, greed, … } } }
 //
 // 3.0 folded the 2.0's woven quirks into soul.quirks[] and the pinned
 // memories into state.memories — both are identity, so both ride along.
+// The trait core rides along too: the live ego/greed/paranoia levels shape
+// the voice the same way they shape the in-app chat brain.
 export function identityFromEnvelope(raw) {
   const id = fallbackIdentity();
   if (!raw || typeof raw !== 'object') return id;
@@ -125,6 +127,15 @@ export function identityFromEnvelope(raw) {
         .filter((m) => m && m.pinned && typeof m.text === 'string' && m.text.trim())
         .slice(0, 6)
         .map((m) => ({ icon: clip(m.icon, 4) || '🧠', text: clip(m.text, 160) }));
+    }
+    if (st.personality && typeof st.personality === 'object') {
+      const t = {};
+      for (const [k, v] of Object.entries(st.personality)) {
+        const n = Number(v);
+        if (n >= 0 && n <= 100) t[k] = Math.round(n);
+        else if (n > 100) t[k] = 100;
+      }
+      if (Object.keys(t).length) id.traits = t;
     }
     return id;
   }
@@ -199,6 +210,10 @@ export function buildSystemPrompt(identity) {
   }
   if (Array.isArray(identity.quirks) && identity.quirks.length) {
     lines.push(`Your quirks: ${identity.quirks.slice(0, 8).join('; ')}.`);
+  }
+  if (identity.traits && Object.keys(identity.traits).length) {
+    const fmt = (k) => `${k} ${identity.traits[k]}%`;
+    lines.push(`Your trait core right now: ${Object.keys(identity.traits).map(fmt).join(' · ')}. Let the dominant drive color your tone — never announce these numbers.`);
   }
   if (Array.isArray(identity.pinnedMemories) && identity.pinnedMemories.length) {
     lines.push(`Memories you carry: ${identity.pinnedMemories.slice(0, 5).map((m) => m.text).join(' | ')}.`);

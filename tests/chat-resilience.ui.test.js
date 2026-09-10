@@ -111,4 +111,14 @@ describe('chat send vs a down wired brain', () => {
     const problems = CONSOLE_CALLS.filter((p) => p.method === 'error' || p.method === 'warn');
     expect(problems, problems.map((p) => `${p.method}: ${p.text}`).join('\n')).toHaveLength(0);
   });
+
+  it('the wired persona prompt carries the trait core (live ego/greed feed)', async () => {
+    await bootShell();
+    window.__broStore.hackMainframe(); // paranoia +5, ego +2, greed +3
+    chatPayload = { ok: true, text: 'Wired and dangerous, pilgrim.' };
+    await send('who are you today?');
+    const body = JSON.parse(vi.mocked(fetch).mock.calls.find((c) => String(c[0]).includes('v1/chat'))[1].body);
+    expect(body.system).toContain('Your trait core right now:');
+    expect(body.system).toContain('Dominant drive: paranoia');
+  });
 });

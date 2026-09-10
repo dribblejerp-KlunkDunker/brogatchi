@@ -74,6 +74,7 @@ function defaultState(now = Date.now()) {
     theme: 'cyberpunk',
     scanlines: true,
     vol: { bgm: 0.7, sfx: 0.8 },
+    bgmMuted: false,
     best: { snake: 0, flappy: 0, breaker: 0, mario: 0, rpg: 0, loot: 0 },
     quest: { date: todayStr(now), mined: 0, goal: 20, rewarded: false },
     molt: {
@@ -187,6 +188,9 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   }
   normalizePersonality();
 
+  // heal saves from before the mute toggle existed
+  if (typeof state.bgmMuted !== 'boolean') state.bgmMuted = false;
+
   /** Record a gameplay event as a real memory. pin: milestone. */
   function rememberEvent(text, { icon = '🧠', imp = 2, pin = false } = {}) {
     mutate((s) => { s.memories = remember(s.memories, { icon, text, imp, pin }); });
@@ -228,6 +232,9 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   /** Trait summary for the SOUL viewer ("Ego 34% · Greed 12% …"). */
   function personalityDescribe() { return describeTraits(state.personality); }
   function personalityDominant() { return dominantTrait(state.personality); }
+
+  /** Current trait core as a persona-prompt line (chat brain, bridge voice). */
+  function personalityPromptLine() { return `Your trait core right now: ${describeTraits(state.personality)}. Dominant drive: ${dominantTrait(state.personality)} — let it color the tone, never announce it.`; }
 
   /** Pin/unpin a memory by id. */
   function toggleMemoryPin(id) {
@@ -515,6 +522,8 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
         if (!state.quest.rewarded && state.quest.mined >= state.quest.goal) {
           state.quest.rewarded = true;
           state.coins += 50;
+          // 2.0 quest wiring: completion feeds broCode and fitness.
+          applyEvents(state.personality, [{ trait: 'broCode', amount: 2 }, { trait: 'fitness', amount: 1 }]);
           // 2.0 quest milestone — pinned.
           rememberEvent('Finished a real-life quest. The sim shakes.', { icon: '✅', imp: 4, pin: true });
           events.push({ tag: 'QUEST', text: 'DAILY.QUEST complete — GOLDEN.SHELL fund +50 CR', questDone: true });
@@ -553,6 +562,8 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       s.stats.hunger = clamp(s.stats.hunger + 18);
       s.stats.happy = clamp(s.stats.happy + 2);
       s.stats.greed = clamp(s.stats.greed + 1);
+      // 2.0 meal wiring: a meal feeds gluttony (pizza-tier).
+      applyEvents(s.personality, [{ trait: 'gluttony', amount: 3 }]);
       ok = true;
     });
     if (ok) xpGain(2);
@@ -572,7 +583,11 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   }
 
   function toggleMine() {
-    mutate((s) => { s.mining = !s.mining; });
+    mutate((s) => {
+      s.mining = !s.mining;
+      // 2.0 rig wiring: deploying the miner feeds greed.
+      if (s.mining) applyEvents(s.personality, [{ trait: 'greed', amount: 3 }]);
+    });
     if (state.mining) {
       rememberEvent('Deployed the mining rig. Passive income go brrr.', { icon: '⛏️', imp: 3 });
     }
@@ -585,14 +600,24 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   }
 
   function petThePet() {
-    mutate((s) => { s.stats.happy = clamp(s.stats.happy + 1); });
+    mutate((s) => {
+      s.stats.happy = clamp(s.stats.happy + 1);
+      // 2.0 pet wiring: pet10 quest paid broCode +2 — same rate per pet.
+      applyEvents(s.personality, [{ trait: 'broCode', amount: 0.2 }]);
+    });
     xpGain(0.2);
   }
 
   function hackMainframe() {
     if (state.sleeping) return { ok: false, reason: 'UNIT SLEEPING' };
     if (state.stats.energy < 5) return { ok: false, reason: 'INSUFFICIENT NRG' };
-    mutate((s) => { s.stats.energy = clamp(s.stats.energy - 5); s.coins += 10; s.counters.hacks += 1; });
+    mutate((s) => {
+      s.stats.energy = clamp(s.stats.energy - 5);
+      s.coins += 10;
+      s.counters.hacks += 1;
+      // 2.0 hack wiring: paranoia up hard, ego and greed ride the payout.
+      applyEvents(s.personality, [{ trait: 'paranoia', amount: 5 }, { trait: 'ego', amount: 2 }, { trait: 'greed', amount: 3 }]);
+    });
     if (state.counters.hacks === 1) {
       rememberEvent('Breached the J.O.O.H. mainframe. They felt nothing. That is the scary part.', { icon: '🔓', imp: 4, pin: true });
     }
@@ -606,7 +631,13 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     if (!item) return { ok: false, reason: 'UNKNOWN ITEM' };
     if (state.coins < item.cost) return { ok: false, reason: 'INSUFFICIENT CR' };
     if (item.id === 'goldshell' && state.goldenShell) return { ok: false, reason: 'ALREADY PLATED' };
-    mutate((s) => { s.coins -= item.cost; item.apply(s); });
+    mutate((s) => {
+      s.coins -= item.cost;
+      item.apply(s);
+      // 2.0 shop wiring: pizza feeds gluttony, NRG cells feed ego.
+      if (item.id === 'pizza') applyEvents(s.personality, [{ trait: 'gluttony', amount: 3 }]);
+      if (item.id === 'nrgcell') applyEvents(s.personality, [{ trait: 'ego', amount: 1.5 }]);
+    });
     if (item.id === 'pizza') state.counters.pizzas += 1;
     rememberEvent(`Bought the ${item.name}. Worth it.`, { icon: '🛍️', imp: 2 });
     return { ok: true, item };
@@ -710,6 +741,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   function setTheme(theme) { mutate((s) => { s.theme = theme; }); }
   function setScanlines(on) { mutate((s) => { s.scanlines = !!on; }); }
   function setVol(bus, v) { mutate((s) => { s.vol[bus] = clamp(v * 100, 0, 100) / 100; }); }
+  function setBgmMuted(on) { mutate((s) => { s.bgmMuted = !!on; }); }
   function setSnakeBest(score) { mutate((s) => { if (score > s.best.snake) s.best.snake = score; }); }
   // Generic best-score writer for the arcade suite (flappy/breaker/mario/rpg/loot).
   // Returns true when this run set a NEW best (2.0 onGameOver semantic).
@@ -721,7 +753,16 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     });
     return isNew;
   }
-  function addSteps(n) { mutate((s) => { s.steps += n; }); }
+  function addSteps(n) {
+    if (!Number.isFinite(Number(n)) || n <= 0) return;
+    mutate((s) => {
+      const before = s.steps;
+      s.steps += Math.floor(Number(n));
+      // 2.0 pedometer wiring: fitness +0.8 per 100 steps crossed.
+      const gained = Math.floor(s.steps / 100) - Math.floor(before / 100);
+      if (gained > 0) applyEvents(s.personality, [{ trait: 'fitness', amount: 0.8 * Math.min(gained, 10) }]);
+    });
+  }
   function reset() {
     // Factory reset wipes 3.0 state + the snapshot archive.
     // Legacy 2.0 keys (brogatchi_*) are NEVER touched — on next
@@ -743,7 +784,8 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     hackMainframe, buy, postToMolt, moltReply, replyToMolt, pushMoltReply, bumpMoltHeat, trendingMolt,
     adoptPilgrim, exportRoster,
     rememberEvent, toggleMemoryPin, importSoulBundle, syncBridgeMemories,
-    recordArcadeRun, personalityDescribe, personalityDominant,
+    recordArcadeRun, personalityDescribe, personalityDominant, personalityPromptLine,
+    setBgmMuted,
     setTheme, setScanlines, setVol, setSnakeBest, setGameBest, addSteps, reset,
     exportState, importState,
   };

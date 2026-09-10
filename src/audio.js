@@ -13,6 +13,7 @@ class AudioEngine {
     this.enabled = true;
     this.sfxVolume = 0.8;   // 0..1, scaled onto preset volumes
     this.bgmVolume = 0.7;   // used by the sequencer/synth bus
+    this.bgmMuted = false;  // settings MUTE MUSIC — silences the BGM bus only
   }
 
   // Must be called from a user gesture (browser autoplay policy).
@@ -34,6 +35,7 @@ class AudioEngine {
 
   setSfxVolume(v) { this.sfxVolume = Math.min(1, Math.max(0, v)); }
   setBgmVolume(v) { this.bgmVolume = Math.min(1, Math.max(0, v)); }
+  setBgmMuted(on) { this.bgmMuted = !!on; }
 
   // Core synth voice
   playTone(freq, type = 'square', duration = 0.1, vol = 0.08) {
@@ -107,6 +109,7 @@ class AudioEngine {
 
   // Sequencer note (bgm bus)
   note(freq, dur = 0.15) {
+    if (this.bgmMuted) return;
     this.playTone(freq, 'square', dur, 0.06 * this.bgmVolume);
   }
 
@@ -125,7 +128,7 @@ class AudioEngine {
   }
 
   hat(vol = 0.5, at = null) {
-    if (!this.enabled || !this.ctx) return;
+    if (this.bgmMuted || !this.enabled || !this.ctx) return;
     try {
       const t = at ?? this.ctx.currentTime;
       const sr = this.ctx.sampleRate;
@@ -148,7 +151,7 @@ class AudioEngine {
   }
 
   _musicTone(freq, type, dur, rel, at = null) {
-    if (!this.enabled || !this.ctx) return;
+    if (this.bgmMuted || !this.enabled || !this.ctx) return;
     try {
       const t = at ?? this.ctx.currentTime;
       const osc = this.ctx.createOscillator();

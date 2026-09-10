@@ -254,4 +254,27 @@ describe('pilgrim agent-cards ADOPT flow', () => {
     expect(obj.soul).toBeTruthy();
     expect(obj.legacySnapshot).toContain('legacy');
   });
+
+  it('MUTE MUSIC persists across save/load like every setting', () => {
+    const storage = memStorage();
+    let t = 1000;
+    const a = createStore({ storage, now: () => t });
+    expect(a.state.bgmMuted).toBe(false);
+    a.setBgmMuted(true);
+    a.save();
+    const b = createStore({ storage, now: () => t });
+    b.load();
+    expect(b.state.bgmMuted).toBe(true);
+  });
+
+  it('saves from before the mute toggle existed load unmuted', () => {
+    const storage = memStorage();
+    let t = 1000;
+    const a = createStore({ storage, now: () => t });
+    a.save();
+    storage.setItem('bro_os_3', JSON.stringify({ ...JSON.parse(storage.getItem('bro_os_3')), bgmMuted: undefined }));
+    const b = createStore({ storage, now: () => t });
+    b.load();
+    expect(b.state.bgmMuted).toBe(false);
+  });
 });

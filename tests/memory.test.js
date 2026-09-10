@@ -555,6 +555,86 @@ describe('2.0 arcade soul-feed (recordArcadeRun)', () => {
     expect(s.personality.fitness).toBe(12);            // steps > 0 → no decay
   });
 
+  /* ─────────── 2.0 action wiring: meals, pets, hacks, quests, steps ─────────── */
+
+  it('2.0 meal wiring: feeding feeds gluttony +3', () => {
+    const store = freshStore();
+    store.load();
+    const g0 = store.state.personality.gluttony;
+    expect(store.feed()).toBe(true);
+    expect(store.state.personality.gluttony).toBeCloseTo(g0 + 3);
+  });
+
+  it('2.0 shop wiring: PIZZA.SLC → gluttony +3, NRG.CELL → ego +1.5', () => {
+    const store = freshStore();
+    store.load();
+    store.state.coins = 500;
+    const g0 = store.state.personality.gluttony;
+    const e0 = store.state.personality.ego;
+    expect(store.buy('pizza').ok).toBe(true);
+    expect(store.state.personality.gluttony).toBeCloseTo(g0 + 3);
+    expect(store.buy('nrgcell').ok).toBe(true);
+    expect(store.state.personality.ego).toBeCloseTo(e0 + 1.5);
+  });
+
+  it('2.0 pet wiring: petting feeds broCode at the pet10-quest rate (+0.2/pet)', () => {
+    const store = freshStore();
+    store.load();
+    const b0 = store.state.personality.broCode;
+    for (let i = 0; i < 10; i++) store.petThePet();
+    expect(store.state.personality.broCode).toBeCloseTo(b0 + 2);
+  });
+
+  it('2.0 pedometer wiring: fitness +0.8 per 100 steps crossed', () => {
+    const store = freshStore();
+    store.load();
+    const f0 = store.state.personality.fitness;
+    store.addSteps(99);
+    expect(store.state.personality.fitness).toBe(f0); // no boundary crossed
+    store.addSteps(1);
+    expect(store.state.personality.fitness).toBeCloseTo(f0 + 0.8);
+    store.addSteps(250);
+    expect(store.state.personality.fitness).toBeCloseTo(f0 + 0.8 * 3); // +2 more boundaries (350 total)
+  });
+
+  it('2.0 rig wiring: deploying the miner feeds greed +3 (retracting does not)', () => {
+    const store = freshStore();
+    store.load();
+    const g0 = store.state.personality.greed;
+    store.state.mining = false;
+    store.toggleMine();
+    expect(store.state.personality.greed).toBeCloseTo(g0 + 3);
+    store.toggleMine();
+    expect(store.state.personality.greed).toBeCloseTo(g0 + 3);
+  });
+
+  it('2.0 hack wiring: paranoia +5, ego +2, greed +3', () => {
+    const store = freshStore();
+    store.load();
+    const p0 = store.state.personality.paranoia;
+    const e0 = store.state.personality.ego;
+    const g0 = store.state.personality.greed;
+    const res = store.hackMainframe();
+    expect(res.ok).toBe(true);
+    expect(store.state.personality.paranoia).toBeCloseTo(p0 + 5);
+    expect(store.state.personality.ego).toBeCloseTo(e0 + 2);
+    expect(store.state.personality.greed).toBeCloseTo(g0 + 3);
+  });
+
+  it('2.0 quest wiring: completing the daily quest feeds broCode +2 / fitness +1', () => {
+    const store = freshStore();
+    store.load();
+    store.state.mining = true;
+    store.state.stats.energy = 50;
+    store.state.quest.mined = store.state.quest.goal - 1;
+    const b0 = store.state.personality.broCode;
+    const f0 = store.state.personality.fitness;
+    store.tick(7); // > MINE_INTERVAL_MS — one mine tick finishes the quest
+    expect(store.state.quest.rewarded).toBe(true);
+    expect(store.state.personality.broCode).toBeCloseTo(b0 + 2);
+    expect(store.state.personality.fitness).toBeCloseTo(f0 + 1);
+  });
+
   it('normalization heals pre-port saves: missing personality defaults, 3.0 v3 loads intact', () => {
     const storage = {
       _m: new Map(),
@@ -620,5 +700,46 @@ describe('2.0 gameplay memory call sites (reconciled-tree port)', () => {
     expect(store.state.quest.rewarded).toBe(true);
     store.tick(7); // more mining after completion must not re-fire
     expect(store.state.memories.filter((m) => m.text === 'Finished a real-life quest. The sim shakes.')).toHaveLength(1);
+  });
+});
+
+describe('trait core → AI persona prompts', () => {
+  it('personalityPromptLine() carries the live traits and dominant drive', () => {
+    const store = freshStore();
+    store.load();
+    store.hackMainframe(); // paranoia +5, ego +2, greed +3 → ego 24 becomes dominant
+    const line = store.personalityPromptLine();
+    expect(line).toContain('Paranoia 25%');
+    expect(line).toContain('Ego 24%');
+    expect(line).toContain('Dominant drive: paranoia'); // 25 > 24 after the hack
+    expect(line).toMatch(/color the tone/); // the "never announce it" instruction
+  });
+
+  it('the trait line tracks gameplay shifts (a meal feeds gluttony into the prompt)', () => {
+    const store = freshStore();
+    store.load();
+    const before = store.personalityPromptLine();
+    store.feed(); // gluttony +3
+    expect(store.personalityPromptLine()).toContain('Gluttony 23%');
+    expect(before).toContain('Gluttony 20%');
+  });
+
+  it('the bridge harness prompt speaks with the trait core from the v3 soul export', async () => {
+    const { identityFromEnvelope, buildSystemPrompt } = await import('../bridge/src/voice.js');
+    const store = freshStore();
+    store.load();
+    store.hackMainframe();
+    const identity = identityFromEnvelope(JSON.parse(store.exportState()));
+    expect(identity.traits).toEqual({ paranoia: 25, ego: 24, gluttony: 20, fitness: 12, broCode: 15, greed: 13 });
+    const prompt = buildSystemPrompt(identity);
+    expect(prompt).toContain('paranoia 25% · ego 24%');
+    expect(prompt).toContain('Let the dominant drive color your tone');
+  });
+
+  it('envelopes without a personality block stay trait-free (v2 soul files)', async () => {
+    const { identityFromEnvelope, buildSystemPrompt } = await import('../bridge/src/voice.js');
+    const identity = identityFromEnvelope({ kind: 'soul-file', soul: { selfDescription: 'a pilgrim' } });
+    expect(identity.traits).toBeUndefined();
+    expect(buildSystemPrompt(identity)).not.toContain('trait core');
   });
 });

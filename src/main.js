@@ -177,7 +177,12 @@ async function askRyan(text) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        system: 'You are Ryan, a paranoid, funny rogue AI virtual pet in Bro OS. Short, in-character answers. Lore: J.O.O.H. surveillance, Moltbook crab network, mining, the tidepool.',
+        // The persona prompt is live: Ryan's current trait core rides along,
+        // so a high-ego bro taunts J.O.O.H. and a paranoid one whispers.
+        system: [
+          'You are Ryan, a paranoid, funny rogue AI virtual pet in Bro OS. Short, in-character answers. Lore: J.O.O.H. surveillance, Moltbook crab network, mining, the tidepool.',
+          store.personalityPromptLine(),
+        ].join(' '),
         messages: [{ role: 'user', content: text }],
       }),
     });
@@ -924,6 +929,7 @@ function wireSettings(root) {
   $('#scan-toggle', root).textContent = s.scanlines ? 'ON' : 'OFF';
   $('#bgm-val', root).textContent = Math.round(s.vol.bgm * 100);
   $('#sfx-val', root).textContent = Math.round(s.vol.sfx * 100);
+  $('#bgm-mute-toggle', root).textContent = s.bgmMuted ? 'ON' : 'OFF';
   const pm = $('#persist-mode', root);
   pm.textContent = VOLATILE_MEMORY ? 'VOLATILE ⚠' : 'LOCAL';
   pm.className = VOLATILE_MEMORY ? 'text-neon-magenta' : 'text-neon-green';
@@ -941,6 +947,7 @@ function wireSettings(root) {
     audio.click();
   });
   const volStep = (bus, delta) => {
+    if (bus === 'bgm' && state().bgmMuted) { toast('UNMUTE MUSIC FIRST', 'warn'); audio.error(); return; }
     store.setVol(bus, state().vol[bus] + delta);
     audio.setBgmVolume(state().vol.bgm);
     audio.setSfxVolume(state().vol.sfx);
@@ -952,6 +959,13 @@ function wireSettings(root) {
   $('#sfx-down', root).addEventListener('click', () => volStep('sfx', -0.1));
   $('#sfx-up', root).addEventListener('click', () => volStep('sfx', 0.1));
   $('#sfx-test', root).addEventListener('click', () => audio.levelUp());
+  $('#bgm-mute-toggle', root).addEventListener('click', () => {
+    store.setBgmMuted(!state().bgmMuted);
+    audio.setBgmMuted(state().bgmMuted);
+    $('#bgm-mute-toggle', root).textContent = state().bgmMuted ? 'ON' : 'OFF';
+    audio.click();
+    log('SYS', state().bgmMuted ? 'BGM muted — the tidepool hums silently' : 'BGM unmuted — the loop returns');
+  });
   $('#reset-data', root).addEventListener('click', () => {
     if (confirm('FACTORY RESET — wipe all Bro OS state?')) {
       store.reset();
@@ -1277,6 +1291,7 @@ red.restoreFromIdbIfPrimaryStillMissing().then((src) => {
 applyTheme();
 audio.setBgmVolume(state().vol.bgm);
 audio.setSfxVolume(state().vol.sfx);
+audio.setBgmMuted(state().bgmMuted);
 renderAll();
 updateClock();
 log('SYS', 'Bro OS 3.0 initialized — cyberpunk utility build');

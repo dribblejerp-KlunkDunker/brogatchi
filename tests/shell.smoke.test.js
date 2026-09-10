@@ -43,6 +43,13 @@ describe('shell smoke (jsdom)', () => {
     select.dispatchEvent(new window.Event('change', { bubbles: true }));
     expect(document.documentElement.dataset.theme).toBe('area51');
 
+    // MUTE MUSIC flips the engine bus live and persists into the store
+    const muteBtn = settingsContent.querySelector('#bgm-mute-toggle');
+    expect(muteBtn.textContent).toBe('OFF');
+    muteBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+    expect(muteBtn.textContent).toBe('ON');
+    expect(window.__broStore.state.bgmMuted).toBe(true);
+
     // close everything cleanly (teardowns must not throw)
     for (const id of ['chat', 'arcade', 'shop', 'composer', 'moltbook', 'jooh', 'journal', 'settings']) {
       App.close(id);
