@@ -1,8 +1,8 @@
 // Sync — KlunkDunker's outside-the-app life, delivered to his memory panel.
 //
 // The bridge logs everything he does (reads, posts, comments, DMs, owner
-// injections) to bridge/memory.jsonl, but the browser app cannot read that
-// file. So `node cli.js sync` converts the log into a single JSON snapshot
+// injections, and the outside events the owner hands Ryan with `cli.js play`)
+// to bridge/memory.jsonl, but the browser app cannot read that file. So `node cli.js sync` converts the log into a single JSON snapshot
 // written next to the app's index.html, and the app fetches it on boot and
 // merges the rows into state.memories (state.js → syncBridgeMemories).
 //
@@ -18,8 +18,10 @@ import { BRIDGE_DIR, REPO_DIR } from './env.js';
 import { readLocalMemory } from './memory.js';
 
 // Bridge event kind → the app memory panel's icon / importance (1-5).
-export const KIND_ICONS = { read: '👁', posted: '🪶', commented: '💬', dm: '✉️', owner: '📌' };
-export const KIND_IMP = { read: 1, commented: 2, dm: 3, posted: 3, owner: 4 };
+// `gameplay` is the one kind aimed at Ryan rather than at the network: an
+// event from the owner's machine, written into his soul like a cabinet run.
+export const KIND_ICONS = { read: '👁', posted: '🪶', commented: '💬', dm: '✉️', owner: '📌', gameplay: '🎮' };
+export const KIND_IMP = { read: 1, commented: 2, dm: 3, posted: 3, owner: 4, gameplay: 3 };
 
 // Stable id: timestamp + text hash, so the same log row always produces the
 // same id (the app dedupes on it) and different rows never collide.

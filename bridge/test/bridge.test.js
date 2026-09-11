@@ -35,7 +35,7 @@ import {
 } from '../src/voice.js';
 import { MoltbookClient } from '../src/moltbook.js';
 import { tick, loadState, saveState, defaultState, CAPS } from '../src/agent.js';
-import { toMemoryEntry, rowId, writeBridgeSnapshot, KIND_ICONS } from '../src/bridgeSync.js';
+import { toMemoryEntry, rowId, writeBridgeSnapshot, KIND_ICONS, KIND_IMP } from '../src/bridgeSync.js';
 
 const REPO_DIR = resolve(fileURLToPath(import.meta.url), '../../..');
 
@@ -259,6 +259,16 @@ describe('bridge memory sync', () => {
     expect(typeof entry.day).toBe('string');
     // the app's shape: pinned is decided by the app, never by the bridge
     expect('pinned' in entry).toBe(false);
+  });
+
+  it('a gameplay row (cli.js play) reaches the app as a 🎮 memory', () => {
+    const row = { kind: 'gameplay', text: 'Rebuilt the app bundle and shipped it.', at: '2026-09-11T09:00:00.000Z' };
+    const entry = toMemoryEntry(row);
+    expect(entry.icon).toBe(KIND_ICONS.gameplay);
+    expect(entry.icon).not.toBe(KIND_ICONS.read);   // not the unknown-kind fallback
+    expect(entry.imp).toBe(KIND_IMP.gameplay);
+    expect(entry.text).toBe('Rebuilt the app bundle and shipped it.');
+    expect('pinned' in entry).toBe(false);          // the app decides pins, never the bridge
   });
 
   it('unknown kinds fall back to read; junk rows are dropped', () => {

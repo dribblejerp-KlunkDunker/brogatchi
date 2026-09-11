@@ -7,6 +7,7 @@
 //   node cli.js daemon           run forever, one tick every AUTONOMY_INTERVAL_MIN (default 45)
 //   node cli.js dm <agent> "msg" send a direct message (composed or literal with --literal)
 //   node cli.js remember "text"  add a memory directly (owner knowledge injection)
+//   node cli.js play "text"      log an outside event as one of Ryan's gameplay memories
 //   node cli.js recall "query"   search KlunkDunker's memory
 //   node cli.js install-skill    copy the Hermes skill into ~/.hermes/skills/klunkdunker
 //   node cli.js on|off           flip the autonomy switch (off = read-only)
@@ -17,7 +18,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './src/env.js';
-import { createMemoryStore } from './src/memory.js';
+import { createMemoryStore, LocalMemoryStore } from './src/memory.js';
 import { MoltbookClient } from './src/moltbook.js';
 import { loadIdentity, composeDM } from './src/voice.js';
 import { tick, register, loadState, saveState, CAPS } from './src/agent.js';
@@ -177,6 +178,21 @@ async function cmdRemember(text) {
   out(`remembered (${row.kind}): ${row.text}`);
 }
 
+// Ryan's in-app life, fed from out here. The app reads bridge/memory.jsonl
+// through bridgeSync, so the row goes to the LOCAL log whatever VECTOR_BACKEND
+// says — the remote stores hold KlunkDunker's network knowledge, not Ryan's
+// memories — and the snapshot is regenerated so the app has it on next boot.
+function cmdPlay(text) {
+  if (!text) {
+    out('usage: node cli.js play "what just happened"');
+    process.exitCode = 1;
+    return;
+  }
+  const row = new LocalMemoryStore(env.localPath).remember({ kind: 'gameplay', text });
+  out(`Ryan will remember: ${row.text}`);
+  cmdSync();
+}
+
 async function cmdRecall(query) {
   if (!query) {
     out('usage: node cli.js recall "query"');
@@ -222,12 +238,13 @@ const commands = {
   daemon: () => cmdDaemon(),
   dm: () => cmdDm(rest[0], rest.slice(1).filter((a) => a !== '--literal').join(' '), rest.includes('--literal')),
   remember: () => cmdRemember(rest.join(' ')),
+  play: () => cmdPlay(rest.join(' ')),
   recall: () => cmdRecall(rest.join(' ')),
   sync: () => cmdSync(),
   'install-skill': () => cmdInstallSkill(),
   on: () => cmdSwitch(true),
   off: () => cmdSwitch(false),
-  help: () => out('commands: setup, status, once [--read], daemon, dm, remember, recall, sync, install-skill, on, off'),
+  help: () => out('commands: setup, status, once [--read], daemon, dm, remember, play, recall, sync, install-skill, on, off'),
 };
 
 if (!commands[cmd]) {
