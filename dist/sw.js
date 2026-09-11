@@ -1,13 +1,13 @@
 /* ═══════════════════════════════════════════════════════════
    BRO_OS 3.0 // src/sw.js — OFFLINE SHELL SERVICE WORKER
    Emitted to dist/sw.js by the stamp-sw plugin in vite.config.js,
-   which replaces mtw58fou per build: the bytes change on
+   which replaces mtw8801o per build: the bytes change on
    every deploy, the browser reinstalls, and activate() prunes
    every previous shell cache. No manual version bumps, ever.
    Registered only in production builds (see src/main.js).
    ═══════════════════════════════════════════════════════════ */
 
-const CACHE = 'bro-os-3-shell-mtw58fou';
+const CACHE = 'bro-os-3-shell-mtw8801o';
 const CORE = ['./', './index.html', './manifest.json', './favicon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
