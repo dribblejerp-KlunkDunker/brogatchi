@@ -1,6 +1,6 @@
 import { GameBase, VIEW_W, VIEW_H } from './GameBase.js';
 import { drawSprite } from './pixel.js';
-import { RYAN_RUN1, RYAN_RUN2, COIN } from './sprites.js';
+import { getSprite } from './overrides.js';
 
 // LOOT SHOWER — coins are "leaking" out of the billionaire grid and Ryan is
 // the only one who can catch them before the devs patch the leak. Move with
@@ -196,7 +196,7 @@ export class LootGame extends GameBase {
       if (it.bomb) {
         drawBomb(ctx, it.x, it.y, this.time);
       } else {
-        const frame = COIN[Math.floor(this.time * 12) % 2];
+        const frame = getSprite('COIN')[Math.floor(this.time * 12) % 2];
         drawSprite(ctx, frame.r, frame.p, it.x, it.y, { scale: 2 });
       }
     }
@@ -215,7 +215,7 @@ export class LootGame extends GameBase {
     // ---- player ----
     if (this.invuln <= 0 || Math.floor(this.time * 14) % 2 === 0) {
       const moving = Math.abs(this.vx) > 24;
-      const frame = moving ? (Math.floor(this.time * 12) % 2 === 0 ? RYAN_RUN1 : RYAN_RUN2) : RYAN_RUN1;
+      const frame = getSprite(moving && Math.floor(this.time * 12) % 2 !== 0 ? 'RYAN_RUN2' : 'RYAN_RUN1');
       drawSprite(ctx, frame.r, frame.p, this.px, PLAYER_Y, { scale: 2, flip: this.dir < 0, shadow: true });
     }
 

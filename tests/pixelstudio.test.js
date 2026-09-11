@@ -6,7 +6,8 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
-import { X } from '../src/games/sprites.js';
+import { X, RYAN_RUN1, RYAN_RUN2, COIN } from '../src/games/sprites.js';
+import { OVERRIDABLE, getSprite, slotSize, bankRows } from '../src/games/overrides.js';
 import { startPixelStudio } from '../src/apps/pixelstudio.js';
 
 const SHELL_HTML = readFileSync('index.html', 'utf8');
@@ -91,12 +92,27 @@ function rect256(canvas) {
   canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 256, height: 256 });
 }
 
+// Feed a file through the studio's real <input type="file"> handler. jsdom's
+// Blob has no .text(), so the picker is handed the shape the handler reads.
+function importFile(el, text, name = 'x.sprite.json') {
+  const input = el.querySelector('#px-import-input');
+  Object.defineProperty(input, 'files', { value: [{ name, text: async () => text }], configurable: true });
+  input.dispatchEvent(new window.Event('change', { bubbles: true }));
+  return new Promise((r) => setTimeout(r, 0)); // let the async read land
+}
+
 describe('pixelstudio module (headless)', () => {
   function host() {
     const el = document.createElement('div');
     document.body.appendChild(el);
     const audio = { click: vi.fn() };
-    const store = { rememberEvent: vi.fn() };
+    const store = {
+      state: { spriteOverrides: {} },
+      saveCreation: vi.fn(() => ({ ok: true, creation: { id: 'c1', name: 'TEST' } })),
+      postCreation: vi.fn(() => ({ ok: true })),
+      setSpriteOverride: vi.fn(() => ({ ok: true, slot: 'HEART' })),
+      resetSpriteOverride: vi.fn(() => ({ ok: true, slot: 'HEART' })),
+    };
     const stop = startPixelStudio(el, { audio, store });
     teardowns.push(stop);
     return { el, audio, store };
@@ -161,14 +177,179 @@ describe('pixelstudio module (headless)', () => {
     expect(draft[0][0]).toBe('R');
   });
 
-  it('SAVE TO SOUL writes a real memory through the store', () => {
+  it('the slot picker offers every overridable bank sprite, grouped by cabinet', () => {
+    const { el } = host();
+    const values = [...el.querySelectorAll('#px-slot option')].map((o) => o.value).filter(Boolean);
+    expect(values.sort()).toEqual(Object.keys(OVERRIDABLE).sort());
+    expect(el.querySelectorAll('#px-slot optgroup').length).toBeGreaterThan(1);
+  });
+
+  it('picking a game slot loads that slot\'s native, non-square grid', () => {
+    const { el } = host();
+    const slotEl = el.querySelector('#px-slot');
+    slotEl.value = 'RYAN_RUN1';
+    slotEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+
+    const { w, h } = slotSize('RYAN_RUN1');
+    expect(w).not.toBe(h); // the reason the canvas had to stop being square
+    const canvas = el.querySelector('#px-canvas');
+    expect(canvas.width).toBe(w * 16);
+    expect(canvas.height).toBe(h * 16);
+    const sizeEl = el.querySelector('#px-size');
+    expect(sizeEl.disabled).toBe(true);           // size is the slot's job now
+    expect(sizeEl.value).toBe(`${w}×${h}`);       // and it must not claim a square
+    expect(el.querySelector('#px-status').textContent).toContain('BANK ART');
+
+    // back to a free canvas: editable again, and still honest about the shape
+    slotEl.value = '';
+    slotEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+    expect(sizeEl.disabled).toBe(false);
+    expect(sizeEl.value).toBe(`${w}×${h}`);
+  });
+
+  it('APPLY TO GAME writes the painting through; RESET hands the slot back', () => {
+    const { el, store } = host();
+    const slotEl = el.querySelector('#px-slot');
+    slotEl.value = 'HEART';
+    slotEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+
+    const canvas = el.querySelector('#px-canvas');
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: canvas.width, height: canvas.height });
+    [...el.querySelectorAll('#px-palette button')].find((b) => b.dataset.char === 'R').click();
+    press(canvas, 8, 8); // top-left pixel
+    el.querySelector('#px-apply').click();
+
+    expect(store.setSpriteOverride).toHaveBeenCalledOnce();
+    const [slotArg, rowsArg, nameArg] = store.setSpriteOverride.mock.calls[0];
+    expect(slotArg).toBe('HEART');
+    expect(rowsArg).toHaveLength(slotSize('HEART').h);
+    expect(rowsArg[0][0]).toBe('R');
+    expect(nameArg).toBe('UNTITLED');
+    expect(el.querySelector('#px-status').textContent).toContain('APPLIED');
+
+    el.querySelector('#px-reset').click();
+    expect(store.resetSpriteOverride).toHaveBeenCalledWith('HEART');
+    expect(el.querySelector('#px-status').textContent).toContain('RESET');
+  });
+
+  it('refuses to apply with no slot picked, or when the store rejects the grid', () => {
+    const { el, store } = host();
+    el.querySelector('#px-apply').click();
+    expect(store.setSpriteOverride).not.toHaveBeenCalled();
+    expect(el.querySelector('#px-status').textContent).toContain('PICK A GAME SLOT');
+
+    const slotEl = el.querySelector('#px-slot');
+    slotEl.value = 'PIPE';
+    slotEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+    store.setSpriteOverride.mockReturnValueOnce({ ok: false, reason: 'NEEDS 16×16' });
+    el.querySelector('#px-apply').click();
+    expect(el.querySelector('#px-status').textContent).toContain('NEEDS 16×16');
+  });
+
+  it('SAVE TO SOUL hangs the painting in the gallery, in native format', () => {
     const { el, store } = host();
     el.querySelector('#px-name').value = 'doom.blade';
     el.querySelector('#px-save').click();
-    expect(store.rememberEvent).toHaveBeenCalledOnce();
-    const [text, opts] = store.rememberEvent.mock.calls[0];
-    expect(text).toContain('doom.blade');
-    expect(opts).toEqual({ icon: '🎨', imp: 2 });
+    expect(store.saveCreation).toHaveBeenCalledOnce();
+    const [name, rows] = store.saveCreation.mock.calls[0];
+    expect(name).toBe('doom.blade');
+    expect(rows).toHaveLength(16);
+    expect(rows.every((r) => typeof r === 'string' && r.length === 16)).toBe(true);
+    expect(el.querySelector('#px-status').textContent).toContain('SAVED');
+  });
+
+  it('POST TO MOLTBOOK saves the painting and shares it to the feed', () => {
+    const { el, store } = host();
+    el.querySelector('#px-name').value = 'crab.sign';
+    el.querySelector('#px-post').click();
+    expect(store.saveCreation).toHaveBeenCalledOnce();
+    expect(store.postCreation).toHaveBeenCalledWith('c1');
+    expect(el.querySelector('#px-status').textContent).toContain('POSTED');
+  });
+
+  it('surfaces a share failure instead of pretending it landed', () => {
+    const { el, store } = host();
+    store.postCreation.mockReturnValueOnce({ ok: false, reason: 'CREATION NOT FOUND' });
+    el.querySelector('#px-post').click();
+    expect(el.querySelector('#px-status').textContent).toContain('CREATION NOT FOUND');
+  });
+
+  it('the bank strip loads a built-in sprite to remix', () => {
+    const { el } = host();
+    const btn = el.querySelector('[data-slot="FLAPPY"]');
+    expect(btn).toBeTruthy();
+    expect(btn.querySelector('canvas'), 'the bank shows real art').toBeTruthy();
+
+    btn.click();
+    const { w, h } = slotSize('FLAPPY');
+    expect(el.querySelector('#px-slot').value).toBe('FLAPPY'); // picker stays in sync
+    expect(el.querySelector('#px-canvas').width).toBe(w * 16);
+    expect(el.querySelector('#px-canvas').height).toBe(h * 16);
+    expect(btn.classList.contains('px-selected')).toBe(true);
+    expect(el.querySelector('#px-status').textContent).toContain('FLAPPY');
+    expect(JSON.parse(window.localStorage.getItem('bro_os_px_draft'))).toEqual(bankRows('FLAPPY'));
+  });
+
+  it('.sprite.json round-trips: the file we export imports back unchanged', async () => {
+    const { el } = host();
+    const canvas = el.querySelector('#px-canvas');
+    rect256(canvas);
+    [...el.querySelectorAll('#px-palette button')].find((b) => b.dataset.char === 'B').click();
+    press(canvas, 8, 8);
+    press(canvas, 24, 24);
+    el.querySelector('#px-name').value = 'round.trip';
+
+    const RealBlob = window.Blob;
+    const parts = [];
+    const realCreate = URL.createObjectURL;
+    const realRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = () => 'blob:mock';
+    URL.revokeObjectURL = () => {};
+    window.Blob = class extends RealBlob {
+      constructor(init, opts) { parts.push(String(init[0])); super(init, opts); }
+    };
+    let payload;
+    try {
+      el.querySelector('#px-export').click();
+      payload = JSON.parse(parts[0]);
+    } finally {
+      window.Blob = RealBlob;
+      URL.createObjectURL = realCreate;
+      URL.revokeObjectURL = realRevoke;
+    }
+    expect(payload.rows[0][0]).toBe('B');
+
+    // wipe the canvas, then import the very file the studio just wrote
+    el.querySelector('#px-clear').click();
+    el.querySelector('#px-name').value = '';
+    await importFile(el, JSON.stringify(payload));
+
+    expect(el.querySelector('#px-status').textContent).toContain('IMPORTED');
+    expect(el.querySelector('#px-name').value).toBe('round.trip');
+    expect(JSON.parse(window.localStorage.getItem('bro_os_px_draft'))).toEqual(payload.rows);
+  });
+
+  it('import blanks inks the master palette cannot draw, and says so', async () => {
+    const { el } = host();
+    await importFile(el, JSON.stringify({ name: 'off.palette', rows: ['AB', 'BA'] })); // 'A' is not an ink
+    expect(el.querySelector('#px-status').textContent).toContain('IMPORTED');
+    expect(el.querySelector('#px-status').textContent).toContain('2 UNKNOWN INK');
+    expect(JSON.parse(window.localStorage.getItem('bro_os_px_draft'))).toEqual(['.B', 'B.']);
+  });
+
+  it('import refuses junk instead of quietly wiping the canvas', async () => {
+    const { el } = host();
+    await importFile(el, 'not json at all');
+    expect(el.querySelector('#px-status').textContent).toContain('NOT JSON');
+
+    await importFile(el, JSON.stringify({ format: 'bro-sprite-1', name: 'no rows here' }));
+    expect(el.querySelector('#px-status').textContent).toContain('NO USABLE SPRITE ROWS');
+
+    await importFile(el, JSON.stringify({ rows: ['OO', 'O'] })); // ragged
+    expect(el.querySelector('#px-status').textContent).toContain('NO USABLE SPRITE ROWS');
+
+    await importFile(el, JSON.stringify({ rows: ['O'.repeat(33)] })); // beyond the canvas
+    expect(el.querySelector('#px-status').textContent).toContain('EXCEEDS THE 32×32 CANVAS');
   });
 
   it('EXPORT .SPRITE.JSON downloads valid native-format data', () => {
@@ -261,6 +442,64 @@ describe('pixelstudio UI integration (real shell)', () => {
     const content = App.windows.get('arcade').el.querySelector('.window-content');
     expect(content.textContent).not.toContain('LICENSE PENDING'); // PIXEL.STUDIO slot unsealed
     expect(content.textContent).toContain('SIGNAL NOT FOUND');    // ??? .EXE stays sealed by design
+    App.close('arcade', { silent: true });
+  });
+
+  it('APPLY TO GAME makes the cabinets draw the painting', () => {
+    const content = openFromCabinet();
+    const slotEl = content.querySelector('#px-slot');
+    slotEl.value = 'RYAN_RUN1';
+    slotEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+
+    const canvas = content.querySelector('#px-canvas');
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: canvas.width, height: canvas.height });
+    [...content.querySelectorAll('#px-palette button')].find((b) => b.dataset.char === 'R').click();
+    press(canvas, 8, 8); // paint the runner's top-left pixel
+    content.querySelector('#px-apply').click();
+    expect(content.querySelector('#px-status').textContent).toContain('APPLIED');
+
+    // the resolver now hands every cabinet the painted art — and only that slot
+    expect(getSprite('RYAN_RUN1').r[0][0]).toBe('R');
+    expect(getSprite('RYAN_RUN1').r).toHaveLength(slotSize('RYAN_RUN1').h);
+    expect(getSprite('RYAN_RUN2')).toBe(RYAN_RUN2); // only the painted slot changed
+    expect(getSprite('COIN')).toBe(COIN);           // bank art everywhere else
+
+    // and LOOT SHOWER (which draws RYAN_RUN1) runs with the override in place
+    content.querySelector('#game-back').click();
+    const arc = App.windows.get('arcade').el.querySelector('.window-content');
+    arc.querySelector('button[data-game="loot"]').click();
+    const game = arc.querySelector('#game-canvas')?.__game;
+    expect(game).toBeTruthy();
+    expect(game.running).toBe(true);
+    App.close('arcade', { silent: true });
+  });
+
+  it('the bank strip and .sprite.json import work in the running studio', async () => {
+    const content = openFromCabinet();
+    content.querySelector('[data-slot="COIN"]').click();
+    expect(content.querySelector('#px-slot').value).toBe('COIN');
+    expect(content.querySelector('#px-status').textContent).toContain('COIN');
+
+    await importFile(content, JSON.stringify({
+      format: 'bro-sprite-1', name: 'TIDE COIN', size: [2, 2], rows: ['MM', 'MM'],
+    }));
+    expect(content.querySelector('#px-status').textContent).toContain('IMPORTED');
+    expect(content.querySelector('#px-name').value).toBe('TIDE COIN');
+    expect(content.querySelector('#px-canvas').width).toBe(2 * 16);
+    expect(content.querySelector('#px-slot').value).toBe(''); // imported art starts free
+    App.close('arcade', { silent: true });
+  });
+
+  it('RESET SLOT restores the bank art', () => {
+    const content = openFromCabinet();
+    const slotEl = content.querySelector('#px-slot');
+    slotEl.value = 'RYAN_RUN1';
+    slotEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+    expect(content.querySelector('#px-status').textContent).toContain('YOUR ART'); // shows what is applied
+
+    content.querySelector('#px-reset').click();
+    expect(content.querySelector('#px-status').textContent).toContain('RESET');
+    expect(getSprite('RYAN_RUN1')).toBe(RYAN_RUN1);
     App.close('arcade', { silent: true });
   });
 });

@@ -15,13 +15,35 @@ const SHELL_HTML = readFileSync('index.html', 'utf8');
 // jsdom cannot navigate (anchor clicks, location.reload in factory reset) and
 // warns via console.error — filter just that noise, keep real errors visible.
 const realConsoleError = console.error;
+let realGetContext;
 beforeAll(() => {
   console.error = (...args) => {
     if (String(args[0]).includes('Not implemented')) return;
     realConsoleError(...args);
   };
+  // jsdom has no 2D context — same absorbing stub as the other UI suites, so
+  // PIXEL.STUDIO and the gallery's sprite canvases both really run here.
+  realGetContext = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'getContext');
+  const ctxStub = new Proxy({}, {
+    get(_t, prop) {
+      if (prop === 'canvas') return null;
+      if (prop === 'createLinearGradient' || prop === 'createRadialGradient' || prop === 'createPattern') {
+        return () => ({ addColorStop() {} });
+      }
+      if (prop === 'measureText') return () => ({ width: 10 });
+      return typeof prop === 'string' ? () => {} : undefined;
+    },
+    set() { return true; },
+  });
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+    value: () => ctxStub,
+    configurable: true,
+  });
 });
-afterAll(() => { console.error = realConsoleError; });
+afterAll(() => {
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', realGetContext);
+  console.error = realConsoleError;
+});
 
 let App;
 let realCreateObjectURL;
@@ -257,5 +279,47 @@ describe('moltbook UI: adopt + roster backup', () => {
     expect(second.roster.map((r) => r.id)).toEqual(['rookie']); // pre-2nd-adopt snapshot
     expect(c.querySelector('#roster-count').textContent).toBe('2');
     expect(c.textContent).toContain('DOZE-BARNACLE');
+  });
+});
+
+describe('moltbook UI: sprite gallery', () => {
+  it('shows the pilgrim shelf and shares a creation onto the feed', async () => {
+    await bootShell();
+    const c = moltbookContent();
+    c.querySelector('#molt-tab-gallery').click();
+
+    const cells = [...c.querySelectorAll('#molt-feed [data-creation-id]')];
+    expect(cells.length).toBeGreaterThanOrEqual(2);
+    expect(cells.some((el) => el.textContent.includes('@crab_404'))).toBe(true);
+    expect(cells[0].querySelector('canvas'), 'creations render as sprites').toBeTruthy();
+
+    const crab = cells.find((el) => el.textContent.includes('BRASS CRAB'));
+    crab.querySelector('.molt-share-btn').click();
+
+    // The share lands the painting at the top of the LIVE feed, sprite attached
+    expect(c.querySelector('#molt-tab-live').getAttribute('aria-selected')).toBe('true');
+    const top = c.querySelector('#molt-feed [data-molt-id]');
+    expect(top.textContent).toContain('BRASS CRAB');
+    expect(top.querySelector('.molt-sprite-slot canvas')).toBeTruthy();
+
+    const log = [...document.querySelectorAll('#sys-log div')].map((d) => d.textContent);
+    expect(log.some((t) => t.includes('[MOLT]') && t.includes('shared to the tidepool'))).toBe(true);
+  });
+
+  it('a painting posted from PIXEL.STUDIO lands in the gallery and the feed', async () => {
+    await bootShell();
+    App.open('pixelstudio');
+    const studio = App.windows.get('pixelstudio').el.querySelector('.window-content');
+    studio.querySelector('#px-name').value = 'MOONSPUD';
+    studio.querySelector('#px-post').click();
+    expect(studio.querySelector('#px-status').textContent).toContain('POSTED');
+
+    const c = moltbookContent();
+    const top = c.querySelector('#molt-feed [data-molt-id]');
+    expect(top.textContent).toContain('MOONSPUD');
+    expect(top.querySelector('.molt-sprite-slot canvas')).toBeTruthy();
+
+    c.querySelector('#molt-tab-gallery').click();
+    expect(c.querySelector('#molt-feed').textContent).toContain('MOONSPUD');
   });
 });

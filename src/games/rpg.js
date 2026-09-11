@@ -1,21 +1,23 @@
 import { GameBase, VIEW_W, VIEW_H } from './GameBase.js';
 import { drawSprite } from './pixel.js';
-import { RYAN_RPG, ZEKE_RPG, CHAD_RPG, DRONE_RPG, AGENT_RPG } from './sprites.js';
+import { getSprite } from './overrides.js';
 
 // Final Bro-tasy — PLAYER-controlled tactical RPG. No more screensaver:
 // select a hero (tap portrait), and when their ATB gauge fills, command
 // ATTACK / FOCUS / GUARD / ULTIMATE from the bottom bar. Tap an enemy to
 // re-target them. The Agent shifts to phase 2 at half HP.
 
+// `sprite` is the bank SLOT name, resolved at draw time so a painted
+// PIXEL.STUDIO override shows up mid-run.
 const HERO_DEF = [
-  { name: 'RYAN', role: 'DPS',  sprite: RYAN_RPG, maxHp: 140, atk: 26, def: 5, spd: 2.0, x: 96, y: 396 },
-  { name: 'CHAD', role: 'TANK', sprite: CHAD_RPG, maxHp: 230, atk: 16, def: 14, spd: 1.45, x: 152, y: 422 },
-  { name: 'ZEKE', role: 'HACK', sprite: ZEKE_RPG, maxHp: 90, atk: 44, def: 3, spd: 1.95, x: 44, y: 430 },
+  { name: 'RYAN', role: 'DPS',  sprite: 'RYAN_RPG', maxHp: 140, atk: 26, def: 5, spd: 2.0, x: 96, y: 396 },
+  { name: 'CHAD', role: 'TANK', sprite: 'CHAD_RPG', maxHp: 230, atk: 16, def: 14, spd: 1.45, x: 152, y: 422 },
+  { name: 'ZEKE', role: 'HACK', sprite: 'ZEKE_RPG', maxHp: 90, atk: 44, def: 3, spd: 1.95, x: 44, y: 430 },
 ];
 
 const ENEMY_DEF = [
-  { name: 'FED DRONE', sprite: DRONE_RPG, maxHp: 160, atk: 18, def: 4, spd: 2.5, x: 300, y: 356 },
-  { name: 'AGENT 01', sprite: AGENT_RPG, maxHp: 300, atk: 24, def: 9, spd: 2.8, x: 246, y: 410 },
+  { name: 'FED DRONE', sprite: 'DRONE_RPG', maxHp: 160, atk: 18, def: 4, spd: 2.5, x: 300, y: 356 },
+  { name: 'AGENT 01', sprite: 'AGENT_RPG', maxHp: 300, atk: 24, def: 9, spd: 2.8, x: 246, y: 410 },
 ];
 
 const STORY = [
@@ -339,9 +341,10 @@ export class RPGGame extends GameBase {
 
     // --- combat ---
     for (const e of [...this.heroes, ...this.enemies]) {
+      const art = getSprite(e.sprite);
       if (e.dead) {
         ctx.globalAlpha = 0.15;
-        drawSprite(ctx, e.sprite.r, e.sprite.p, e.x, e.y, { scale: 1.6, shadow: true });
+        drawSprite(ctx, art.r, art.p, e.x, e.y, { scale: 1.6, shadow: true });
         ctx.globalAlpha = 1;
         continue;
       }
@@ -349,11 +352,11 @@ export class RPGGame extends GameBase {
         ctx.save();
         ctx.globalAlpha = Math.min(0.9, e.flash);
         ctx.globalCompositeOperation = 'lighter';
-        drawSprite(ctx, e.sprite.r, e.sprite.p, e.x, e.y, { scale: 1.7, shadow: true });
+        drawSprite(ctx, art.r, art.p, e.x, e.y, { scale: 1.7, shadow: true });
         ctx.restore();
       }
       const bob = e.isHero ? Math.sin((this.time + e.x * 0.03) * 2.6) * 1.5 : 0;
-      drawSprite(ctx, e.sprite.r, e.sprite.p, e.x, e.y + bob, { scale: 1.7, shadow: true });
+      drawSprite(ctx, art.r, art.p, e.x, e.y + bob, { scale: 1.7, shadow: true });
       e.flash = Math.max(0, e.flash - 0.05);
 
       // hp bar
@@ -390,7 +393,10 @@ export class RPGGame extends GameBase {
       ctx.strokeStyle = sel ? '#fde047' : '#334155';
       ctx.lineWidth = sel ? 3 : 2;
       ctx.strokeRect(4, by - 2, 44, 40);
-      if (!h.dead) drawSprite(ctx, h.sprite.r, h.sprite.p, 8, by + 4, { scale: 1.7, shadow: true });
+      if (!h.dead) {
+        const art = getSprite(h.sprite);
+        drawSprite(ctx, art.r, art.p, 8, by + 4, { scale: 1.7, shadow: true });
+      }
       // name/hp
       ctx.fillStyle = sel ? '#fde047' : '#e2e8f0';
       ctx.font = '9px "Press Start 2P"';

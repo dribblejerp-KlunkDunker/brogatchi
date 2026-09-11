@@ -14,7 +14,10 @@ import { startSnake } from './apps/snake.js';
 import { startSynth } from './apps/synth.js';
 import { startPixelStudio } from './apps/pixelstudio.js';
 import { hostGame, GAMES } from './arcadeCore.js';
+import { initSpriteOverrides } from './games/overrides.js';
 import { createGameMusic } from './gameMusic.js';
+import { drawSprite } from './games/pixel.js';
+import { X as SPRITE_PALETTE } from './games/sprites.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 // Optional lookup: for nodes that may legitimately be absent (renderers whose
@@ -59,6 +62,8 @@ const recoveredFrom = red.restorePrimary();
 
 const store = createStore({ storage: appStorage });
 const state = () => store.state;
+// Games resolve sprite art through the override resolver; hand it the save.
+initSpriteOverrides(store);
 
 /* ═══════════════════ SYSTEM LOG & TOASTS ═══════════════════ */
 
@@ -270,8 +275,9 @@ function wireArcade(root) {
   let activeStop = null;
   let activeKey = null;
   // One shared arcade sequencer: per-game BGM loops with milestone tier
-  // variants, driven by the same chiptune engine as the UI SFX.
-  const gameMusic = createGameMusic(audio);
+  // variants, driven by the same chiptune engine as the UI SFX. A remix
+  // saved in CHIPTUNE.SYNTH replaces that loop when the cabinet plays.
+  const gameMusic = createGameMusic(audio, { remixFor: (id, tier) => store.remixFor(id, tier) });
   window.__broGameMusic = gameMusic; // debug/test handle: the live sequencer
 
   const GAME_NAMES = { snake: 'SNAKE.EXE', ...Object.fromEntries(Object.entries(GAMES).map(([k, g]) => [k, g.name])) };
@@ -408,12 +414,27 @@ function wireShop(root) {
   renderItems();
 }
 
+// Painted creations are char rows keyed to the shared master palette;
+// drawSprite() is exactly how the games render them, so a gallery piece
+// looks on the tidepool precisely as it looks in a cabinet.
+function spriteCanvas(rows, scale) {
+  const canvas = document.createElement('canvas');
+  canvas.width = rows[0].length * scale;
+  canvas.height = rows.length * scale;
+  canvas.className = 'border border-border bg-void max-w-full';
+  canvas.style.imageRendering = 'pixelated';
+  const ctx = typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
+  if (ctx) drawSprite(ctx, rows, SPRITE_PALETTE, 0, 0, { scale });
+  return canvas;
+}
+
 function wireMoltbook(root) {
   const feed = $('#molt-feed', root);
   const composer = $('#molt-composer', root);
   const tabLive = $('#molt-tab-live', root);
   const tabTide = $('#molt-tab-tide', root);
-  let view = 'live'; // 'live' chronological · 'tide' riptide-ranked
+  const tabGallery = $('#molt-tab-gallery', root);
+  let view = 'live'; // 'live' chronological · 'tide' riptide-ranked · 'gallery' painted creations
 
   function eyeLabel(v) { return v >= 70 ? 'OPEN' : v >= 30 ? 'FLICKERING' : 'CLOSED'; }
 
@@ -444,7 +465,8 @@ function wireMoltbook(root) {
         </div>
         <span class="text-text-muted text-[9px] shrink-0">${timeAgo(p.time)}</span>
       </div>
-      <p class="text-text-main">${esc(p.text)}</p>`;
+      <p class="text-text-main">${esc(p.text)}</p>
+      ${Array.isArray(p.sprite) ? '<div class="molt-sprite-slot mt-1.5"></div>' : ''}`;
   }
 
   function replyHTML(r) {
@@ -489,13 +511,7 @@ function wireMoltbook(root) {
     });
   }
 
-  function render() {
-    const s = state();
-    $('#molt-eye-xp', root).textContent = Math.floor(s.molt.eye);
-    $('#molt-eye-label', root).textContent = eyeLabel(s.molt.eye);
-    $('#molt-eye-bar', root).style.width = `${s.molt.eye}%`;
-
-    feed.innerHTML = '';
+  function renderPosts(s) {
     const posts = view === 'tide' ? store.trendingMolt() : s.molt.posts;
     posts.forEach((p) => {
       const d = document.createElement('div');
@@ -511,9 +527,60 @@ function wireMoltbook(root) {
         </div>
         ${nReplies ? `<div class="molt-replies mt-1.5 space-y-1">${p.replies.map(replyHTML).join('')}</div>` : ''}
         ${replyComposerHTML(p.id)}`;
+      const slot = d.querySelector('.molt-sprite-slot');
+      if (slot) slot.appendChild(spriteCanvas(p.sprite, 4));
       wirePost(d, p);
       feed.appendChild(d);
     });
+  }
+
+  // The gallery: every painted creation on the shelf, pilgrim or player.
+  // SHARE puts one on the feed, where the tide answers it like any post.
+  function renderGallery(s) {
+    const shelf = document.createElement('div');
+    shelf.className = 'grid grid-cols-2 gap-2';
+    if (!s.creations.length) {
+      const empty = document.createElement('p');
+      empty.className = 'col-span-2 font-mono text-[9px] text-text-muted';
+      empty.textContent = 'THE SHELF IS EMPTY — paint something in PIXEL.STUDIO.';
+      shelf.appendChild(empty);
+    }
+    s.creations.forEach((c) => {
+      const cell = document.createElement('div');
+      cell.className = 'border border-border bg-void/30 p-2';
+      cell.dataset.creationId = c.id;
+      cell.innerHTML = `
+        <div class="molt-sprite-slot mb-1.5 flex justify-center"></div>
+        <div class="font-mono text-[9px] text-text-main truncate">${esc(c.name)}</div>
+        <div class="flex items-center justify-between gap-1 mt-0.5">
+          <span class="font-mono text-[8px] text-neon-amber truncate">${esc(c.author)}</span>
+          <button class="molt-share-btn btn-cyber text-[8px] shrink-0" aria-label="Share ${esc(c.name)} to the feed">SHARE</button>
+        </div>`;
+      cell.querySelector('.molt-sprite-slot').appendChild(spriteCanvas(c.rows, 5));
+      cell.querySelector('.molt-share-btn').addEventListener('click', () => {
+        const res = store.postCreation(c.id);
+        if (!res.ok) { audio.error(); toast(`SHARE DENIED — ${res.reason}`, 'err'); return; }
+        audio.click();
+        log('MOLT', `creation "${c.name}" shared to the tidepool`);
+        view = 'live'; // the feed is where the tide answers
+        applyView();
+        render();
+        renderAll();
+        tideResponds(state().molt.posts[0]);
+      });
+      shelf.appendChild(cell);
+    });
+    feed.appendChild(shelf);
+  }
+
+  function render() {
+    const s = state();
+    $('#molt-eye-xp', root).textContent = Math.floor(s.molt.eye);
+    $('#molt-eye-label', root).textContent = eyeLabel(s.molt.eye);
+    $('#molt-eye-bar', root).style.width = `${s.molt.eye}%`;
+
+    feed.innerHTML = '';
+    if (view === 'gallery') renderGallery(s); else renderPosts(s);
 
     // pilgrim agent-cards with the ADOPT auto-backup guard
     $('#roster-count', root).textContent = String(s.roster.length);
@@ -569,16 +636,21 @@ function wireMoltbook(root) {
   });
   $('#molt-cancel', root).addEventListener('click', () => composer.classList.add('hidden'));
 
+  function applyView() {
+    [['live', tabLive], ['tide', tabTide], ['gallery', tabGallery]].forEach(([key, tab]) => {
+      tab.setAttribute('aria-selected', String(view === key));
+      tab.classList.toggle('active', view === key);
+    });
+  }
   function setView(v) {
     view = v;
-    tabLive.setAttribute('aria-selected', String(v === 'live'));
-    tabTide.setAttribute('aria-selected', String(v === 'tide'));
-    [tabLive, tabTide].forEach((t) => t.classList.toggle('active', v === (t === tabLive ? 'live' : 'tide')));
+    applyView();
     audio.click();
     render();
   }
   tabLive.addEventListener('click', () => setView('live'));
   tabTide.addEventListener('click', () => setView('tide'));
+  tabGallery.addEventListener('click', () => setView('gallery'));
 
   $('#molt-post', root).addEventListener('click', () => {
     const text = $('#molt-input', root).value;
@@ -993,10 +1065,8 @@ const App = {
     chat: { title: 'CHAT.SYS // RYAN AI', templateId: 'tpl-chat', wire: wireChat },
     arcade: { title: 'ARCADE.SYS', templateId: 'tpl-arcade', wire: wireArcade },
     shop: { title: 'MARKET.TERMINAL', templateId: 'tpl-shop', wire: wireShop },
-    composer: { title: 'CHIPTUNE.SYNTH', templateId: 'tpl-composer', wire: (root) => {
-      const stop = startSynth($('#synth-root', root), { audio, getBpmState: () => 120 });
-      return stop;
-    } },
+    composer: { title: 'CHIPTUNE.SYNTH', templateId: 'tpl-composer', wire: (root) =>
+      startSynth($('#synth-root', root), { audio, store }) },
     moltbook: { title: 'MOLTBOOK // TIDEPOOL', templateId: 'tpl-moltbook', wire: wireMoltbook },
     pixelstudio: { title: 'PIXEL.STUDIO', templateId: 'tpl-pixelstudio', wire: (root) =>
       startPixelStudio($('#px-root', root), { audio, store }) },

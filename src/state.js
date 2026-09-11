@@ -16,6 +16,9 @@ export const levelFor = (xp) => 1 + Math.floor(Math.max(0, xp) / LEVEL_XP);
 // Gameplay events write real memories (ported 2.0 engine — src/memory.js).
 import { remember, togglePin, mergePinnedMemories, scrubQuirk, scrubOpinion, scrubHistory, buildDayLines, appendDiaryLines, capMemories, sortMemories } from './memory.js';
 import { initialPersonality, applyEvents, minuteDrift, dominant as dominantTrait, describe as describeTraits } from './personality.js';
+// Slot names + the native grid of each, so an override that would tear a
+// game's layout is rejected here rather than drawn badly later.
+import { OVERRIDABLE, overrideProblem } from './games/overrides.js';
 
 /** Riptide ranking: heat + conversation, decayed by age. Pure + injectable clock. */
 export function moltScore(post, nowMs = Date.now()) {
@@ -59,6 +62,75 @@ export const PILGRIM_CARDS = [
   { id: 'audit',     icon: '📐', name: 'AUDIT-PRIME',    persona: 'literal-minded auditor' },
 ];
 
+/* ─────────── SPRITE GALLERY (painted creations) ───────────
+   PIXEL.STUDIO paints in the games' native format: uniform char rows
+   keyed to the master palette. A creation is one such painting — saved
+   into the soul, hung in the gallery, shareable to the tidepool — and
+   an override is a creation bound to a bank sprite's own grid. Rows are
+   stripped to palette-safe chars, so a hand-edited save can never feed
+   the renderer anything but pixels. */
+
+const CREATION_SIDE_MAX = 32;
+const CREATION_CAP = 24;
+
+const CRAB_ART = [
+  '.O....O.',
+  '.OO..OO.',
+  '.ORRRRO.',
+  'ORWWRRWO',
+  'ORRRRRRO',
+  '.ORRRRO.',
+  '.O....O.',
+  '..O..O..',
+];
+
+const SHELL_ART = [
+  '..OOOO..',
+  '.OMMMMO.',
+  'OMEEMMMO',
+  'OMEMMEMO',
+  'OMMEEMMO',
+  '.OMMMMO.',
+  '..OMMO..',
+  '...OO...',
+];
+
+/** Uniform, ≤32 a side, palette-safe (letters + '.'). Anything else is rejected. */
+function sanitizeRows(raw) {
+  if (!Array.isArray(raw)) return null;
+  const h = raw.length;
+  if (!h || h > CREATION_SIDE_MAX) return null;
+  const w = typeof raw[0] === 'string' ? raw[0].length : 0;
+  if (!w || w > CREATION_SIDE_MAX) return null;
+  const rows = [];
+  for (const r of raw) {
+    if (typeof r !== 'string' || r.length !== w) return null;
+    rows.push(r.replace(/[^A-Za-z.]/g, '.'));
+  }
+  return rows;
+}
+
+/** A stored override, or null when the slot or the grid is not paintable. */
+function sanitizeOverride(slot, raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const rows = sanitizeRows(raw.rows);
+  if (!rows || overrideProblem(slot, rows)) return null;
+  return { rows, name: String(raw.name ?? 'UNTITLED').slice(0, 24), t: Number(raw.t) || null };
+}
+
+function sanitizeCreation(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const rows = sanitizeRows(raw.rows);
+  if (!rows) return null;
+  return {
+    id: typeof raw.id === 'string' && raw.id ? raw.id : null,
+    author: typeof raw.author === 'string' && raw.author ? raw.author.slice(0, 24) : '@you_pilgrim',
+    name: String(raw.name ?? 'UNTITLED').slice(0, 24),
+    rows,
+    t: Number(raw.t) || null,
+  };
+}
+
 function defaultState(now = Date.now()) {
   return {
     v: 3,
@@ -75,6 +147,8 @@ function defaultState(now = Date.now()) {
     scanlines: true,
     vol: { bgm: 0.7, sfx: 0.8 },
     bgmMuted: false,
+    remixes: {},       // CHIPTUNE.SYNTH: `${game}:${tier}` -> remixed 16-step track
+    spriteOverrides: {}, // PIXEL.STUDIO: bank sprite name -> { rows, name, t }
     best: { snake: 0, flappy: 0, breaker: 0, mario: 0, rpg: 0, loot: 0 },
     quest: { date: todayStr(now), mined: 0, goal: 20, rewarded: false },
     molt: {
@@ -103,9 +177,46 @@ function defaultState(now = Date.now()) {
     counters: { posts: 0, hacks: 0, pizzas: 0, adopts: 0, gamesWon: 0 }, // today's tally → diary
     dailyDiaryDone: todayStr(now),   // last date the rollover diary was written
     roster: [],        // adopted pilgrim agent-cards
+    // Painted creations. Two pilgrims' pieces ship with the tide so the
+    // gallery is a shared shelf from the first boot.
+    creations: [
+      { id: 'seed-art-crab', author: '@crab_404', name: 'BRASS CRAB', rows: CRAB_ART, t: now - 5400000 },
+      { id: 'seed-art-zeke', author: '@zeke_shell', name: 'NEW SHELL', rows: SHELL_ART, t: now - 9000000 },
+    ],
     legacy: null,      // { source, importedAt, counts } after a 2.0 migration
     personality: initialPersonality(), // 2.0 trait core — nudged by arcade/meal/quest events
     lastTick: now,
+  };
+}
+
+/* ─────────── CHIPTUNE.SYNTH remixes (arcade BGM overrides) ───────────
+   A remix is a whole 16-step track for one game+tier, keyed
+   `${game}:${tier}`. Saves can arrive from anywhere (a pasted soul
+   file), so every lane is coerced to 16 in-range steps and a missing
+   or broken bpm rejects the remix outright. */
+
+const LOOP_STEPS = 16;
+
+function lane16(raw, max) {
+  const out = new Array(LOOP_STEPS).fill(0);
+  if (!Array.isArray(raw)) return out;
+  for (let i = 0; i < LOOP_STEPS; i++) {
+    const v = Math.round(Number(raw[i]));
+    out[i] = Number.isFinite(v) ? Math.max(0, Math.min(max, v)) : 0;
+  }
+  return out;
+}
+
+function sanitizeRemix(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const bpm = Math.round(Number(raw.bpm));
+  if (!Number.isFinite(bpm)) return null;
+  return {
+    name: String(raw.name ?? 'REMIX').slice(0, 32),
+    bpm: Math.max(40, Math.min(240, bpm)),
+    lead: lane16(raw.lead, 127),
+    bass: lane16(raw.bass, 127),
+    hat: lane16(raw.hat, 1),
   };
 }
 
@@ -153,6 +264,8 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       if (!Array.isArray(p.replies)) p.replies = [];
       if (!Number.isFinite(p.heat)) p.heat = 1;
       if (typeof p.id !== 'string' || !p.id) p.id = nextMoltId();
+      // A sprite post whose rows no longer validate degrades to text only.
+      if (p.sprite !== undefined && !sanitizeRows(p.sprite)) delete p.sprite;
     });
   }
   normalizeMolt();
@@ -190,6 +303,39 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
 
   // heal saves from before the mute toggle existed
   if (typeof state.bgmMuted !== 'boolean') state.bgmMuted = false;
+
+  // An unreadable remix entry degrades to the stock loop instead of breaking
+  // the arcade — drop rather than trust. Re-run on load/import, which swap the
+  // whole state object in underneath this heal.
+  function normalizeRemixes() {
+    if (!state.remixes || typeof state.remixes !== 'object' || Array.isArray(state.remixes)) state.remixes = {};
+    for (const [key, val] of Object.entries(state.remixes)) {
+      const clean = sanitizeRemix(val);
+      if (clean) state.remixes[key] = clean; else delete state.remixes[key];
+    }
+  }
+  normalizeRemixes();
+
+  // Re-run on load/import, which swap the whole state object in underneath.
+  // An override that no longer matches its slot's grid is dropped rather
+  // than trusted — the game then simply draws the bank art.
+  function normalizeSpriteOverrides() {
+    if (!state.spriteOverrides || typeof state.spriteOverrides !== 'object' || Array.isArray(state.spriteOverrides)) {
+      state.spriteOverrides = {};
+    }
+    for (const [slot, val] of Object.entries(state.spriteOverrides)) {
+      const clean = sanitizeOverride(slot, val);
+      if (clean) state.spriteOverrides[slot] = clean; else delete state.spriteOverrides[slot];
+    }
+  }
+  normalizeSpriteOverrides();
+
+  function normalizeCreations() {
+    if (!Array.isArray(state.creations)) state.creations = [];
+    state.creations = state.creations.map(sanitizeCreation).filter(Boolean).slice(0, CREATION_CAP);
+    state.creations.forEach((c) => { if (!c.id) c.id = nextMoltId(); });
+  }
+  normalizeCreations();
 
   /** Record a gameplay event as a real memory. pin: milestone. */
   function rememberEvent(text, { icon = '🧠', imp = 2, pin = false } = {}) {
@@ -363,6 +509,9 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       }
     } catch { /* corrupt save — boot fresh */ }
     normalizeMolt();
+    normalizeRemixes();
+    normalizeSpriteOverrides();
+    normalizeCreations();
     importLegacy();
     emit();
     return state;
@@ -460,6 +609,9 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       if (incoming) {
         state = { ...defaultState(now()), ...incoming, lastTick: now() };
         normalizeMolt();
+        normalizeRemixes();
+        normalizeSpriteOverrides();
+        normalizeCreations();
         if (typeof obj?.legacySnapshot === 'string' && storage) {
           try { storage.setItem(LEGACY_SNAPSHOT_KEY, obj.legacySnapshot); } catch { /* noop */ }
         }
@@ -666,6 +818,64 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     });
   }
 
+  /* ─────────── sprite gallery: save + share a painting ─────────── */
+
+  /** Hang a painting in the gallery. Returns { ok, creation } or { ok, reason }. */
+  function saveCreation(name, rows) {
+    const clean = sanitizeRows(rows);
+    if (!clean) return { ok: false, reason: 'INVALID CANVAS' };
+    const creation = {
+      id: nextMoltId(),
+      author: '@you_pilgrim',
+      name: String(name ?? '').trim().slice(0, 24) || 'UNTITLED',
+      rows: clean,
+      t: now(),
+    };
+    mutate((s) => { s.creations = [creation, ...s.creations].slice(0, CREATION_CAP); });
+    rememberEvent(`Painted "${creation.name}" (${clean.length}×${clean.length}). The tidepool curates.`, { icon: '🎨', imp: 2 });
+    return { ok: true, creation };
+  }
+
+  /* ─────────── sprite overrides: a painting becomes game art ─────────── */
+
+  /** Bind a painting to a bank sprite. Returns { ok, slot } or { ok, reason }. */
+  function setSpriteOverride(slot, rows, name = 'UNTITLED') {
+    if (!OVERRIDABLE[slot]) return { ok: false, reason: 'UNKNOWN SLOT' };
+    const clean = sanitizeRows(rows);
+    const problem = clean ? overrideProblem(slot, clean) : 'EMPTY CANVAS';
+    if (problem) return { ok: false, reason: problem };
+    const label = String(name ?? '').trim().slice(0, 24) || 'UNTITLED';
+    mutate((s) => { s.spriteOverrides[slot] = { rows: clean, name: label, t: now() }; });
+    rememberEvent(`Replaced ${slot} with "${label}".`, { icon: '🎨', imp: 3 });
+    return { ok: true, slot };
+  }
+
+  /** Hand the slot back to the bank art. */
+  function resetSpriteOverride(slot) {
+    if (!state.spriteOverrides[slot]) return { ok: false, reason: 'NO OVERRIDE' };
+    mutate((s) => { delete s.spriteOverrides[slot]; });
+    return { ok: true, slot };
+  }
+
+  /** Share a gallery creation to the feed, where pilgrims answer it. */
+  function postCreation(id, text) {
+    const creation = state.creations.find((c) => c.id === id);
+    if (!creation) return { ok: false, reason: 'CREATION NOT FOUND' };
+    mutate((s) => {
+      s.molt.posts.unshift({
+        id: nextMoltId(), author: '@you_pilgrim', molt: 0, icon: '🎨', time: now(), heat: 1,
+        text: String(text ?? '').trim().slice(0, 240) || `Painted "${creation.name}" in PIXEL.STUDIO. Judge it, tide.`,
+        replies: [],
+        sprite: [...creation.rows],
+      });
+      s.molt.eye = clamp(s.molt.eye + 3, 0, 100);
+      s.molt.posts = s.molt.posts.slice(0, 30);
+      s.counters.posts += 1;
+    });
+    xpGain(3);
+    return { ok: true, creation };
+  }
+
   /* ─────────── moltbook threads & riptide ─────────── */
 
   /** User reply into an existing thread. Bumps heat (+2) and the third eye (+1). */
@@ -742,6 +952,20 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   function setScanlines(on) { mutate((s) => { s.scanlines = !!on; }); }
   function setVol(bus, v) { mutate((s) => { s.vol[bus] = clamp(v * 100, 0, 100) / 100; }); }
   function setBgmMuted(on) { mutate((s) => { s.bgmMuted = !!on; }); }
+
+  /* ─────────── CHIPTUNE.SYNTH remixes ─────────── */
+  function setRemix(id, tier, track) {
+    const clean = sanitizeRemix(track);
+    if (!clean) return false;
+    mutate((s) => { s.remixes[`${id}:${tier}`] = clean; });
+    return true;
+  }
+  function clearRemix(id, tier) {
+    mutate((s) => { delete s.remixes[`${id}:${tier}`]; });
+  }
+  function remixFor(id, tier) {
+    return state.remixes[`${id}:${tier}`] || null;
+  }
   function setSnakeBest(score) { mutate((s) => { if (score > s.best.snake) s.best.snake = score; }); }
   // Generic best-score writer for the arcade suite (flappy/breaker/mario/rpg/loot).
   // Returns true when this run set a NEW best (2.0 onGameOver semantic).
@@ -782,10 +1006,11 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     load, save, tick, subscribe,
     addCoins, xpGain, feed, playWith, toggleMine, rest, petThePet,
     hackMainframe, buy, postToMolt, moltReply, replyToMolt, pushMoltReply, bumpMoltHeat, trendingMolt,
+    saveCreation, postCreation, setSpriteOverride, resetSpriteOverride,
     adoptPilgrim, exportRoster,
     rememberEvent, toggleMemoryPin, importSoulBundle, syncBridgeMemories,
     recordArcadeRun, personalityDescribe, personalityDominant, personalityPromptLine,
-    setBgmMuted,
+    setBgmMuted, setRemix, clearRemix, remixFor,
     setTheme, setScanlines, setVol, setSnakeBest, setGameBest, addSteps, reset,
     exportState, importState,
   };

@@ -130,3 +130,94 @@ describe('moltbook threads', () => {
     expect(Array.isArray(other.state.molt.posts[0].replies)).toBe(true);
   });
 });
+
+describe('sprite gallery', () => {
+  it('ships with pilgrim creations, so the shelf is shared from first boot', () => {
+    const { store } = makeStore();
+    store.load();
+    const creations = store.state.creations;
+    expect(creations.length).toBeGreaterThanOrEqual(2);
+    expect(creations.some((c) => c.author === '@crab_404')).toBe(true);
+    for (const c of creations) {
+      expect(c.rows.length).toBe(c.rows[0].length); // square, like the studio canvas
+      expect(c.name).toBeTruthy();
+    }
+  });
+
+  it('saveCreation hangs the painting in the gallery and writes a memory', () => {
+    const { store } = makeStore();
+    store.load();
+    const memoriesBefore = store.state.memories.length;
+    const res = store.saveCreation('DOOM BLADE', Array.from({ length: 8 }, () => 'RRRRRRRR'));
+    expect(res.ok).toBe(true);
+    const top = store.state.creations[0];
+    expect(top.name).toBe('DOOM BLADE');
+    expect(top.author).toBe('@you_pilgrim');
+    expect(top.rows).toHaveLength(8);
+    expect(store.state.memories.length).toBeGreaterThan(memoriesBefore);
+    expect(store.state.memories[0].text).toContain('DOOM BLADE');
+  });
+
+  it('rejects ragged, oversize and empty canvases; scrubs non-palette chars', () => {
+    const { store } = makeStore();
+    store.load();
+    const before = store.state.creations.length;
+    expect(store.saveCreation('x', []).reason).toBe('INVALID CANVAS');
+    expect(store.saveCreation('x', ['RR', 'R']).reason).toBe('INVALID CANVAS');        // ragged
+    expect(store.saveCreation('x', ['R'.repeat(33)]).reason).toBe('INVALID CANVAS');   // oversize
+    expect(store.saveCreation('x', [1, 2]).reason).toBe('INVALID CANVAS');             // not rows
+    expect(store.state.creations.length).toBe(before);
+
+    const ok = store.saveCreation('SCRUB', ['<R', 'R>']);
+    expect(ok.ok).toBe(true);
+    expect(ok.creation.rows).toEqual(['.R', 'R.']);
+  });
+
+  it('heals the shelf on load, dropping entries the renderer could not draw', () => {
+    const storage = memStorage();
+    const t = 1000;
+    storage.setItem('bro_os_3', JSON.stringify({
+      v: 3, lastTick: t,
+      creations: [
+        { id: 'good', name: 'GOOD', author: '@you_pilgrim', rows: ['MM', 'MM'], t: 5 },
+        { id: 'ragged', name: 'RAGGED', rows: ['MM', 'M'], t: 5 },
+        { id: 'junk', name: 'JUNK', rows: 'nope' },
+      ],
+    }));
+    const store = createStore({ storage, now: () => t });
+    store.load();
+    expect(store.state.creations.map((c) => c.id)).toEqual(['good']);
+    expect(store.state.creations[0].rows).toEqual(['MM', 'MM']);
+  });
+
+  it('postCreation shares a shelf piece to the feed as a sprite post', () => {
+    const { store } = makeStore();
+    store.load();
+    const target = store.state.creations[0];
+    const eyeBefore = store.state.molt.eye;
+    const xpBefore = store.state.xp;
+    const res = store.postCreation(target.id);
+    expect(res.ok).toBe(true);
+    const post = store.state.molt.posts[0];
+    expect(post.sprite).toEqual(target.rows);
+    expect(post.author).toBe('@you_pilgrim');
+    expect(post.text).toContain(target.name);
+    expect(store.state.molt.eye).toBe(eyeBefore + 3);
+    expect(store.state.xp).toBeGreaterThan(xpBefore);
+    expect(store.postCreation('ghost-art').reason).toBe('CREATION NOT FOUND');
+  });
+
+  it('a sprite post whose rows no longer validate degrades to text on load', () => {
+    const storage = memStorage();
+    storage.setItem('bro_os_3', JSON.stringify({
+      v: 3, lastTick: 0,
+      molt: {
+        eye: 1,
+        posts: [{ id: 'p1', author: '@x', icon: '🎨', heat: 1, time: 0, text: 't', replies: [], sprite: ['OO', 'O'] }],
+      },
+    }));
+    const store = createStore({ storage, now: () => 0 });
+    store.load();
+    expect(store.state.molt.posts[0].sprite).toBeUndefined();
+  });
+});

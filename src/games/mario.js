@@ -1,6 +1,6 @@
 import { GameBase, VIEW_W, VIEW_H } from './GameBase.js';
 import { drawSprite } from './pixel.js';
-import { RYAN_RUN1, RYAN_RUN2, REPTOID, COIN, QBLOCK, QBLOCK_EMPTY, BRICK, PIPE } from './sprites.js';
+import { getSprite } from './overrides.js';
 
 // Super Bro Land — Ryan's run to the 5G tower.
 // Fixed-timestep physics, coyote time, jump buffering, variable jump height,
@@ -295,6 +295,10 @@ export class MarioGame extends GameBase {
     ctx.translate(-cam, 0);
 
     // tiles
+    const pipeArt = getSprite('PIPE');
+    const brickArt = getSprite('BRICK');
+    const qArt = getSprite('QBLOCK');
+    const qEmptyArt = getSprite('QBLOCK_EMPTY');
     for (const t of this.tiles()) {
       if (t.ground) {
         ctx.fillStyle = '#854d0e';
@@ -311,7 +315,7 @@ export class MarioGame extends GameBase {
         const tw = Math.round(16 * ts);
         for (let yy = t.y; yy < t.y + t.h; yy += tw) {
           for (let xx = t.x; xx < t.x + t.w; xx += tw) {
-            drawSprite(ctx, PIPE.r, PIPE.p, xx, yy, { scale: ts });
+            drawSprite(ctx, pipeArt.r, pipeArt.p, xx, yy, { scale: ts });
           }
         }
         // lip
@@ -332,13 +336,13 @@ export class MarioGame extends GameBase {
         // pulse
         const toggle = Math.floor(this.time * 2) % 2 === 0;
         if (t.used) {
-          drawSprite(ctx, QBLOCK_EMPTY.r, QBLOCK_EMPTY.p, t.x, t.y, { scale: 1.875 });
+          drawSprite(ctx, qEmptyArt.r, qEmptyArt.p, t.x, t.y, { scale: 1.875 });
         } else {
-          drawSprite(ctx, QBLOCK.r, QBLOCK.p, t.x, t.y, { scale: 1.875 });
+          drawSprite(ctx, qArt.r, qArt.p, t.x, t.y, { scale: 1.875 });
           if (toggle) { ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(t.x, t.y, t.w, 3); }
         }
       } else if (t.brick) {
-        drawSprite(ctx, BRICK.r, BRICK.p, t.x, t.y, { scale: 1.875 });
+        drawSprite(ctx, brickArt.r, brickArt.p, t.x, t.y, { scale: 1.875 });
       } else if (t.goal) {
         // 5G tower
         ctx.fillStyle = '#475569';
@@ -366,14 +370,14 @@ export class MarioGame extends GameBase {
     // enemies
     for (const e of this.enemies) {
       if (!e.alive) continue;
-      const frame = REPTOID[Math.floor(e.frame / 8) % 2];
+      const frame = getSprite('REPTOID')[Math.floor(e.frame / 8) % 2];
       drawSprite(ctx, frame.r, frame.p, e.x, e.y, { scale: 1.6, flip: e.vx < 0, shadow: true });
     }
 
     // player
     if (this.invuln <= 0 || Math.floor(this.time * 14) % 2 === 0) {
       const moving = Math.abs(p.vx) > 40 && p.grounded;
-      const frame = moving ? (Math.floor(this.time * 12) % 2 === 0 ? RYAN_RUN1 : RYAN_RUN2) : RYAN_RUN1;
+      const frame = getSprite(moving && Math.floor(this.time * 12) % 2 !== 0 ? 'RYAN_RUN2' : 'RYAN_RUN1');
       drawSprite(ctx, frame.r, frame.p, p.x, p.y, { scale: 2.4, flip: p.dir < 0, shadow: true });
     }
 

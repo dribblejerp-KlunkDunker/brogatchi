@@ -1,6 +1,6 @@
 import { GameBase, VIEW_W, VIEW_H } from './GameBase.js';
 import { drawSprite } from './pixel.js';
-import { FLAPPY, COIN, PIPE } from './sprites.js';
+import { getSprite } from './overrides.js';
 
 const GRAVITY = 1350;      // u/s²
 const FLAP = -410;         // u/s (jump impulse)
@@ -159,7 +159,7 @@ export class FlappyGame extends GameBase {
       ctx.save();
       ctx.translate(PLAYER_X + PLAYER_SIZE / 2, this.y + PLAYER_SIZE / 2);
       ctx.rotate(Math.max(-0.65, Math.min(0.65, this.vy * 0.0011)));
-      const flap = FLAPPY[Math.floor(this.time * 9) % 2];
+      const flap = getSprite('FLAPPY')[Math.floor(this.time * 9) % 2];
       drawSprite(ctx, flap.r, flap.p, -PLAYER_SIZE / 2, -PLAYER_SIZE / 2, { scale: 1 });
       ctx.restore();
     }
@@ -170,9 +170,10 @@ function drawPipe(ctx, x, y, w, h) {
   // body: tile the shared PIPE sprite
   const ts = 1.875;
   const tw = Math.round(16 * ts);
+  const pipe = getSprite('PIPE');
   for (let yy = y; yy < y + h; yy += tw) {
     for (let xx = x; xx < x + w; xx += tw) {
-      drawSprite(ctx, PIPE.r, PIPE.p, xx, yy, { scale: ts });
+      drawSprite(ctx, pipe.r, pipe.p, xx, yy, { scale: ts });
     }
   }
   // cap

@@ -278,3 +278,91 @@ describe('pilgrim agent-cards ADOPT flow', () => {
     expect(b.state.bgmMuted).toBe(false);
   });
 });
+
+describe('CHIPTUNE.SYNTH remixes', () => {
+  const remix = (over = {}) => ({
+    name: 'Bench', bpm: 120,
+    lead: new Array(16).fill(0), bass: new Array(16).fill(0), hat: new Array(16).fill(0),
+    ...over,
+  });
+
+  it('saves, reads back, and clears a per-game/tier remix', () => {
+    const { store } = makeStore();
+    expect(store.remixFor('flappy', 0)).toBe(null);
+    expect(store.setRemix('flappy', 0, remix({ lead: [60, ...new Array(15).fill(0)] }))).toBe(true);
+    const saved = store.remixFor('flappy', 0);
+    expect(saved.lead[0]).toBe(60);
+    expect(saved.lead).toHaveLength(16);
+    store.clearRemix('flappy', 0);
+    expect(store.remixFor('flappy', 0)).toBe(null);
+  });
+
+  it('keys remixes by game AND tier, so tiers remix independently', () => {
+    const { store } = makeStore();
+    store.setRemix('loot', 0, remix({ lead: [60, ...new Array(15).fill(0)] }));
+    store.setRemix('loot', 2, remix({ lead: [64, ...new Array(15).fill(0)] }));
+    expect(store.remixFor('loot', 0).lead[0]).toBe(60);
+    expect(store.remixFor('loot', 2).lead[0]).toBe(64);
+    expect(store.remixFor('flappy', 0)).toBe(null);
+  });
+
+  it('sanitizes every lane to 16 in-range steps and rejects an unreadable track', () => {
+    const { store } = makeStore();
+    expect(store.setRemix('loot', 0, { bpm: 120, lead: [999, -5, 'x'], bass: null, hat: [1] })).toBe(true);
+    const saved = store.remixFor('loot', 0);
+    expect(saved.lead[0]).toBe(127); // clamped high
+    expect(saved.lead[1]).toBe(0);   // clamped low
+    expect(saved.lead[2]).toBe(0);   // non-numeric → silent
+    expect(saved.lead).toHaveLength(16);
+    expect(saved.bass.every((n) => n === 0)).toBe(true); // missing lane → silent, not broken
+    expect(saved.hat[0]).toBe(1);
+    expect(saved.name).toBe('REMIX'); // defaulted
+    // a track with no usable bpm can never reach the sequencer
+    expect(store.setRemix('loot', 0, { lead: [] })).toBe(false);
+  });
+
+  it('clamps bpm into the engine range', () => {
+    const { store } = makeStore();
+    store.setRemix('loot', 0, remix({ bpm: 5000 }));
+    expect(store.remixFor('loot', 0).bpm).toBe(240);
+    store.setRemix('loot', 1, remix({ bpm: 1 }));
+    expect(store.remixFor('loot', 1).bpm).toBe(40);
+  });
+
+  it('persists across save/load like every other setting', () => {
+    const storage = memStorage();
+    const a = createStore({ storage, now: () => 1000 });
+    a.setRemix('mario', 1, remix({ lead: [72, ...new Array(15).fill(0)] }));
+    a.save();
+    const b = createStore({ storage, now: () => 1000 });
+    b.load();
+    expect(b.remixFor('mario', 1).lead[0]).toBe(72);
+  });
+
+  it('a save from before the remix lab existed loads with none', () => {
+    const storage = memStorage();
+    const a = createStore({ storage, now: () => 1000 });
+    a.save();
+    const raw = JSON.parse(storage.getItem('bro_os_3'));
+    storage.setItem('bro_os_3', JSON.stringify({ ...raw, remixes: undefined }));
+    const b = createStore({ storage, now: () => 1000 });
+    b.load();
+    expect(b.state.remixes).toEqual({});
+  });
+
+  it('drops corrupt entries on load instead of breaking the arcade', () => {
+    const storage = memStorage();
+    const a = createStore({ storage, now: () => 1000 });
+    a.save();
+    const raw = JSON.parse(storage.getItem('bro_os_3'));
+    storage.setItem('bro_os_3', JSON.stringify({
+      ...raw,
+      remixes: { 'flappy:0': { name: 'no bpm' }, 'loot:0': 'nope', 'mario:1': { bpm: 90, lead: [67] } },
+    }));
+    const b = createStore({ storage, now: () => 1000 });
+    b.load();
+    expect(b.remixFor('flappy', 0)).toBe(null);
+    expect(b.remixFor('loot', 0)).toBe(null);
+    expect(b.remixFor('mario', 1).bpm).toBe(90); // the readable one survives
+  });
+});
