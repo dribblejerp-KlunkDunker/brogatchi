@@ -32,10 +32,24 @@ export function applyEvents(personality, events) {
   }
 }
 
+// Ego settles back toward its resting value at this rate per minute
+// (≈7 points an hour), so a streak of records fades instead of ratcheting
+// for the life of the save.
+const EGO_SETTLE = 0.12;
+const RESTING = initialPersonality();
+
 // Slow ambient drift once per minute so traits breathe over a day.
 // (3.0's ticker runs per second — the store accumulates and calls
 // this on the 2.0 per-minute cadence.)
 export function minuteDrift(personality, state) {
+  // Glory is not permanent: above his resting ego, the high-water mark
+  // eases back down, and stops exactly at rest (a plain subtraction can
+  // drift a hair past it and shave off a whole extra step). The
+  // happy-glory rule below offsets most of it while the win is still
+  // funny, then the bro settles.
+  if (personality.ego > RESTING.ego) {
+    personality.ego = Math.max(RESTING.ego, personality.ego - EGO_SETTLE);
+  }
   if (state.stats.hunger < 30) adjust(personality, 'paranoia', 0.15);
   if (state.stats.energy < 20) adjust(personality, 'paranoia', 0.1);
   if (state.stats.happy > 75) adjust(personality, 'ego', 0.1);

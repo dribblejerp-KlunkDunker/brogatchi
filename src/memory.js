@@ -37,8 +37,12 @@ export function capMemories(memories) {
 }
 
 // Add a memory. `pin: true` marks a milestone — pinned entries are never
-// evicted by the cap (only the unpinned tail is sliced).
-export function remember(memories, { icon = '🧠', text, imp = 2, pin = false } = {}) {
+// evicted by the cap (only the unpinned tail is sliced). `fade: true`
+// marks a score worth remembering less vividly as it ages (see
+// fadeMemories); pinning one arrests the fade, so the player can keep it.
+// `post` links the memory back to the Moltbook thread it came from, so
+// SOUL.FILE can hand you back to the conversation that wrote it.
+export function remember(memories, { icon = '🧠', text, imp = 2, pin = false, fade = false, post = null } = {}) {
   if (!text?.trim()) return memories;
   const entry = {
     id: memoryId(),
@@ -48,8 +52,38 @@ export function remember(memories, { icon = '🧠', text, imp = 2, pin = false }
     t: Date.now(),          // 3.0 shape: SOUL.FILE renders this timestamp
     day: dayString(),       // 2.0 field kept for pinned imports fidelity
     ...(pin ? { pinned: true } : {}),
+    ...(fade && !pin ? { fades: true, imp0: imp } : {}),
+    ...(post ? { post: String(post) } : {}),
   };
   return capMemories([...(memories || []), entry]);
+}
+
+/* ─────────── record decay: old scores lose their grip ───────────
+   A score is vivid the day it lands and ordinary a week later. Memories
+   tagged `fades` lose a point of importance per step of age, down to the
+   ordinary-memory floor — they never vanish, they just stop crowding the
+   top of the file (and stop being safe from the cap). Pinned entries are
+   skipped: a player who pins a record has made it deliberate.
+
+   The importance is derived from `imp0` + age rather than decremented, so
+   the pass is idempotent — running it twice, or after a month away, lands
+   on the same answer. */
+
+export const FADE_FLOOR = 2;                 // the ordinary-memory importance
+export const FADE_STEP_MS = 30 * 60 * 1000;  // one point of grip per half hour
+
+export function fadeMemories(memories, now = Date.now()) {
+  if (!Array.isArray(memories)) return memories;
+  let changed = false;
+  for (const m of memories) {
+    if (!m || !m.fades || m.pinned) continue;
+    // Heal an entry that arrived without its original weight.
+    if (!Number.isFinite(m.imp0)) m.imp0 = Number.isFinite(m.imp) ? m.imp : FADE_FLOOR;
+    const age = Math.max(0, now - (Number.isFinite(m.t) ? m.t : now));
+    const next = Math.max(FADE_FLOOR, m.imp0 - Math.floor(age / FADE_STEP_MS));
+    if (next !== m.imp) { m.imp = next; changed = true; }
+  }
+  return changed ? sortMemories(memories) : memories;
 }
 
 // Toggle a memory's pin by id. Returns a freshly sorted array (unchanged

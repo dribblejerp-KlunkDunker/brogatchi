@@ -325,6 +325,24 @@ describe('3.0 store memory wiring', () => {
     expect(st.memories.filter((m) => m.id.startsWith('bridge-'))).toHaveLength(2);
   });
 
+  it('a gameplay row from the CLI lands in the soul as Ryan\'s own memory', () => {
+    const store = freshStore();
+    store.load();
+    // exactly what `node cli.js play "…"` writes and bridgeSync exports
+    const snap = {
+      kind: 'bridge-memory-log',
+      entries: [{
+        id: 'bridge-1-play', icon: '🎮', text: 'Rebuilt the app bundle and shipped it.',
+        imp: 3, t: 1788439200000, day: '9/7/2026',
+      }],
+    };
+    expect(store.syncBridgeMemories(snap)).toBe(1);
+    const mem = store.state.memories.find((m) => m.text === 'Rebuilt the app bundle and shipped it.');
+    expect(mem.icon).toBe('🎮');   // a gameplay memory, not a network event
+    expect(mem.imp).toBe(3);
+    expect(mem.pinned).toBe(false); // and it ranks below his lived milestones
+  });
+
   it('an in-app pin on a bridge entry survives later syncs', () => {
     const store = freshStore();
     store.load();
@@ -553,6 +571,93 @@ describe('2.0 arcade soul-feed (recordArcadeRun)', () => {
     expect(s.personality.ego).toBeCloseTo(22.1);       // happy > 75
     expect(s.personality.greed).toBeCloseTo(10.1);     // coins >= 100
     expect(s.personality.fitness).toBe(12);            // steps > 0 → no decay
+  });
+
+  /* ─────────── records fade, ego settles ─────────── */
+
+  describe('record decay', () => {
+    it('fadeMemories erodes a score memory by age, never past the floor', async () => {
+      const { remember, fadeMemories, FADE_STEP_MS, FADE_FLOOR } = await import('../src/memory.js');
+      const mems = remember([], { icon: '🌟', text: 'New Loot Shower record: 37 points.', imp: 4, fade: true });
+      const born = mems[0].t;
+
+      expect(fadeMemories(mems, born)).toBe(mems); // fresh: untouched, same array
+      expect(fadeMemories(mems, born + FADE_STEP_MS)[0].imp).toBe(3);
+      expect(fadeMemories(mems, born + FADE_STEP_MS * 3)[0].imp).toBe(FADE_FLOOR);
+      expect(fadeMemories(mems, born + FADE_STEP_MS * 500)[0].imp).toBe(FADE_FLOOR);
+      expect(mems[0].imp0).toBe(4); // the original weight is kept, so the maths stays idempotent
+      expect(fadeMemories(mems, born + FADE_STEP_MS * 500)[0].imp).toBe(FADE_FLOOR);
+    });
+
+    it('leaves ordinary memories and pinned records alone', async () => {
+      const { remember, fadeMemories, togglePin, FADE_STEP_MS } = await import('../src/memory.js');
+      let mems = remember([], { icon: '🧠', text: 'Bought the PIZZA.SLC. Worth it.', imp: 2 });
+      mems = remember(mems, { icon: '🌟', text: 'New record: 9 points.', imp: 4, fade: true });
+      mems = remember(mems, { icon: '🌟', text: 'Pinned record: 99 points.', imp: 4, fade: true, pin: true });
+      const old = mems[0].t + FADE_STEP_MS * 20;
+
+      const faded = fadeMemories(mems, old);
+      const byText = (t) => faded.find((m) => m.text === t);
+      expect(byText('Bought the PIZZA.SLC. Worth it.').imp).toBe(2); // never tagged, untouched
+      expect(byText('New record: 9 points.').imp).toBe(2);
+      expect(byText('Pinned record: 99 points.').imp).toBe(4);      // pin wins over age
+      expect(byText('Pinned record: 99 points.').fades).toBeFalsy(); // remember() drops the flag when pinned
+
+      // pinning an already-fading record arrests it from then on
+      mems = togglePin(mems, mems.find((m) => m.text === 'New record: 9 points.').id);
+      const held = fadeMemories(mems, old);
+      expect(held.find((m) => m.text === 'New record: 9 points.').imp).toBe(2); // already eroded
+      expect(held.find((m) => m.text === 'New record: 9 points.').pinned).toBe(true);
+    });
+
+    it('heals a fading memory that arrived without its original weight', async () => {
+      const { fadeMemories, FADE_STEP_MS } = await import('../src/memory.js');
+      const mems = [{ icon: '🌟', text: 'imported score', imp: 4, fades: true, t: 1_700_000_000_000 }];
+      const faded = fadeMemories(mems, 1_700_000_000_000 + FADE_STEP_MS * 2);
+      expect(faded[0].imp0).toBe(4);
+      expect(faded[0].imp).toBe(2);
+    });
+
+    it('the drift clock erodes a run\'s memories as they age', () => {
+      let clock = Date.now();
+      const store = createStore({ storage: null, now: () => clock });
+      store.load();
+      store.recordArcadeRun({ key: 'loot', label: 'Loot Shower', score: 37, newBest: true });
+      const record = store.state.memories.find((m) => m.icon === '🌟');
+      expect(record.imp).toBe(4);
+
+      clock += 3 * 3600 * 1000; // three hours of real time pass
+      store.tick(60);           // one drift minute
+
+      expect(store.state.memories.find((m) => m.icon === '🌟').imp).toBe(2); // 4 → floor: the grip is gone
+
+      // the first-ever win is a pinned 2.0 milestone — pinning is the exception
+      const firstWin = store.state.memories.find((m) => m.text === 'Won Loot Shower with 37 points.');
+      expect(firstWin.pinned).toBe(true);
+      expect(firstWin.imp).toBe(3);
+
+      // a later, unpinned win fades like any other score
+      store.recordArcadeRun({ key: 'loot', label: 'Loot Shower', score: 40 });
+      clock += 3 * 3600 * 1000;
+      store.tick(60);
+      expect(store.state.memories.find((m) => m.text === 'Won Loot Shower with 40 points.').imp).toBe(2);
+      expect(store.state.memories.every((m) => !m.fades || m.pinned || m.imp >= 2)).toBe(true);
+    });
+
+    it('ego settles back toward its resting value instead of ratcheting', async () => {
+      const { minuteDrift, initialPersonality } = await import('../src/personality.js');
+      const rest = initialPersonality();
+      const p = initialPersonality();
+      p.ego = 40; // a streak of records
+      const s = { stats: { hunger: 50, energy: 90, happy: 40, weight: 1.2 }, steps: 100, coins: 50 };
+
+      for (let i = 0; i < 60; i++) minuteDrift(p, s); // an hour
+      expect(p.ego).toBeCloseTo(40 - 60 * 0.12);      // ≈7 points of glory gone
+      expect(p.ego).toBeGreaterThan(rest.ego);
+
+      for (let i = 0; i < 200; i++) minuteDrift(p, s);
+      expect(p.ego).toBe(rest.ego); // settles, never undershoots
+    });
   });
 
   /* ─────────── 2.0 action wiring: meals, pets, hacks, quests, steps ─────────── */

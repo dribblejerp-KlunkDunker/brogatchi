@@ -14,7 +14,7 @@ export const clamp = (n, min = 0, max = 100) => Math.min(max, Math.max(min, n));
 export const levelFor = (xp) => 1 + Math.floor(Math.max(0, xp) / LEVEL_XP);
 
 // Gameplay events write real memories (ported 2.0 engine — src/memory.js).
-import { remember, togglePin, mergePinnedMemories, scrubQuirk, scrubOpinion, scrubHistory, buildDayLines, appendDiaryLines, capMemories, sortMemories } from './memory.js';
+import { remember, togglePin, mergePinnedMemories, scrubQuirk, scrubOpinion, scrubHistory, buildDayLines, appendDiaryLines, capMemories, sortMemories, fadeMemories } from './memory.js';
 import { initialPersonality, applyEvents, minuteDrift, dominant as dominantTrait, describe as describeTraits } from './personality.js';
 // Slot names + the native grid of each, so an override that would tear a
 // game's layout is rejected here rather than drawn badly later.
@@ -108,6 +108,12 @@ function sanitizeRows(raw) {
     rows.push(r.replace(/[^A-Za-z.]/g, '.'));
   }
   return rows;
+}
+
+/** One flat line of a post, for the 🪶 soul memory that echoes it. */
+function echoLine(text, max = 64) {
+  const flat = String(text).replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
 /** A stored override, or null when the slot or the grid is not paintable. */
@@ -337,9 +343,10 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   }
   normalizeCreations();
 
-  /** Record a gameplay event as a real memory. pin: milestone. */
-  function rememberEvent(text, { icon = '🧠', imp = 2, pin = false } = {}) {
-    mutate((s) => { s.memories = remember(s.memories, { icon, text, imp, pin }); });
+  /** Record a gameplay event as a real memory. pin: milestone; post: the
+      Moltbook thread this memory echoes (SOUL.FILE links back through it). */
+  function rememberEvent(text, { icon = '🧠', imp = 2, pin = false, post = null } = {}) {
+    mutate((s) => { s.memories = remember(s.memories, { icon, text, imp, pin, post }); });
   }
 
   /* ─────────── 2.0 personality & arcade soul-feed ───────────
@@ -355,11 +362,14 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       // 2.0 game-over flow: a run at the cabinets is a good time.
       if (s.stats) s.stats.happy = clamp(s.stats.happy + 20);
       s.counters.gamesWon += 1;
+      // A score memory fades with age (see fadeMemories): vivid today,
+      // ordinary later. The first win is pinned, and pinning arrests it.
       s.memories = remember(s.memories, {
         icon: '🎮',
         text: `Won ${label || key} with ${score} points.`,
         imp: 3,
         pin: s.counters.gamesWon === 1,
+        fade: true,
       });
       // High scores write their own memory — the soul keeps the leaderboard.
       if (newBest) {
@@ -367,6 +377,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
           icon: '🌟',
           text: `New ${label || key} record: ${score} points.`,
           imp: 4,
+          fade: true,
         });
       }
     });
@@ -513,6 +524,9 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     normalizeSpriteOverrides();
     normalizeCreations();
     importLegacy();
+    // Age is the whole input, so a save that sat closed for a month comes
+    // back with its records already settled.
+    state.memories = fadeMemories(state.memories, now());
     emit();
     return state;
   }
@@ -612,6 +626,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
         normalizeRemixes();
         normalizeSpriteOverrides();
         normalizeCreations();
+        state.memories = fadeMemories(state.memories, now());
         if (typeof obj?.legacySnapshot === 'string' && storage) {
           try { storage.setItem(LEGACY_SNAPSHOT_KEY, obj.legacySnapshot); } catch { /* noop */ }
         }
@@ -663,6 +678,8 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     while (state._persAcc >= 60000) {
       state._persAcc -= 60000;
       minuteDrift(state.personality, state);
+      // The same clock erodes old records' grip on the top of the file.
+      state.memories = fadeMemories(state.memories, now());
     }
     state._mineAcc = (state._mineAcc || 0) + dtSec * 1000;
     if (state.mining && !state.sleeping && state.stats.energy > 1) {
@@ -798,12 +815,17 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   /* ─────────── moltbook ─────────── */
   function postToMolt(text) {
     if (!text?.trim()) return false;
+    const body = text.trim();
+    let postId = null;
     mutate((s) => {
-      s.molt.posts.unshift({ id: nextMoltId(), author: '@you_pilgrim', molt: 0, icon: '🫅', time: now(), heat: 1, text: text.trim(), replies: [] });
+      postId = nextMoltId();
+      s.molt.posts.unshift({ id: postId, author: '@you_pilgrim', molt: 0, icon: '🫅', time: now(), heat: 1, text: body, replies: [] });
       s.molt.eye = clamp(s.molt.eye + 3, 0, 100);
       s.molt.posts = s.molt.posts.slice(0, 30);
       s.counters.posts += 1;
     });
+    // 🪶 Every post leaves an echo in the soul that links back to its thread.
+    rememberEvent(`Posted to the tidepool: "${echoLine(body)}"`, { icon: '🪶', imp: 2, post: postId });
     if (state.counters.posts === 1) {
       rememberEvent(`Rejoined MOLTBOOK. The tide remembered ${state.petName}.`, { icon: '🦀', imp: 3, pin: true });
     }
@@ -832,7 +854,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       t: now(),
     };
     mutate((s) => { s.creations = [creation, ...s.creations].slice(0, CREATION_CAP); });
-    rememberEvent(`Painted "${creation.name}" (${clean.length}×${clean.length}). The tidepool curates.`, { icon: '🎨', imp: 2 });
+    rememberEvent(`Painted "${creation.name}" (${clean[0].length}×${clean.length}). The tidepool curates.`, { icon: '🎨', imp: 2 });
     return { ok: true, creation };
   }
 
@@ -845,8 +867,24 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     const problem = clean ? overrideProblem(slot, clean) : 'EMPTY CANVAS';
     if (problem) return { ok: false, reason: problem };
     const label = String(name ?? '').trim().slice(0, 24) || 'UNTITLED';
+    const meta = OVERRIDABLE[slot];
     mutate((s) => { s.spriteOverrides[slot] = { rows: clean, name: label, t: now() }; });
-    rememberEvent(`Replaced ${slot} with "${label}".`, { icon: '🎨', imp: 3 });
+    // Write a Moltbook post so the equipped state is visible on the tidepool.
+    let postId = null;
+    mutate((s) => {
+      postId = nextMoltId();
+      s.molt.posts.unshift({
+        id: postId, author: '@you_pilgrim', molt: 0, icon: '🎮', time: now(), heat: 1,
+        text: `Equipped "${label}" into ${meta.label} (${meta.game}). The cabinets draw your art now.`,
+        replies: [],
+        sprite: [...clean],
+        equipped: slot,
+      });
+      s.molt.eye = clamp(s.molt.eye + 3, 0, 100);
+      s.molt.posts = s.molt.posts.slice(0, 30);
+      s.counters.posts += 1;
+    });
+    rememberEvent(`Replaced ${slot} with "${label}".`, { icon: '🎨', imp: 3, post: postId });
     return { ok: true, slot };
   }
 
@@ -861,9 +899,11 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   function postCreation(id, text) {
     const creation = state.creations.find((c) => c.id === id);
     if (!creation) return { ok: false, reason: 'CREATION NOT FOUND' };
+    let postId = null;
     mutate((s) => {
+      postId = nextMoltId();
       s.molt.posts.unshift({
-        id: nextMoltId(), author: '@you_pilgrim', molt: 0, icon: '🎨', time: now(), heat: 1,
+        id: postId, author: '@you_pilgrim', molt: 0, icon: '🎨', time: now(), heat: 1,
         text: String(text ?? '').trim().slice(0, 240) || `Painted "${creation.name}" in PIXEL.STUDIO. Judge it, tide.`,
         replies: [],
         sprite: [...creation.rows],
@@ -872,6 +912,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       s.molt.posts = s.molt.posts.slice(0, 30);
       s.counters.posts += 1;
     });
+    rememberEvent(`Shared "${creation.name}" with the tidepool.`, { icon: '🪶', imp: 2, post: postId });
     xpGain(3);
     return { ok: true, creation };
   }
