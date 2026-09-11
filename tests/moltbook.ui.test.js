@@ -323,3 +323,124 @@ describe('moltbook UI: sprite gallery', () => {
     expect(c.querySelector('#molt-feed').textContent).toContain('MOONSPUD');
   });
 });
+
+describe('moltbook UI: 🪶 memory echo', () => {
+  function soulRow(needle) {
+    App.open('journal'); // SOUL.FILE
+    const soul = App.windows.get('journal').el.querySelector('.window-content');
+    return [...soul.querySelectorAll('[data-mem-id]')].find((li) => li.textContent.includes(needle));
+  }
+
+  it('a post leaves a linked 🪶 memory that hands you back to the thread', async () => {
+    await bootShell();
+    postViaComposer('echo regression: hello tide');
+    const threadId = [...moltbookContent().querySelectorAll('#molt-feed > div')]
+      .find((d) => d.textContent.includes('echo regression')).dataset.moltId;
+    postViaComposer('a later, unrelated post'); // so the echo is NOT the newest thread
+
+    const row = soulRow('echo regression');
+    expect(row.textContent).toContain('🪶');
+    const link = row.querySelector('.mem-echo-btn');
+    expect(link.dataset.echoPost).toBe(threadId);
+
+    // park the tidepool on the gallery tab — the link has to find the thread
+    // anyway, come back to the feed, and light up that exact post
+    const c = moltbookContent();
+    c.querySelector('#molt-tab-gallery').click();
+    expect(c.querySelector('#molt-tab-live').getAttribute('aria-selected')).toBe('false');
+
+    link.click();
+    const after = moltbookContent();
+    expect(after.querySelector('#molt-tab-live').getAttribute('aria-selected')).toBe('true');
+    const lit = after.querySelector('#molt-feed .molt-echo');
+    expect(lit).toBeTruthy();
+    expect(lit.dataset.moltId).toBe(threadId);
+    expect(lit.dataset.moltId).not.toBe(after.querySelector('#molt-feed [data-molt-id]').dataset.moltId);
+  });
+
+  it('a link whose thread has drifted out of the tideline says so', async () => {
+    await bootShell();
+    App.open('journal');
+    const soul = App.windows.get('journal').el.querySelector('.window-content');
+    soul.querySelector('#soul-copy').click(); // fills the textarea with the live export
+    const ta = soul.querySelector('#soul-io-text');
+    const save = JSON.parse(ta.value); // { v, kind, state, legacySnapshot }
+    save.state.memories = [{
+      id: 'ghost', icon: '🪶', text: 'Posted to the tidepool: "long gone"', imp: 2, t: Date.now(), post: 'm-drifted',
+    }];
+    ta.value = JSON.stringify(save);
+    soul.querySelector('#soul-import-apply').click();
+
+    const link = soulRow('long gone').querySelector('.mem-echo-btn');
+    expect(link.dataset.echoPost).toBe('m-drifted');
+    link.click();
+
+    expect(moltbookContent().querySelector('#molt-feed .molt-echo')).toBeNull();
+    expect(document.getElementById('toast-layer').textContent).toContain('DRIFTED');
+  });
+});
+
+describe('moltbook UI: equipped sprites', () => {
+  // jsdom has no PointerEvent; the studio listens for pointerdown and only
+  // reads coordinates, so a MouseEvent carries them fine.
+  function press(canvas, px, py) {
+    canvas.dispatchEvent(new window.MouseEvent('pointerdown', { clientX: px, clientY: py, bubbles: true }));
+  }
+
+  it('gallery EQUIP benches in PIXEL.STUDIO; APPLY posts it equipped, the tide comments, the shelf reads EQUIPPED', async () => {
+    await bootShell();
+    vi.spyOn(Math, 'random').mockReturnValue(0); // force the tide to answer (0 < 0.55)
+    vi.useFakeTimers();
+
+    // Paint a COIN-shaped creation and hang it on the shelf.
+    App.open('pixelstudio');
+    const studio = App.windows.get('pixelstudio').el.querySelector('.window-content');
+    const slotEl = studio.querySelector('#px-slot');
+    slotEl.value = 'COIN'; // bank COIN art (12×10) loads onto the bench
+    slotEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+    const canvas = studio.querySelector('#px-canvas');
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 256, height: 256 });
+    press(canvas, 8, 8); // one red pixel — art no bank sprite has
+    studio.querySelector('#px-name').value = 'TIDE_COIN';
+    studio.querySelector('#px-save').click();
+
+    // The gallery offers EQUIP on it; taking it benches the creation.
+    const c = moltbookContent();
+    c.querySelector('#molt-tab-gallery').click();
+    const cell = [...c.querySelectorAll('[data-creation-id]')].find((el) => el.textContent.includes('TIDE_COIN'));
+    expect(cell.querySelector('.molt-equip-btn')).toBeTruthy();
+    cell.querySelector('.molt-equip-btn').click();
+
+    const benched = App.windows.get('pixelstudio').el.querySelector('.window-content');
+    expect(benched.querySelector('#px-name').value).toBe('TIDE_COIN');
+    expect(benched.querySelector('#px-status').textContent).toContain('FITS COIN');
+
+    // Pick the slot and APPLY — the painting goes live in the cabinet.
+    const slotEl2 = benched.querySelector('#px-slot');
+    slotEl2.value = 'COIN';
+    slotEl2.dispatchEvent(new window.Event('change', { bubbles: true }));
+    expect(benched.querySelector('#px-status').textContent).toContain('SHELF ART ON BENCH');
+    benched.querySelector('#px-apply').click();
+
+    // The equipped post lands on the feed with the badge, and the tide's
+    // reply (deferred 3.5s+) arrives inside its thread.
+    vi.advanceTimersByTime(4000);
+    c.querySelector('#molt-tab-live').click(); // the equip left the tidepool on the gallery
+    const top = c.querySelector('#molt-feed [data-molt-id]');
+    expect(top.textContent).toContain('EQUIPPED → COIN');
+    expect(top.textContent).toContain('TIDE_COIN');
+    expect(top.querySelector('.molt-sprite-slot canvas')).toBeTruthy();
+    expect(top.querySelector('.molt-replies').textContent).toContain('cabinet');
+
+    // Back to the shelf: the creation now reads as equipped, not shareable.
+    c.querySelector('#molt-tab-gallery').click();
+    const after = [...c.querySelectorAll('[data-creation-id]')].find((el) => el.textContent.includes('TIDE_COIN'));
+    expect(after.className).toContain('border-neon-green');
+    expect(after.textContent).toContain('EQUIPPED → COIN');
+    expect(after.querySelector('.molt-share-btn')).toBeNull();
+    // an unequipped creation keeps both controls
+    const crab = [...c.querySelectorAll('[data-creation-id]')].find((el) => el.textContent.includes('BRASS CRAB'));
+    expect(crab.querySelector('.molt-equip-btn')).toBeTruthy();
+    expect(crab.querySelector('.molt-share-btn')).toBeTruthy();
+  });
+});

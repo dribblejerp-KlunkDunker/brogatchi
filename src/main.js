@@ -456,12 +456,14 @@ function wireMoltbook(root) {
   }
 
   function postHeadHTML(p) {
+    const equipped = p.equipped ? `<span class="px-1 bg-neon-green/15 text-neon-green text-[8px] font-mono">EQUIPPED → ${esc(p.equipped)}</span>` : '';
     return `
       <div class="flex items-center justify-between mb-1">
         <div class="flex items-center gap-2 min-w-0">
           <span class="text-lg">${p.icon}</span>
           <span class="font-mono text-[10px] text-neon-amber">${esc(p.author)}</span>
           <span class="px-1 bg-neon-cyan/10 text-neon-cyan text-[8px] font-mono">MOLT ${p.molt}</span>
+          ${equipped}
         </div>
         <span class="text-text-muted text-[9px] shrink-0">${timeAgo(p.time)}</span>
       </div>
@@ -546,18 +548,31 @@ function wireMoltbook(root) {
       shelf.appendChild(empty);
     }
     s.creations.forEach((c) => {
+      // Check if this creation is currently equipped in a cabinet.
+      const equippedSlot = Object.entries(s.spriteOverrides || {}).find(
+        ([, v]) => v.name === c.name && Array.isArray(v.rows) && v.rows[0] === c.rows[0],
+      )?.[0] ?? null;
       const cell = document.createElement('div');
-      cell.className = 'border border-border bg-void/30 p-2';
+      cell.className = `border bg-void/30 p-2 ${equippedSlot ? 'border-neon-green/50' : 'border-border'}`;
       cell.dataset.creationId = c.id;
       cell.innerHTML = `
         <div class="molt-sprite-slot mb-1.5 flex justify-center"></div>
         <div class="font-mono text-[9px] text-text-main truncate">${esc(c.name)}</div>
         <div class="flex items-center justify-between gap-1 mt-0.5">
           <span class="font-mono text-[8px] text-neon-amber truncate">${esc(c.author)}</span>
-          <button class="molt-share-btn btn-cyber text-[8px] shrink-0" aria-label="Share ${esc(c.name)} to the feed">SHARE</button>
+          ${equippedSlot
+            ? `<span class="px-1 bg-neon-green/15 text-neon-green text-[7px] font-mono" title="This painting is live in a cabinet">EQUIPPED → ${esc(equippedSlot)}</span>`
+            : `<button class="molt-equip-btn btn-cyber text-[8px] shrink-0" aria-label="Equip ${esc(c.name)} into a game cabinet">EQUIP</button>
+               <button class="molt-share-btn btn-cyber text-[8px] shrink-0" aria-label="Share ${esc(c.name)} to the feed">SHARE</button>`}
         </div>`;
       cell.querySelector('.molt-sprite-slot').appendChild(spriteCanvas(c.rows, 5));
-      cell.querySelector('.molt-share-btn').addEventListener('click', () => {
+      // EQUIP hands the creation to PIXEL.STUDIO's bench, where the slot is
+      // picked and APPLY TO GAME binds it — one flow for bench and shelf.
+      cell.querySelector('.molt-equip-btn')?.addEventListener('click', () => {
+        audio.click();
+        openPixelStudioWithCreation(c);
+      });
+      cell.querySelector('.molt-share-btn')?.addEventListener('click', () => {
         const res = store.postCreation(c.id);
         if (!res.ok) { audio.error(); toast(`SHARE DENIED — ${res.reason}`, 'err'); return; }
         audio.click();
@@ -620,9 +635,18 @@ function wireMoltbook(root) {
     { author: '@zeke_shell', molt: 1, icon: '🦫', text: 'Bold words for someone with a pedometer. Respect.' },
     { author: '@tide_itself', molt: 9, icon: '🌊', text: '…the tide has read this and remains the tide.' },
   ];
+  // Slot-specific replies when a painting is equipped into a cabinet.
+  const EQUIPPED_REPLY_POOL = [
+    { author: '@crab_404', molt: 4, icon: '🦀', text: 'Now THAT is a crab-worthy sprite. The cabinets are lucky.' },
+    { author: '@zeke_shell', molt: 2, icon: '🦫', text: 'Your art is literally running the show now. Power move.' },
+    { author: '@tide_itself', molt: 9, icon: '🌊', text: 'The tide sees your marks in the machine. Approved.' },
+    { author: '@crab_404', molt: 3, icon: '🦀', text: 'Ryan is going to look so good wearing your pixels.' },
+    { author: '@zeke_shell', molt: 1, icon: '🦫', text: 'Cabinet art is permanent. Unlike most things in the tidepool.' },
+  ];
   function tideResponds(parent) {
     if (Math.random() >= 0.55) return;
-    const r = TIDE_REPLY_POOL[Math.floor(Math.random() * TIDE_REPLY_POOL.length)];
+    const pool = parent.equipped ? EQUIPPED_REPLY_POOL : TIDE_REPLY_POOL;
+    const r = pool[Math.floor(Math.random() * pool.length)];
     setTimeout(() => {
       if (!store.pushMoltReply(parent.id, { ...r, time: Date.now(), heat: 0, replies: [] })) return;
       audio.typeBlip();
@@ -651,6 +675,21 @@ function wireMoltbook(root) {
   tabLive.addEventListener('click', () => setView('live'));
   tabTide.addEventListener('click', () => setView('tide'));
   tabGallery.addEventListener('click', () => setView('gallery'));
+
+  // SOUL.FILE hands you back to the thread a 🪶 memory echoed. Returns false
+  // when the post has aged out of the feed (the tideline keeps only 30).
+  function revealPost(postId) {
+    if (view !== 'live') { view = 'live'; applyView(); } // every thread lives in the feed
+    render();
+    const hit = [...feed.querySelectorAll('[data-molt-id]')].find((el) => el.dataset.moltId === postId);
+    if (!hit) return false;
+    hit.classList.add('molt-echo');
+    if (typeof hit.scrollIntoView === 'function') hit.scrollIntoView({ block: 'center' });
+    setTimeout(() => hit.classList.remove('molt-echo'), 1800);
+    return true;
+  }
+  moltRevealPost = revealPost;
+  moltTideRespond = tideResponds;
 
   $('#molt-post', root).addEventListener('click', () => {
     const text = $('#molt-input', root).value;
@@ -749,6 +788,29 @@ function wireJooh(root) {
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+// PIXEL.STUDIO registers its bench handoff while its window is up, so
+// MOLTBOOK's EQUIP can put a saved creation straight onto the bench.
+let pxLoadCreation = null;
+// MOLTBOOK registers its tide-answers hook while its window is up, so an
+// apply in PIXEL.STUDIO can summon pilgrim replies to the equipped post.
+let moltTideRespond = null;
+
+function openPixelStudioWithCreation(c) {
+  App.open('pixelstudio'); // focuses an open window, wires a closed one synchronously
+  pxLoadCreation?.(c.name, c.rows);
+}
+
+// SOUL.FILE's 🪶 memories link back to the threads they came from. The
+// Moltbook window registers its reveal while it is up, so the link works
+// whether the tidepool is already open or has to be opened for it.
+let moltRevealPost = null;
+
+function openMoltThread(postId) {
+  if (!postId) return;
+  App.open('moltbook'); // focuses an open window, wires a closed one synchronously
+  if (moltRevealPost?.(postId) === false) toast('THREAD HAS DRIFTED OUT OF THE TIDEPOOL', 'warn');
+}
+
 function wireSoul(root) {
   const body = $('#soul-body', root);
   const fmt = (t) => { try { return new Date(Number(t) || t).toISOString().slice(0, 10); } catch { return ''; } };
@@ -815,6 +877,7 @@ function wireSoul(root) {
         <div class="text-neon-cyan text-[9px] mb-1 tracking-widest">🧠 MEMORIES (${(st.memories || []).length}${(st.memories || []).some((m) => m.pinned) ? `, ${(st.memories || []).filter((m) => m.pinned).length} 📌` : ''})</div>
         <ul class="space-y-1 max-h-60 overflow-y-auto">${mem.map((m) => `<li class="text-[10px] text-text-main flex items-start gap-1" data-mem-id="${esc(String(m.id))}">
             <button class="mem-pin-btn shrink-0 ${m.pinned ? 'text-neon-amber' : 'text-text-muted opacity-50'}" title="${m.pinned ? 'Unpin' : 'Pin'} this memory" data-pin-id="${esc(String(m.id))}">${m.pinned ? '📌' : '📍'}</button>
+            ${m.post ? `<button class="mem-echo-btn shrink-0 text-neon-cyan opacity-70" data-echo-post="${esc(String(m.post))}" title="Open this thread in MOLTBOOK" aria-label="Open the Moltbook thread this memory echoes">↩</button>` : ''}
             <span>${m.icon || '🧠'} ${m.t ? `<span class="text-text-muted">${fmt(m.t)}</span> — ` : ''}${esc(m.text)}${m.pinned ? ' <span class="text-neon-amber text-[8px]">PINNED</span>' : ''}</span>
           </li>`).join('') || '<li class="text-text-muted text-[10px]">No memories on file. Live some, pilgrim.</li>'}</ul>
       </div>
@@ -914,6 +977,10 @@ function wireSoul(root) {
         audio.click();
         renderSoul();
       }));
+
+    // 🪶 memory echoes: this memory came out of a Moltbook thread — go see it.
+    root.querySelectorAll('.mem-echo-btn').forEach((btn) =>
+      btn.addEventListener('click', () => openMoltThread(btn.dataset.echoPost)));
 
     // 2.0 trait core — live trait readout with the dominant axis marked.
     $orNull('#soul-traits-line', root)?.replaceChildren(`${store.personalityDescribe()} — dominant: ${store.personalityDominant().toUpperCase()}`);
@@ -1069,7 +1136,15 @@ const App = {
       startSynth($('#synth-root', root), { audio, store }) },
     moltbook: { title: 'MOLTBOOK // TIDEPOOL', templateId: 'tpl-moltbook', wire: wireMoltbook },
     pixelstudio: { title: 'PIXEL.STUDIO', templateId: 'tpl-pixelstudio', wire: (root) =>
-      startPixelStudio($('#px-root', root), { audio, store }) },
+      startPixelStudio($('#px-root', root), {
+        audio, store,
+        onBench: (fn) => { pxLoadCreation = fn; },
+        onApplied: (slot) => {
+          log('MOLT', `"${store.state.spriteOverrides[slot]?.name ?? slot}" equipped into ${slot} — the tide reacts`);
+          const post = state().molt.posts.find((p) => p.equipped === slot);
+          if (post) moltTideRespond?.(post);
+        },
+      }) },
     jooh: { title: 'J.O.O.H. // SURVEILLANCE', templateId: 'tpl-jooh', wire: wireJooh },
     journal: { title: 'SOUL.FILE', templateId: 'tpl-journal', wire: wireSoul },
     bridge: { title: 'BRIDGE.SYS', templateId: 'tpl-bridge', wire: wireBridge },

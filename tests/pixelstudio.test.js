@@ -102,12 +102,12 @@ function importFile(el, text, name = 'x.sprite.json') {
 }
 
 describe('pixelstudio module (headless)', () => {
-  function host() {
+  function host(storeState = {}) {
     const el = document.createElement('div');
     document.body.appendChild(el);
     const audio = { click: vi.fn() };
     const store = {
-      state: { spriteOverrides: {} },
+      state: { spriteOverrides: {}, creations: [], ...storeState },
       saveCreation: vi.fn(() => ({ ok: true, creation: { id: 'c1', name: 'TEST' } })),
       postCreation: vi.fn(() => ({ ok: true })),
       setSpriteOverride: vi.fn(() => ({ ok: true, slot: 'HEART' })),
@@ -337,6 +337,34 @@ describe('pixelstudio module (headless)', () => {
     expect(JSON.parse(window.localStorage.getItem('bro_os_px_draft'))).toEqual(['.B', 'B.']);
   });
 
+  it('an imported .sprite.json installs as game art in one pass — no redrawing', async () => {
+    const { el, store } = host();
+    const rows = Array.from({ length: 10 }, () => 'F'.repeat(12)); // COIN's 12×10 grid
+    await importFile(el, JSON.stringify({ name: 'TIDE_COIN', rows }));
+    expect(el.querySelector('#px-status').textContent).toContain('FITS COIN');
+
+    // picking the slot keeps the file's art on the bench (import benches like a shelf load)
+    const slotEl = el.querySelector('#px-slot');
+    slotEl.value = 'COIN';
+    slotEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+    expect(el.querySelector('#px-status').textContent).toContain('SHELF ART ON BENCH');
+    expect(JSON.parse(window.localStorage.getItem('bro_os_px_draft'))).toEqual(rows);
+
+    // APPLY binds the file's own rows — the shared sprite is live in the cabinet
+    el.querySelector('#px-apply').click();
+    expect(store.setSpriteOverride).toHaveBeenCalledWith('COIN', rows, 'TIDE_COIN');
+  });
+
+  it('an imported sprite that fits no slot still benches for remixing, naming no slot', async () => {
+    const { el } = host();
+    await importFile(el, JSON.stringify({ name: 'odd_duck', rows: ['OO', 'OO', 'OO'] })); // 3×3 fits nothing
+    expect(el.querySelector('#px-status').textContent).toContain('FREE CANVAS');
+    const slotEl = el.querySelector('#px-slot');
+    slotEl.value = 'HEART';
+    slotEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+    expect(el.querySelector('#px-status').textContent).toContain('NEEDS'); // says why it won't bind
+  });
+
   it('import refuses junk instead of quietly wiping the canvas', async () => {
     const { el } = host();
     await importFile(el, 'not json at all');
@@ -393,6 +421,78 @@ describe('pixelstudio module (headless)', () => {
     expect(src).toContain("export const MY_THING = spr([");
     expect(src).toContain("], X);");
     expect(src.split('\n').filter((l) => l.trim().startsWith("'")).length).toBe(16);
+  });
+
+  it('the shelf says so when nothing has been saved', () => {
+    const { el } = host();
+    expect(el.querySelector('#px-soul').textContent).toContain('THE SHELF IS EMPTY');
+  });
+
+  it('a saved creation loads back onto the bench, art and name intact', () => {
+    const { el, store } = host({
+      creations: [{ id: 'c9', name: 'DOOM RUNNER', author: '@you_pilgrim', rows: ['RR..', '..BB'] }],
+    });
+    const thumb = el.querySelector('#px-soul [data-creation="c9"]');
+    expect(thumb.querySelector('canvas')).toBeTruthy(); // drawn with its real art
+
+    thumb.click();
+    expect(el.querySelector('#px-name').value).toBe('DOOM RUNNER');
+    expect(el.querySelector('#px-canvas').width).toBe(4 * 16);
+    expect(el.querySelector('#px-canvas').height).toBe(2 * 16);
+    expect(JSON.parse(window.localStorage.getItem('bro_os_px_draft'))).toEqual(['RR..', '..BB']);
+    expect(el.querySelector('#px-slot').value).toBe(''); // free until you choose a target
+    expect(el.querySelector('#px-status').textContent).toContain('NO BANK SPRITE IS THAT SHAPE');
+    expect(store.setSpriteOverride).not.toHaveBeenCalled();
+  });
+
+  it('loading a creation names the slots it fits, and the slot pick keeps the art', () => {
+    const { el } = host({
+      creations: [{ id: 'c1', name: 'TIDE COIN', author: '@you_pilgrim', rows: bankRows('COIN') }],
+    });
+    el.querySelector('#px-soul [data-creation="c1"]').click();
+    expect(el.querySelector('#px-status').textContent).toContain('FITS COIN');
+
+    const slotEl = el.querySelector('#px-slot');
+    slotEl.value = 'COIN';
+    slotEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+    expect(el.querySelector('#px-status').textContent).toContain('SHELF ART ON BENCH');
+    expect(JSON.parse(window.localStorage.getItem('bro_os_px_draft'))).toEqual(bankRows('COIN'));
+
+    // a slot the art is the wrong shape for says so rather than binding nothing
+    slotEl.value = 'HEART';
+    slotEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+    expect(el.querySelector('#px-status').textContent).toContain('NEEDS');
+
+    // the bank strip is still how you load bank art to remix
+    el.querySelector('[data-slot="HEART"]').click();
+    expect(el.querySelector('#px-status').textContent).toContain('BANK ART');
+  });
+
+  it('onBench hands the bench loader to the shell, and onApplied fires when art goes live', () => {
+    let benched = null;
+    let appliedSlot = null;
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    const store = {
+      state: { spriteOverrides: {}, creations: [] },
+      setSpriteOverride: vi.fn(() => ({ ok: true, slot: 'COIN' })),
+    };
+    const stop = startPixelStudio(el, { audio: { click: vi.fn() }, store, onBench: (fn) => { benched = fn; }, onApplied: (slot) => { appliedSlot = slot; } });
+    teardowns.push(stop);
+
+    expect(typeof benched).toBe('function');
+    const rows = Array.from({ length: 10 }, () => 'F'.repeat(12)); // COIN's 12×10 grid
+    benched('TIDE_COIN', rows); // a shell-driven bench load
+    expect(el.querySelector('#px-name').value).toBe('TIDE_COIN');
+    expect(el.querySelector('#px-status').textContent).toContain('FITS COIN');
+
+    const slotEl = el.querySelector('#px-slot');
+    slotEl.value = 'COIN';
+    slotEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+    expect(el.querySelector('#px-status').textContent).toContain('SHELF ART ON BENCH');
+    el.querySelector('#px-apply').click();
+    expect(store.setSpriteOverride).toHaveBeenCalledWith('COIN', rows, 'TIDE_COIN');
+    expect(appliedSlot).toBe('COIN');
   });
 });
 
@@ -500,6 +600,38 @@ describe('pixelstudio UI integration (real shell)', () => {
     content.querySelector('#px-reset').click();
     expect(content.querySelector('#px-status').textContent).toContain('RESET');
     expect(getSprite('RYAN_RUN1')).toBe(RYAN_RUN1);
+    App.close('arcade', { silent: true });
+  });
+
+  it('a SAVED creation is loaded back and bound to a game sprite', () => {
+    const content = openFromCabinet();
+    // start from real bank art, mark it, and hang it on the shelf
+    content.querySelector('[data-slot="COIN"]').click();
+    const canvas = content.querySelector('#px-canvas');
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: canvas.width, height: canvas.height });
+    [...content.querySelectorAll('#px-palette button')].find((b) => b.dataset.char === 'R').click();
+    press(canvas, 8, 8);
+    content.querySelector('#px-name').value = 'TIDE COIN';
+    content.querySelector('#px-save').click();
+    expect(content.querySelector('#px-status').textContent).toContain('SAVED');
+
+    // wipe the bench: whatever comes back can only have come from the shelf
+    content.querySelector('#px-clear').click();
+    const mine = content.querySelector('#px-soul [data-creation]'); // newest is first
+    expect(mine).toBeTruthy();
+    mine.click();
+    expect(content.querySelector('#px-status').textContent).toContain('LOADED');
+    expect(content.querySelector('#px-status').textContent).toContain('FITS COIN');
+
+    const slotEl = content.querySelector('#px-slot');
+    slotEl.value = 'COIN';
+    slotEl.dispatchEvent(new window.Event('change', { bubbles: true }));
+    content.querySelector('#px-apply').click();
+
+    // the cabinet now draws the shelf creation, not the bank coin
+    expect(getSprite('COIN')[0].r[0][0]).toBe('R');
+    content.querySelector('#px-reset').click();
+    expect(getSprite('COIN')).toBe(COIN);
     App.close('arcade', { silent: true });
   });
 });

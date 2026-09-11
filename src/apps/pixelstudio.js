@@ -48,10 +48,11 @@ const SLOT_OPTIONS = (() => {
   ).join('');
 })();
 
-export function startPixelStudio(container, { audio = {}, store = null } = {}) {
+export function startPixelStudio(container, { audio = {}, store = null, onBench = null, onApplied = null } = {}) {
   // ── state ──────────────────────────────────────────────────
   let grid = blankGrid(16, 16);
   let slot = ''; // '' = free canvas, else a bank sprite name
+  let benchArt = null; // rows the artist brought (a shelf creation) — a slot pick must not erase them
   let active = STUDIO_PALETTE[0];
   let tool = 'paint'; // paint | erase | pick | fill
   let gridOn = true;
@@ -86,6 +87,10 @@ export function startPixelStudio(container, { audio = {}, store = null } = {}) {
       <div class="flex flex-col gap-1">
         <span class="text-[9px] text-text-muted">BANK // CLICK A BUILT-IN SPRITE TO REMIX IT</span>
         <div id="px-bank" class="flex flex-wrap gap-1 items-end"></div>
+      </div>
+      <div class="flex flex-col gap-1">
+        <span class="text-[9px] text-text-muted">SHELF // CLICK A SAVED CREATION TO LOAD IT</span>
+        <div id="px-soul" class="flex flex-wrap gap-1 items-end"></div>
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <select id="px-size" class="bg-void border border-border text-[10px] px-1 py-0.5" aria-label="Canvas size">
@@ -365,14 +370,24 @@ export function startPixelStudio(container, { audio = {}, store = null } = {}) {
       status(`FREE CANVAS — ${w()}×${h()}. Pick a game slot to paint its art.`);
       return;
     }
+    // Bench art the artist brought (a shelf creation) outranks the slot's
+    // own art: picking a slot is then choosing a TARGET, not loading that
+    // slot's art — the bank strip is how you load art to remix.
     const mine = overrideFor(name);
-    const rows = normalizeGrid(mine ?? bankRows(name));
+    const rows = normalizeGrid(benchArt ?? mine ?? bankRows(name));
     if (rows) grid = rows;
     resizeCanvas();
     saveDraft();
     repaint();
     syncSizeSelect();
     const { w: tw, h: th, frames } = slotSize(name);
+    if (benchArt) {
+      const fits = benchArt.length === th && benchArt[0].length === tw;
+      status(fits
+        ? `SLOT ${name} — ${tw}×${th} · SHELF ART ON BENCH. APPLY TO GAME binds it.`
+        : `SLOT ${name} NEEDS ${tw}×${th} — YOUR ART IS ${benchArt[0].length}×${benchArt.length}.`);
+      return;
+    }
     status(`SLOT ${name} — ${tw}×${th}${frames > 1 ? ` × ${frames} FRAMES` : ''} · ${mine ? 'YOUR ART' : 'BANK ART'}`);
   }
 
@@ -384,6 +399,7 @@ export function startPixelStudio(container, { audio = {}, store = null } = {}) {
   // The bank, drawn with its real art: one button per overridable sprite, so
   // you can SEE what you are about to remix before you load it.
   const bankEl = container.querySelector('#px-bank');
+  const soulEl = container.querySelector('#px-soul');
   for (const [name, meta] of Object.entries(OVERRIDABLE)) {
     const rows = bankRows(name);
     const btn = document.createElement('button');
@@ -399,11 +415,67 @@ export function startPixelStudio(container, { audio = {}, store = null } = {}) {
     if (thumbCtx) drawSprite(thumbCtx, rows, X, 0, 0, { scale: 1 });
     btn.appendChild(thumb);
     btn.addEventListener('click', () => {
+      benchArt = null; // bank art is what you want on the bench here
       slotEl.value = name;
       selectSlot(name);
       audio.click?.();
     });
     bankEl.appendChild(btn);
+  }
+
+  // The shelf, mirroring the bank strip: your SAVED creations, loaded back
+  // onto the bench. Without this, a painting only exists while its window is
+  // open — you could never take a shelf piece and put it on Ryan.
+  function renderSoulStrip() {
+    soulEl.replaceChildren();
+    const creations = store?.state?.creations ?? [];
+    if (!creations.length) {
+      const none = document.createElement('span');
+      none.className = 'text-[9px] text-text-muted';
+      none.textContent = 'THE SHELF IS EMPTY — SAVE TO SOUL hangs a creation here.';
+      soulEl.appendChild(none);
+      return;
+    }
+    for (const c of creations) {
+      const rows = normalizeGrid(c.rows);
+      if (!rows) continue;
+      const btn = document.createElement('button');
+      btn.className = 'px-bank-btn border border-border bg-void p-0.5 cursor-pointer';
+      btn.dataset.creation = c.id;
+      btn.title = `${c.name} · ${c.author}`;
+      btn.setAttribute('aria-label', `Load saved creation ${c.name}`);
+      const thumb = document.createElement('canvas');
+      thumb.width = rows[0].length;
+      thumb.height = rows.length;
+      thumb.style.imageRendering = 'pixelated';
+      const thumbCtx = typeof thumb.getContext === 'function' ? thumb.getContext('2d') : null;
+      if (thumbCtx) drawSprite(thumbCtx, rows, X, 0, 0, { scale: 1 });
+      btn.appendChild(thumb);
+      btn.addEventListener('click', () => loadCreation(c.name, rows));
+      soulEl.appendChild(btn);
+    }
+  }
+
+  // Put a saved creation back on the bench.
+  function loadCreation(name, rows) {
+    benchArt = rows; // from here a slot pick chooses a target, not the art
+    grid = rows;
+    nameEl.value = name;
+    slot = '';
+    slotEl.value = '';
+    bankEl.querySelectorAll('[data-slot]').forEach((b) => b.classList.remove('px-selected'));
+    resizeCanvas();
+    saveDraft();
+    repaint();
+    syncSizeSelect();
+    const fits = Object.keys(OVERRIDABLE).filter((s) => {
+      const size = slotSize(s);
+      return size && size.w === rows[0].length && size.h === rows.length;
+    });
+    status(`LOADED "${spriteName()}" ${w()}×${h()} — `
+      + (fits.length ? `FITS ${fits.join(' · ')}. Pick one, then APPLY TO GAME.`
+        : 'NO BANK SPRITE IS THAT SHAPE, but it can stay on the shelf.'));
+    audio.click?.();
   }
 
   container.querySelector('#px-apply').addEventListener('click', () => {
@@ -413,12 +485,14 @@ export function startPixelStudio(container, { audio = {}, store = null } = {}) {
     if (!res?.ok) { status(`APPLY FAILED — ${res?.reason ?? 'NO SOUL CONNECTION'}`); audio.error?.(); return; }
     status(`APPLIED → ${slot} now draws "${name}". Every cabinet sees it.`);
     audio.levelUp?.();
+    onApplied?.(slot); // the shell announces it to the tidepool
   });
 
   container.querySelector('#px-reset').addEventListener('click', () => {
     if (!slot) { status('RESET FAILED — PICK A GAME SLOT FIRST'); audio.error?.(); return; }
     const res = store?.resetSpriteOverride?.(slot);
     if (!res?.ok) { status(`RESET FAILED — ${res?.reason ?? 'NO SOUL CONNECTION'}`); audio.error?.(); return; }
+    benchArt = null;
     grid = normalizeGrid(bankRows(slot)) ?? grid;
     resizeCanvas();
     saveDraft();
@@ -449,6 +523,7 @@ export function startPixelStudio(container, { audio = {}, store = null } = {}) {
     const name = spriteName();
     const res = store?.saveCreation?.(name, grid);
     if (!res?.ok) { status(`SAVE FAILED — ${res?.reason ?? 'NO SOUL CONNECTION'}`); audio.error?.(); return; }
+    renderSoulStrip(); // the shelf just gained it — show it without a reopen
     status(`SAVED → "${name}" hung in the MOLTBOOK gallery.`);
     audio.click?.();
   });
@@ -460,6 +535,7 @@ export function startPixelStudio(container, { audio = {}, store = null } = {}) {
     if (!saved?.ok) { status(`POST FAILED — ${saved?.reason ?? 'NO SOUL CONNECTION'}`); audio.error?.(); return; }
     const posted = store.postCreation(saved.creation.id);
     if (!posted.ok) { status(`POST FAILED — ${posted.reason}`); audio.error?.(); return; }
+    renderSoulStrip();
     status(`POSTED → "${name}" is on the tide. MOLTBOOK › GALLERY shows the shelf.`);
     audio.click?.();
   });
@@ -497,6 +573,10 @@ export function startPixelStudio(container, { audio = {}, store = null } = {}) {
     }
     const unknownInk = payload.rows.join('').split('').filter((c) => c !== TRANSPARENT && !X[c]).length;
     grid = rows;
+    // A file's art benches like shelf art: the next slot pick chooses a
+    // TARGET (not that slot's own art), so an imported sprite reaches a
+    // cabinet without redrawing. RESET SLOT clears it, like any bench art.
+    benchArt = rows;
     slot = '';
     slotEl.value = '';
     if (typeof payload.name === 'string' && payload.name.trim()) nameEl.value = payload.name.trim().slice(0, 24);
@@ -504,7 +584,14 @@ export function startPixelStudio(container, { audio = {}, store = null } = {}) {
     saveDraft();
     repaint();
     syncSizeSelect();
-    status(`IMPORTED → "${spriteName()}" ${w()}×${h()}. FREE CANVAS — remix it, or pick a slot to apply.`
+    const fits = Object.keys(OVERRIDABLE).filter((s) => {
+      const size = slotSize(s);
+      return size && size.w === rows[0].length && size.h === rows.length;
+    });
+    status(`IMPORTED → "${spriteName()}" ${w()}×${h()}. `
+      + (fits.length
+        ? `FITS ${fits.join(' · ')} — pick the slot and APPLY TO GAME installs it.`
+        : 'FREE CANVAS — remix it, or paint it into a slot shape.')
       + (unknownInk ? ` ${unknownInk} UNKNOWN INK EXISTED → TRANSPARENT` : ''));
     audio.click?.();
   }
@@ -542,11 +629,14 @@ export function startPixelStudio(container, { audio = {}, store = null } = {}) {
   });
 
   // ── boot ───────────────────────────────────────────────────
+  renderSoulStrip();
   syncSizeSelect();
   setActiveSwatch();
   markTools();
   container.querySelector('#px-grid').classList.add('px-selected');
   repaint();
+  // Other windows (MOLTBOOK's EQUIP) bench a saved creation through this.
+  onBench?.(loadCreation);
   raf = requestAnimationFrame(loop);
 
   return () => {

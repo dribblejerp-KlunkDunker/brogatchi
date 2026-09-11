@@ -221,3 +221,88 @@ describe('sprite gallery', () => {
     expect(store.state.molt.posts[0].sprite).toBeUndefined();
   });
 });
+
+describe('equipped sprite posts', () => {
+  const COIN_ROWS = Array.from({ length: 10 }, () => 'F'.repeat(12)); // COIN's 12×10 grid
+
+  it('equipping a sprite posts it to the tidepool with the slot attached, and echoes a linked memory', () => {
+    const { store } = makeStore();
+    store.load();
+    const res = store.setSpriteOverride('COIN', COIN_ROWS, 'TIDE_COIN');
+    expect(res.ok).toBe(true);
+
+    const post = store.state.molt.posts[0];
+    expect(post.equipped).toBe('COIN');
+    expect(post.text).toContain('TIDE_COIN');
+    expect(post.sprite).toEqual(COIN_ROWS);
+    // the soul echo hands you back to this exact thread
+    const echo = store.state.memories.find((m) => m.text.includes('Replaced COIN'));
+    expect(echo.post).toBe(post.id);
+  });
+
+  it('a shape that would tear a cabinet is refused before anything is posted', () => {
+    const { store } = makeStore();
+    store.load();
+    const before = store.state.molt.posts.length;
+    expect(store.setSpriteOverride('HEART', COIN_ROWS, 'TIDE_COIN').reason).toContain('NEEDS 10×8');
+    expect(store.setSpriteOverride('NOPE', COIN_ROWS, 'TIDE_COIN').reason).toBe('UNKNOWN SLOT');
+    expect(store.state.molt.posts).toHaveLength(before);
+  });
+
+  it('the equipped marker survives a save/reload round-trip', () => {
+    const storage = memStorage();
+    const store = createStore({ storage, now: () => 5000 });
+    store.load();
+    store.setSpriteOverride('COIN', COIN_ROWS, 'TIDE_COIN');
+    store.save();
+
+    const reloaded = createStore({ storage, now: () => 5000 });
+    reloaded.load();
+    expect(reloaded.state.molt.posts[0].equipped).toBe('COIN');
+    expect(reloaded.state.spriteOverrides.COIN.name).toBe('TIDE_COIN');
+  });
+});
+
+describe('moltbook memory echo (🪶)', () => {
+  it('a post writes a 🪶 memory that links back to its own thread', () => {
+    const { store } = makeStore();
+    store.load();
+    store.postToMolt('  the tide   is  listening  ');
+
+    const echo = store.state.memories.find((m) => m.icon === '🪶');
+    expect(echo.post).toBe(store.state.molt.posts[0].id);  // the link back
+    expect(echo.text).toContain('the tide is listening');   // one flat line
+    expect(echo.text).not.toMatch(/\s{2}/);                 // not the raw body
+    expect(echo.imp).toBe(2);
+    // the first post still pins the 2.0 milestone alongside its echo
+    expect(store.state.memories.some((m) => m.icon === '🦀' && m.pinned)).toBe(true);
+  });
+
+  it('every post echoes, each pointing at its own thread', () => {
+    const { store } = makeStore();
+    store.load();
+    store.postToMolt('one');
+    store.postToMolt('two');
+
+    const echoes = store.state.memories.filter((m) => m.icon === '🪶');
+    expect(echoes).toHaveLength(2);
+    expect(new Set(echoes.map((e) => e.post))).toEqual(new Set(store.state.molt.posts.slice(0, 2).map((p) => p.id)));
+  });
+
+  it('sharing a painting echoes too, and the link survives a reload', () => {
+    const storage = memStorage();
+    const store = createStore({ storage, now: () => 5000 });
+    store.load();
+    const target = store.state.creations[0];
+    store.postCreation(target.id);
+
+    const echo = store.state.memories.find((m) => m.icon === '🪶');
+    expect(echo.text).toContain(target.name);
+    expect(echo.post).toBe(store.state.molt.posts[0].id);
+
+    store.save();
+    const reloaded = createStore({ storage, now: () => 5000 });
+    reloaded.load();
+    expect(reloaded.state.memories.find((m) => m.icon === '🪶').post).toBe(echo.post);
+  });
+});
