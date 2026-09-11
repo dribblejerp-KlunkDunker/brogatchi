@@ -164,4 +164,57 @@ describe('CHIPTUNE.SYNTH remix lab (real shell)', () => {
 
     expect(problems(), problems().map((p) => `${p.method}: ${p.text}`).join('\n')).toHaveLength(0);
   });
+
+  it('placing a note is heard as the note; removing it clicks — and running shows bar/beat', { timeout: 20000 }, async () => {
+    await boot();
+    App.open('composer');
+    const root = synthRoot();
+    const { audio } = await import('../src/audio.js');
+    const leadSpy = vi.spyOn(audio, 'leadNote').mockImplementation(() => {});
+    const clickSpy = vi.spyOn(audio, 'click').mockImplementation(() => {});
+
+    // placing a note previews THAT note and does not bury it under the UI blip
+    const cell = root.querySelector('.synth-cell[data-step="3"]');
+    const pitch = Number(cell.dataset.row);
+    click(cell);
+    expect(bench().track.lead[3]).toBe(pitch);
+    expect(leadSpy).toHaveBeenCalled();
+    expect(leadSpy.mock.calls.some(([f]) => Math.abs(f - midiFreq(pitch)) < 1e-6)).toBe(true);
+    expect(clickSpy).not.toHaveBeenCalled();
+
+    // removing the note is the removal click
+    clickSpy.mockClear();
+    click(cell);
+    expect(bench().track.lead[3]).toBe(0);
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+
+    // RUN: the readout counts bars and quarter-note beats, the lamp strip
+    // lights the current step, and HALT reports the loop as stopped
+    const play = root.querySelector('#synth-play');
+    const readout = root.querySelector('#synth-barbeat');
+    const lamps = () => root.querySelector('#synth-beats').querySelectorAll('.synth-lamp.lit');
+    expect(readout.textContent).toBe('■ STOPPED');
+    expect(root.querySelectorAll('#synth-beats .synth-lamp')).toHaveLength(16);
+
+    click(play);
+    expect(readout.textContent).toBe('BAR 1 · BEAT 1');
+    expect(lamps()).toHaveLength(1);
+    expect(lamps()[0].dataset.step).toBe('0');
+
+    // 9 ticks in, step 8 sounds: beat 1 of bar 2 (each bar is 8 eighth-steps)
+    const eighth = 60000 / TRACKSETS.flappy[0].bpm / 2;
+    await vi.advanceTimersByTimeAsync(eighth * 9 + 20);
+    expect(readout.textContent).toBe('BAR 2 · BEAT 1');
+    expect(lamps()[0].dataset.step).toBe('8');
+
+    // two ticks later, step 10 sounds: beat 2 of bar 2
+    await vi.advanceTimersByTimeAsync(eighth * 2 + 20);
+    expect(readout.textContent).toBe('BAR 2 · BEAT 2');
+
+    click(play); // HALT
+    expect(readout.textContent).toBe('■ STOPPED');
+    expect(lamps()).toHaveLength(0);
+
+    expect(problems(), problems().map((p) => `${p.method}: ${p.text}`).join('\n')).toHaveLength(0);
+  });
 });

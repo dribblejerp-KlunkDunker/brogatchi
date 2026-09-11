@@ -33,6 +33,8 @@ export function startSynth(container, { audio, store, rng = Math.random }) {
   let playing = false;
   let timer = null;
   let step = 0;
+  let bar = 1;   // 1-based, for the readout
+  let beat = 1;  // 1-based, for the readout
 
   container.innerHTML = `
     <div class="font-mono text-[10px]">
@@ -49,6 +51,8 @@ export function startSynth(container, { audio, store, rng = Math.random }) {
       </div>
       <div class="flex items-center gap-2 mb-2">
         <div id="synth-voices" class="flex gap-1"></div>
+        <div id="synth-beats" class="flex gap-[3px] ml-2" aria-hidden="true"></div>
+        <span id="synth-barbeat" class="text-neon-cyan ml-2 tabular-nums w-24">BAR 1 · BEAT 1</span>
         <span class="text-text-muted ml-auto">BPM</span>
         <input id="synth-bpm" type="range" min="60" max="200" class="w-24 accent-[var(--color-neon-green)]" aria-label="BPM">
         <span id="synth-bpm-val" class="text-neon-green w-7 text-right"></span>
@@ -74,6 +78,8 @@ export function startSynth(container, { audio, store, rng = Math.random }) {
   const bpmInput = container.querySelector('#synth-bpm');
   const bpmVal = container.querySelector('#synth-bpm-val');
   const statusEl = container.querySelector('#synth-status');
+  const barBeatEl = container.querySelector('#synth-barbeat');
+  const beatsEl = container.querySelector('#synth-beats');
 
   const stock = (id, t) => TRACKSETS[id]?.[t] || TRACKSETS[id][0];
   const setStatus = (text) => { statusEl.textContent = text; };
@@ -102,6 +108,27 @@ export function startSynth(container, { audio, store, rng = Math.random }) {
     });
   }
 
+  // The running loop's position, visible without hunting the grid: a numeric
+  // readout (BAR n · BEAT n, beats = quarter notes = 2 steps) and a 16-lamp
+  // strip where the current step's lamp lights while it plays.
+  function buildBeatLamps() {
+    beatsEl.innerHTML = '';
+    for (let s = 0; s < STEPS; s++) {
+      const lamp = document.createElement('span');
+      lamp.className = 'synth-lamp';
+      lamp.dataset.step = String(s);
+      if (s % 4 === 0) lamp.classList.add('down'); // the bar's quarter beats
+      beatsEl.appendChild(lamp);
+    }
+  }
+
+  function markBeats() {
+    beatsEl.querySelectorAll('.synth-lamp').forEach((l) => {
+      l.classList.toggle('lit', playing && Number(l.dataset.step) === step);
+    });
+    barBeatEl.textContent = playing ? `BAR ${bar} · BEAT ${beat}` : '■ STOPPED';
+  }
+
   function buildGrid() {
     grid.innerHTML = '';
     for (const row of rows()) {
@@ -126,6 +153,7 @@ export function startSynth(container, { audio, store, rng = Math.random }) {
   // A lane is monophonic per step, so turning a note on repaints its whole
   // column: the pitch that used to be there is gone.
   function toggleCell(row, s) {
+    audio?.init?.(); // autoplay policy: a cell click IS a user gesture
     if (voice === 'hat') {
       track.hat[s] = track.hat[s] ? 0 : 1;
       if (track.hat[s]) audio?.hat?.(0.5);
@@ -134,23 +162,28 @@ export function startSynth(container, { audio, store, rng = Math.random }) {
       track[voice][s] = on ? 0 : row;
       if (!on) VOICES.find((v) => v.id === voice).play(audio, row, 0.12);
     }
-    audio?.click?.();
+    // The placed note is the placement sound; the UI blip only marks removal,
+    // where it would otherwise play on top of (and drown) the preview.
+    if (!isOn(row, s)) audio?.click?.();
     grid.querySelectorAll(`.synth-cell[data-step="${s}"]`).forEach((c) => {
       c.classList.toggle('on', isOn(Number(c.dataset.row), s));
     });
     setStatus('EDITING — SAVE to bake it into the cabinet');
   }
 
-  /* ─────────── playback ─────────── */
-
   function tick() {
     markPlayhead();
+    markBeats();
     const stepDur = 60 / track.bpm / 2; // 8th notes, same grid as gameMusic
     for (const v of VOICES) {
       const note = track[v.id][step];
       if (note) v.play(audio, note, v.id === 'bass' ? stepDur * 1.7 : stepDur * 0.92);
     }
     step = (step + 1) % STEPS;
+    if (step % 2 === 0) {          // quarter-note boundary → next beat
+      beat = (beat % 4) + 1;
+      if (beat === 1) bar++;
+    }
   }
 
   function schedule() {
@@ -162,9 +195,10 @@ export function startSynth(container, { audio, store, rng = Math.random }) {
   function setPlaying(on) {
     playing = on;
     clearInterval(timer);
-    if (playing) { step = 0; schedule(); }
+    if (playing) { step = 0; bar = 1; beat = 1; schedule(); }
     playBtn.textContent = playing ? '■ HALT' : '▶ RUN';
     markPlayhead();
+    markBeats();
   }
 
   /* ─────────── selection: which cabinet loop is on the bench ─────────── */
@@ -282,6 +316,8 @@ export function startSynth(container, { audio, store, rng = Math.random }) {
     setStatus('RANDOMIZED — SAVE it or run it again');
   });
 
+  buildBeatLamps();
+  markBeats();
   loadSelection();
 
   // Debug/test handle (same convention as the arcade's canvas.__game):

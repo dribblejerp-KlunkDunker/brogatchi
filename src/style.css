@@ -378,6 +378,11 @@ html[data-scanlines='off'] body::after { display: none; }
 
 /* Runtime-toggled (not scanned by Tailwind): selected state in PIXEL.STUDIO */
 .px-selected { border-color: var(--color-neon-magenta, #ff2ea6) !important; }
+/* …and the thread a SOUL.FILE memory echo hands you back to */
+.molt-echo {
+  border-color: var(--color-neon-cyan, #00F0FF) !important;
+  box-shadow: var(--shadow-neon-cyan);
+}
 .window-btn-close, .window-btn-min, .window-btn-max {
   background: none;
   border: none;
@@ -402,6 +407,19 @@ html[data-scanlines='off'] body::after { display: none; }
 }
 .synth-cell.playhead { border-color: var(--color-neon-cyan); }
 .synth-cell.playhead.on { background: var(--color-text-glow); }
+
+/* Beat lamps: the running loop's position at a glance. Downbeats are wider. */
+.synth-lamp {
+  width: 6px;
+  height: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-void);
+}
+.synth-lamp.down { width: 9px; border-color: var(--color-neon-cyan); }
+.synth-lamp.lit {
+  background: var(--color-neon-cyan);
+  box-shadow: var(--shadow-neon-cyan, 0 0 6px rgba(0, 240, 255, 0.7));
+}
 
 /* --- Stat bar glow accents --- */
 .bar-glow-green  { box-shadow: 0 0 8px rgba(0, 255, 157, 0.6); }
