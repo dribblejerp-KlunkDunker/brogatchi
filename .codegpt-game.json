@@ -1,0 +1,24 @@
+{
+  "name": "bro-os",
+  "engine": "web-vite",
+  "build": {
+    "cmd": "npm run build"
+  },
+  "install": [],
+  "launch": {
+    "cmd": "node",
+    "args": ["node_modules/vite/bin/vite.js", "preview", "--port", "${PORT}", "--strictPort"]
+  },
+  "log": {
+    "format": "plain",
+    "stdout": true,
+    "paths": []
+  },
+  "ready": "127\\.0\\.0\\.1",
+  "window": "${GAME_WINDOW}",
+  "sourceRoots": ["src"],
+  "vars": {
+    "PORT": "4177",
+    "GAME_WINDOW": "BRO_OS"
+  }
+}

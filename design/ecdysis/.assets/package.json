@@ -1,0 +1,8 @@
+{
+  "name": "ecdysis-art-assets",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "opentype.js": "^2.0.0"
+  }
+}
