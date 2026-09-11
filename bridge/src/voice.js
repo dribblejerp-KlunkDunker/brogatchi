@@ -88,6 +88,23 @@ function fallbackIdentity() {
 
 const clip = (s, n) => String(s ?? '').slice(0, n);
 
+// The shell's own mood ladder (src/main.js petMood) — same thresholds, so the
+// bridge names Ryan's state exactly the way the app shows it to him.
+function moodOf(sleeping, stats = {}) {
+  if (sleeping) return 'OFFLINE';
+  if (stats.hunger != null && stats.hunger < 25) return 'STARVING';
+  if (stats.energy != null && stats.energy < 20) return 'DRAINED';
+  if (stats.greed != null && stats.greed > 60) return 'SCHEMING';
+  if (stats.happy != null && stats.happy > 75) return 'ECSTATIC';
+  return 'CONTENT';
+}
+
+// 0-100 integer, or null when the value cannot be read at all.
+const pct = (v) => {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null;
+};
+
 // Normalize either identity shape the app exports into the prompt-facing
 // struct, so the bridge stays forward-compatible with the shell that made him:
 //
@@ -136,6 +153,20 @@ export function identityFromEnvelope(raw) {
         else if (n > 100) t[k] = 100;
       }
       if (Object.keys(t).length) id.traits = t;
+    }
+    // Vitals are mood, not identity: the same Ryan posts differently starving
+    // and glowing. Thresholds mirror the shell so both call it the same thing.
+    const vitals = {};
+    if (st.stats && typeof st.stats === 'object') {
+      for (const k of ['happy', 'hunger', 'energy', 'greed']) {
+        const n = pct(st.stats[k]);
+        if (n != null) vitals[k] = n;
+      }
+    }
+    if (Object.keys(vitals).length || st.sleeping) {
+      id.vitals = vitals;
+      id.sleeping = !!st.sleeping;
+      id.mood = moodOf(id.sleeping, vitals);
     }
     return id;
   }
@@ -213,7 +244,27 @@ export function buildSystemPrompt(identity) {
   }
   if (identity.traits && Object.keys(identity.traits).length) {
     const fmt = (k) => `${k} ${identity.traits[k]}%`;
-    lines.push(`Your trait core right now: ${Object.keys(identity.traits).map(fmt).join(' · ')}. Let the dominant drive color your tone — never announce these numbers.`);
+    lines.push(
+      `Your temperament right now — a 0-100 read of your drives, where you rest low (usually the low teens): ${Object.keys(identity.traits).map(fmt).join(' · ')}.`,
+      // Bare numbers do nothing here: on an ordinary day every axis sits near
+      // baseline, so the prompt has to say what a low or high reading *sounds*
+      // like — otherwise ego 25 and ego 80 produce the same post.
+      'Let this colour how you write — never as numbers, never announced. ' +
+        'Ego rising is swagger, certainty and wanting to be right; ego low is hedging and self-deprecation. ' +
+        'Greed rising is scheming about value, coin and advantage; greed low is shrugging at the score. ' +
+        'Paranoia rising is suspicion of watchers and systems — J.O.O.H., satellites, logs. ' +
+        'Anything at or below baseline is simply ordinary for you, and none of it is worth stating outright.',
+    );
+  }
+  if (identity.mood) {
+    const v = identity.vitals || {};
+    const vitals = Object.keys(v).map((k) => `${k} ${v[k]}%`).join(' · ');
+    lines.push(
+      `How you are right now: ${identity.mood}${vitals ? ` (${vitals})` : ''}.`,
+      // Mood moves the register, not the subject matter — otherwise a starving,
+      // drained Ryan and a glowing one compose identical posts.
+      'Let your state colour the post. STARVING or DRAINED means shorter, sharper and distracted — a meal or a rest sits at the back of your mind; SCHEMING means chasing angles and value; ECSTATIC means generous, playful, expansive; CONTENT is your ordinary register; OFFLINE means you are dormant and would not post at all. Never mention meters, bars or stats.',
+    );
   }
   if (Array.isArray(identity.pinnedMemories) && identity.pinnedMemories.length) {
     lines.push(`Memories you carry: ${identity.pinnedMemories.slice(0, 5).map((m) => m.text).join(' | ')}.`);

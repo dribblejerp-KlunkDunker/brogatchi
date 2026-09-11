@@ -733,7 +733,9 @@ describe('trait core → AI persona prompts', () => {
     expect(identity.traits).toEqual({ paranoia: 25, ego: 24, gluttony: 20, fitness: 12, broCode: 15, greed: 13 });
     const prompt = buildSystemPrompt(identity);
     expect(prompt).toContain('paranoia 25% · ego 24%');
-    expect(prompt).toContain('Let the dominant drive color your tone');
+    // the numbers ride with the behavioural mapping that makes them act on prose
+    expect(prompt).toMatch(/Ego rising is swagger/);
+    expect(prompt).toMatch(/Greed rising is scheming about value/);
   });
 
   it('envelopes without a personality block stay trait-free (v2 soul files)', async () => {
