@@ -134,10 +134,17 @@ export const TRACKSETS = {
  * (leadNote/bassNote/hat). With no WebAudio context (jsdom, or no
  * gesture yet) the sequencer still runs on a fallback timer so
  * tests and state remain observable — the voices simply no-op.
+ *
+ * `remixFor(id, tier)` lets CHIPTUNE.SYNTH's saved remixes replace the
+ * stock loop: whenever a track is needed (launch or tier swap), a
+ * remix wins. Without it, behavior is exactly the stock track data.
  */
-export function createGameMusic(engine) {
+export function createGameMusic(engine, { remixFor = null } = {}) {
   let playing = null; // { id, track, variant, step, nextAt, pendingVariant, timer }
   const lastVariant = {}; // per-game tier memory: last tier wins on restart
+
+  // The track a game+tier should actually play: your remix, else stock.
+  const trackOf = (id, variant) => remixFor?.(id, variant) || TRACKSETS[id]?.[variant];
 
   function startMusic(id, variant = 0) {
     const set = TRACKSETS[id];
@@ -149,7 +156,7 @@ export function createGameMusic(engine) {
     }
     stopMusic();
     const v = set[variant] ? variant : 0;
-    playing = { id, track: set[v], variant: v, step: 0, nextAt: null, pendingVariant: null, timer: null };
+    playing = { id, track: trackOf(id, v), variant: v, step: 0, nextAt: null, pendingVariant: null, timer: null };
     lastVariant[id] = v;
     engine.init?.();
     if (engine.ctx) {
@@ -196,7 +203,7 @@ export function createGameMusic(engine) {
     if (!playing) return;
     // Variant swap lands exactly on a bar boundary.
     if (playing.pendingVariant != null && playing.step % 16 === 0) {
-      const nt = TRACKSETS[playing.id]?.[playing.pendingVariant];
+      const nt = trackOf(playing.id, playing.pendingVariant);
       if (nt) {
         playing.track = nt;
         playing.variant = playing.pendingVariant;

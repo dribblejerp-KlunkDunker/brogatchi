@@ -262,3 +262,76 @@ describe('BGM host wiring', () => {
     function textOf(f) { return readFileSync(f, 'utf8'); }
   });
 });
+
+/* ─────────── CHIPTUNE.SYNTH remix resolution ─────────── */
+
+describe('remix resolution: a saved remix replaces the cabinet loop', () => {
+  const midiFreq = (m) => 440 * Math.pow(2, (m - 69) / 12);
+  // Uniform lanes, so whichever step the sequencer is on identifies the track.
+  const remix = {
+    name: 'Bench Test',
+    bpm: 111,
+    lead: new Array(16).fill(60),
+    bass: new Array(16).fill(40),
+    hat: new Array(16).fill(0),
+  };
+
+  it('launches the remix instead of the stock loop', () => {
+    const engine = stubEngine();
+    const music = createGameMusic(engine, {
+      remixFor: (id, tier) => (id === 'loot' && tier === 0 ? remix : null),
+    });
+    expect(music.startMusic('loot')).toBe(true);
+    expect(music.playing.variant).toBe(0);
+
+    engine.calls.length = 0;
+    music.stepOnce();
+    expect(engine.calls).toContainEqual({ lead: midiFreq(60), dur: expect.any(Number) });
+    music.stopMusic();
+  });
+
+  it('leaves the stock loop alone for games with no remix', () => {
+    const engine = stubEngine();
+    const music = createGameMusic(engine, { remixFor: () => null });
+    music.startMusic('loot');
+
+    engine.calls.length = 0;
+    music.stepOnce();
+    // Loot Loop step 0 lead is 72 — the stock note, not the remix's 60.
+    expect(engine.calls.some((c) => c.lead === midiFreq(72))).toBe(true);
+    expect(engine.calls.some((c) => c.lead === midiFreq(60))).toBe(false);
+    music.stopMusic();
+  });
+
+  it('a remix on a milestone tier is heard after the bar-boundary swap', () => {
+    vi.useFakeTimers();
+    const engine = stubEngine();
+    const music = createGameMusic(engine, {
+      remixFor: (id, tier) => (id === 'loot' && tier === 2 ? remix : null),
+    });
+    music.startMusic('loot');
+    music.setVariant('loot', 2);
+    vi.advanceTimersByTime(2000); // past the bar line
+    expect(music.playing.variant).toBe(2);
+
+    engine.calls.length = 0;
+    music.stepOnce();
+    expect(engine.calls.some((c) => c.lead === midiFreq(60))).toBe(true);
+    // Vault Breach (stock tier 2) leads on 84 — it must not be what plays.
+    expect(engine.calls.some((c) => c.lead === midiFreq(84))).toBe(false);
+    music.stopMusic();
+  });
+
+  it('a remix for one cabinet never leaks into another', () => {
+    const engine = stubEngine();
+    const music = createGameMusic(engine, {
+      remixFor: (id, tier) => (id === 'loot' && tier === 0 ? remix : null),
+    });
+    music.startMusic('flappy');
+
+    engine.calls.length = 0;
+    music.stepOnce();
+    expect(engine.calls.some((c) => c.lead === midiFreq(60))).toBe(false);
+    music.stopMusic();
+  });
+});
