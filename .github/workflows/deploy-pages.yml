@@ -33,6 +33,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The guard below compares `git log` timestamps of the source paths
+          # against dist/; a default 1-commit checkout makes that vacuous, so
+          # this job would happily deploy a stale bundle. Fetch full history.
+          fetch-depth: 0
 
       - name: Guard — dist/ must be tracked and fresh
         id: check

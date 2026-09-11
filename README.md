@@ -1,5 +1,7 @@
 # Bro OS 3.0 — Cyberpunk Utility 🕹️👁️
 
+[![CI](https://github.com/dribblejerp-KlunkDunker/brogatchi/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/dribblejerp-KlunkDunker/brogatchi/actions/workflows/ci.yml?query=branch%3Amaster)
+
 The Bro'gatchi rebuild, promoted from dense single-page pet app to a full
 **windowed desktop operating system** in the *Cyberpunk Utility* aesthetic.
 Ryan the rogue AI lives in a secure terminal window, J.O.O.H. watches from a

@@ -24,6 +24,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The dist-freshness guard below compares `git log` timestamps of the
+          # source paths against dist/. A default 1-commit checkout makes that
+          # comparison vacuous (both sides resolve to HEAD, or to nothing), so
+          # a source change committed without a rebuilt bundle would sail
+          # through. Fetch the full history so staleness is actually visible.
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
