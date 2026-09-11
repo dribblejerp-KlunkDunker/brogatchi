@@ -1,6 +1,9 @@
 # Bro OS 3.0 — Cyberpunk Utility 🕹️👁️
 
 [![CI](https://github.com/dribblejerp-KlunkDunker/brogatchi/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/dribblejerp-KlunkDunker/brogatchi/actions/workflows/ci.yml?query=branch%3Amaster)
+[![Deploy to GitHub Pages](https://github.com/dribblejerp-KlunkDunker/brogatchi/actions/workflows/deploy-pages.yml/badge.svg?branch=master&event=workflow_run)](https://github.com/dribblejerp-KlunkDunker/brogatchi/actions/workflows/deploy-pages.yml?query=branch%3Amaster)
+[![tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/dribblejerp-KlunkDunker/brogatchi/master/badges/tests.json)](https://github.com/dribblejerp-KlunkDunker/brogatchi/actions/workflows/ci.yml?query=branch%3Amaster)
+[![live site](https://img.shields.io/website?url=https%3A%2F%2Fdribblejerp-klunkdunker.github.io%2Fbrogatchi%2F)](https://dribblejerp-klunkdunker.github.io/brogatchi/)
 
 The Bro'gatchi rebuild, promoted from dense single-page pet app to a full
 **windowed desktop operating system** in the *Cyberpunk Utility* aesthetic.
@@ -25,6 +28,9 @@ Optional AI wiring: `cp .env.example .env` with `GEMINI_API_KEY=…` and Ryan
 answers through the zero-dep proxy (`server/proxy.mjs`, key never leaves your
 machine). Without a key he answers from his **offline brain** — same paranoia,
 zero latency.
+
+> 🗺️ **New to the repo?** [docs/REPO-MAP.md](docs/REPO-MAP.md) is the one-screen
+> map: what lives where, and how to run each part (app, arcade, bridge, tests).
 
 ## What changed from 2.0 → 3.0
 

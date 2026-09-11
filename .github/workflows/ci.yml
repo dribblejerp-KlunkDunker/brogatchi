@@ -42,7 +42,24 @@ jobs:
         run: npm ci
 
       - name: Vitest suite (app + bridge)
-        run: npm test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee /tmp/vitest.log
+
+      # The README's tests badge reads badges/tests.json (shields endpoint).
+      # Prove it tells the truth: parse the real vitest count from this run's
+      # log and fail CI when the tracked badge is behind the suite.
+      - name: Verify tests badge matches the suite
+        run: |
+          # vitest colours its summary, so strip ANSI codes before parsing.
+          TESTS=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/vitest.log | grep -oE 'Tests  [0-9]+ passed' | grep -oE '[0-9]+' | head -1 || true)
+          if [ -z "$TESTS" ]; then echo "::error::could not parse test count from vitest output"; exit 1; fi
+          TRACKED=$(node -p "require('./badges/tests.json').message.replace(/\\D/g,'')")
+          echo "suite: $TESTS — badge: $TRACKED"
+          if [ "$TESTS" != "$TRACKED" ]; then
+            echo "::error::badges/tests.json says $TRACKED but the suite is $TESTS — update the badge in the same commit."
+            exit 1
+          fi
 
       - name: Build (includes bridge-memory-log postbuild hook)
         run: npm run build
