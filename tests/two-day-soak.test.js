@@ -103,6 +103,24 @@ const rejoined = (m) => m.text.startsWith('Rejoined MOLTBOOK.');
 // memory when the last lands — wait just past that tail.
 const HACK_TAIL_MS = 5 * 260 + 500;
 
+// Cross midnight(s) deterministically: advance the mocked clock in 5-minute
+// steps, running the shell's REAL 1s interval once per step, until the
+// store's rollover day is observed. A blind multi-hour clock jump plus a
+// long advance relies on fake-timer catch-up semantics (fired intervals can
+// read their stale schedule, zone-dependently — CI failed exactly there); a
+// stepped sweep keeps every tick's now() unambiguous.
+async function sweepToDay(day) {
+  for (let i = 0; i < 800; i++) {
+    vi.setSystemTime(new Date(Date.now() + 5 * 60 * 1000));
+    await vi.advanceTimersByTimeAsync(1000);
+    if (store().state.dailyDiaryDone === day) return;
+  }
+  // falling through is fine — the caller's expectDay names the failure
+}
+function expectDay(needDay) {
+  expect(store().state.dailyDiaryDone).toBe(needDay);
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   realCreateObjectURL = URL.createObjectURL;
@@ -182,12 +200,11 @@ describe('two-day soak: milestones hold under the real tick loop', () => {
     // Idle afternoon under every window's tickers.
     await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
 
-    // Jump the quiet hours: land just before midnight #2.
-    jumpTo(23, 57);
-
     // ── MIDNIGHT #2 → DAY 2: the regression moment ──
-    await vi.advanceTimersByTimeAsync(180 * 1000); // cross midnight at full rate
-    expect(store().state.dailyDiaryDone).toBe('2026-09-09');
+    // Sweep the quiet hours (real ticks every 5 simulated minutes) straight
+    // through midnight #2.
+    await sweepToDay('2026-09-09');
+    expectDay('2026-09-09');
     expect(store().state.counters.gamesWon).toBe(0); // daily counter reset...
 
     // ...but the milestones must NOT re-fire on day 2's firsts.
@@ -211,9 +228,8 @@ describe('two-day soak: milestones hold under the real tick loop', () => {
     expect(wonPinsDay2[0].id).toBe(firstWinId);
 
     // ── DAY 3: one more midnight, one more set of firsts ──
-    jumpTo(23, 57);
-    await vi.advanceTimersByTimeAsync(180 * 1000);
-    expect(store().state.dailyDiaryDone).toBe('2026-09-10');
+    await sweepToDay('2026-09-10');
+    expectDay('2026-09-10');
 
     const input3 = m2.querySelector('#molt-input');
     input3.value = 'day three transmission';
