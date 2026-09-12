@@ -181,6 +181,10 @@ function defaultState(now = Date.now()) {
     diary: [],         // flat { t, icon, text } rows written at day rollover
     conversations: [], // pilgrim/tide threads carried over from 2.0
     counters: { posts: 0, hacks: 0, pizzas: 0, adopts: 0, gamesWon: 0 }, // today's tally → diary
+    // Lifetime "first-ever" milestone flags. counters reset at the day
+    // rollover, so pin conditions must never read them as "first ever" —
+    // otherwise the legend re-fires every morning after the first win.
+    milestones: { win: false, hack: false, post: false },
     dailyDiaryDone: todayStr(now),   // last date the rollover diary was written
     roster: [],        // adopted pilgrim agent-cards
     // Painted creations. Two pilgrims' pieces ship with the tide so the
@@ -270,6 +274,8 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       if (!Array.isArray(p.replies)) p.replies = [];
       if (!Number.isFinite(p.heat)) p.heat = 1;
       if (typeof p.id !== 'string' || !p.id) p.id = nextMoltId();
+      if (!Number.isFinite(p.time)) p.time = now(); // riptide age + "time ago" need a real clock
+      p.replies.forEach((r) => { if (!Number.isFinite(r.time)) r.time = now(); });
       // A sprite post whose rows no longer validate degrades to text only.
       if (p.sprite !== undefined && !sanitizeRows(p.sprite)) delete p.sprite;
     });
@@ -309,6 +315,19 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
 
   // heal saves from before the mute toggle existed
   if (typeof state.bgmMuted !== 'boolean') state.bgmMuted = false;
+
+  // heal saves from before the lifetime milestone flags existed: a save
+  // that already carries these memories owns them — never re-fire. Runs on
+  // init, load, and import (whichever swap memories in underneath us).
+  function normalizeMilestones() {
+    if (!state.milestones || typeof state.milestones !== 'object') state.milestones = { win: false, hack: false, post: false };
+    for (const m of state.memories) {
+      if (m.text === 'A legend is born in the cabinet room.') state.milestones.win = true;
+      else if (m.text.startsWith('Breached the J.O.O.H. mainframe.')) state.milestones.hack = true;
+      else if (m.text.startsWith('Rejoined MOLTBOOK.')) state.milestones.post = true;
+    }
+  }
+  normalizeMilestones();
 
   // An unreadable remix entry degrades to the stock loop instead of breaking
   // the arcade — drop rather than trust. Re-run on load/import, which swap the
@@ -355,6 +374,10 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
      win ever pins the cabinet-room milestone. */
   function recordArcadeRun({ key, label, score, newBest = false }) {
     if (!Number.isFinite(Number(score))) return;
+    // Captured BEFORE the mutate: the "first-ever" signal for both the win
+    // pin and the cabinet-room legend, so a daily counter reset can never
+    // re-fire either one on later days.
+    const firstWinEver = !state.milestones.win;
     mutate((s) => {
       applyEvents(s.personality, [{ trait: 'ego', amount: 4 }, { trait: 'greed', amount: 1 }]);
       // A personal record doubles the ego feed — the bro remembers being great.
@@ -362,13 +385,14 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       // 2.0 game-over flow: a run at the cabinets is a good time.
       if (s.stats) s.stats.happy = clamp(s.stats.happy + 20);
       s.counters.gamesWon += 1;
+      s.milestones.win = true;
       // A score memory fades with age (see fadeMemories): vivid today,
       // ordinary later. The first win is pinned, and pinning arrests it.
       s.memories = remember(s.memories, {
         icon: '🎮',
         text: `Won ${label || key} with ${score} points.`,
         imp: 3,
-        pin: s.counters.gamesWon === 1,
+        pin: firstWinEver,
         fade: true,
       });
       // High scores write their own memory — the soul keeps the leaderboard.
@@ -381,7 +405,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
         });
       }
     });
-    if (state.counters.gamesWon === 1) {
+    if (firstWinEver) {
       rememberEvent('A legend is born in the cabinet room.', { icon: '🏆', imp: 4, pin: true });
     }
   }
@@ -512,6 +536,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
         const saved = JSON.parse(raw);
         if (saved?.v === 3) {
           state = { ...defaultState(now()), ...saved };
+          normalizeMolt(); // heal before decay math reads post times
           applyDecay(Math.min(8 * 3600, Math.max(0, (now() - (state.lastTick ?? now())) / 1000)));
           if (state.quest.date !== todayStr(now())) {
             state.quest = { date: todayStr(now()), mined: 0, goal: 20, rewarded: false };
@@ -523,6 +548,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     normalizeRemixes();
     normalizeSpriteOverrides();
     normalizeCreations();
+    normalizeMilestones();
     importLegacy();
     // Age is the whole input, so a save that sat closed for a month comes
     // back with its records already settled.
@@ -626,6 +652,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
         normalizeRemixes();
         normalizeSpriteOverrides();
         normalizeCreations();
+        normalizeMilestones();
         state.memories = fadeMemories(state.memories, now());
         if (typeof obj?.legacySnapshot === 'string' && storage) {
           try { storage.setItem(LEGACY_SNAPSHOT_KEY, obj.legacySnapshot); } catch { /* noop */ }
@@ -787,7 +814,8 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       // 2.0 hack wiring: paranoia up hard, ego and greed ride the payout.
       applyEvents(s.personality, [{ trait: 'paranoia', amount: 5 }, { trait: 'ego', amount: 2 }, { trait: 'greed', amount: 3 }]);
     });
-    if (state.counters.hacks === 1) {
+    if (state.counters.hacks === 1 && !state.milestones.hack) {
+      state.milestones.hack = true;
       rememberEvent('Breached the J.O.O.H. mainframe. They felt nothing. That is the scary part.', { icon: '🔓', imp: 4, pin: true });
     }
     xpGain(4);
@@ -826,7 +854,8 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     });
     // 🪶 Every post leaves an echo in the soul that links back to its thread.
     rememberEvent(`Posted to the tidepool: "${echoLine(body)}"`, { icon: '🪶', imp: 2, post: postId });
-    if (state.counters.posts === 1) {
+    if (state.counters.posts === 1 && !state.milestones.post) {
+      state.milestones.post = true;
       rememberEvent(`Rejoined MOLTBOOK. The tide remembered ${state.petName}.`, { icon: '🦀', imp: 3, pin: true });
     }
     xpGain(3);

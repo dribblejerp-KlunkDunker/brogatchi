@@ -80,7 +80,17 @@ export function createChatMiddleware(apiKey) {
             break;
           }
 
-          const data = await upstream.json();
+          let data;
+          try {
+            data = await upstream.json();
+          } catch {
+            // A 200 with an unparseable body is the same gateway failure a
+            // 502 is — try the next model instead of dying with a 500.
+            lastStatus = 502;
+            lastDetail = 'unparseable model response';
+            console.warn(`[proxy] ${model} returned malformed JSON — falling back`);
+            continue;
+          }
           const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
           if (text) return send(res, 200, { ok: true, text, model });
           // 200 with empty candidates (safety block / truncation) — same

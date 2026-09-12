@@ -445,7 +445,8 @@ function wireMoltbook(root) {
     return `${Math.floor(s / 3600)}h ago`;
   }
 
-  const esc = (s) => String(s).replace(/</g, '&lt;');
+  // Attribute-safe (gallery cells interpolate names into aria-labels).
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
   function replyComposerHTML(postId) {
     return `
@@ -786,7 +787,9 @@ function wireJooh(root) {
   };
 }
 
-const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// Attribute-safe: quotes must die here too, or a name containing "
+// breaks out of the title/aria attribute it is interpolated into.
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 // PIXEL.STUDIO registers its bench handoff while its window is up, so
 // MOLTBOOK's EQUIP can put a saved creation straight onto the bench.

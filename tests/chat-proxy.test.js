@@ -101,6 +101,17 @@ describe('POST /v1/chat middleware — model fallback', () => {
     expect(calls.length).toBe(3);
   });
 
+  it('a 200 with malformed JSON falls through to the next model, not a 500', async () => {
+    calls.queue = [
+      () => upstream(200, '<html>gateway garbage</html>'),
+      () => upstream(200, JSON.stringify({ candidates: [{ content: { parts: [{ text: 'recovered reply' }] } }] })),
+    ];
+    const { res, json } = await run(createChatMiddleware('key'), 'POST', '/v1/chat', CHAT_BODY);
+    expect(res.statusCode).toBe(200);
+    expect(json()).toMatchObject({ ok: true, text: 'recovered reply', model: 'gemini-2.5-flash' });
+    expect(calls.length).toBe(2);
+  });
+
   it('quota (429) fails fast — no pounding of the remaining models', async () => {
     calls.queue = [() => upstream(429, 'quota exceeded')];
     const { res, json } = await run(createChatMiddleware('key'), 'POST', '/v1/chat', CHAT_BODY);

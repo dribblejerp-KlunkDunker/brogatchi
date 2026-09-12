@@ -53,8 +53,9 @@ export function minuteDrift(personality, state) {
   if (state.stats.hunger < 30) adjust(personality, 'paranoia', 0.15);
   if (state.stats.energy < 20) adjust(personality, 'paranoia', 0.1);
   if (state.stats.happy > 75) adjust(personality, 'ego', 0.1);
-  if (state.stats.weight >= 2.0) adjust(personality, 'gluttony', 0.1);
-  if (state.steps === 0 && state.stats.weight < 2.0) adjust(personality, 'fitness', -0.2);
+  // 2.0 drifted gluttony/fitness on body weight; 3.0 dropped the weight sim,
+  // so those axes move through events only (meals → gluttony, steps →
+  // fitness) instead of a weight signal the state no longer carries.
   if (state.coins >= 100) adjust(personality, 'greed', 0.1);
   if (state.coins < 30) adjust(personality, 'greed', -0.07);
 }
