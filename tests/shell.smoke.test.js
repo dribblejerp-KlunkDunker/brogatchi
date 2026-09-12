@@ -43,6 +43,15 @@ describe('shell smoke (jsdom)', () => {
     select.dispatchEvent(new window.Event('change', { bubbles: true }));
     expect(document.documentElement.dataset.theme).toBe('area51');
 
+    // ECDYSIS theme: flips the attribute AND persists into the store.
+    // (jsdom's getComputedStyle does not resolve stylesheet custom
+    // properties, so the token values themselves are pinned file-level
+    // below and verified computed-style live.)
+    select.value = 'ecdysis';
+    select.dispatchEvent(new window.Event('change', { bubbles: true }));
+    expect(document.documentElement.dataset.theme).toBe('ecdysis');
+    expect(window.__broStore.state.theme).toBe('ecdysis');
+
     // MUTE MUSIC flips the engine bus live and persists into the store
     const muteBtn = settingsContent.querySelector('#bgm-mute-toggle');
     expect(muteBtn.textContent).toBe('OFF');
@@ -59,4 +68,23 @@ describe('shell smoke (jsdom)', () => {
     // boot-overlay timers must not fire after the environment tears down
     window.__broBootOverlay?.stop?.();
   }, 20000);
+
+  it('ecdysis theme block carries the plate palette (file-level pin)', () => {
+    const css = readFileSync('src/style.css', 'utf8');
+    const block = css.match(/html\[data-theme='ecdysis'\]\s*\{([\s\S]*?)\}/);
+    expect(block, "ecdysis theme block exists in style.css").toBeTruthy();
+    const tokens = Object.fromEntries(
+      [...block[1].matchAll(/(--[\w-]+)\s*:\s*(#[0-9A-Fa-f]{6})/g)].map((m) => [m[1], m[2]]),
+    );
+    // values lifted straight from design/ecdysis generators
+    expect(tokens['--color-void']).toBe('#0c0b10');          // plate-002 DARK ground
+    expect(tokens['--color-border-active']).toBe('#c97a3e'); // the living edge (plate-001 accent)
+    expect(tokens['--color-neon-cyan']).toBe('#7694ac');     // strataHi
+    expect(tokens['--color-neon-amber']).toBe('#c97a3e');    // accent doubles as amber
+    expect(tokens['--color-text-main']).toBe('#d8dde4');     // clinical ink, brightened
+    expect(tokens['--color-text-muted']).toBe('#6e7a86');    // inkDim
+    // and the select offers it
+    const html = readFileSync('index.html', 'utf8');
+    expect(html).toContain('<option value="ecdysis">ECDYSIS</option>');
+  });
 });

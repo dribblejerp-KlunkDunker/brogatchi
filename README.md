@@ -166,6 +166,22 @@ defense-in-depth memory system:
 Covered by `tests/state.test.js` (migration, nested schemas, export/import
 round-trips, reset safety) — `npm test`.
 
+## Design — Ecdysis
+
+The shell's alternate visual language lives in `design/ecdysis/`: a design
+philosophy of shedding — concentric strata, patient accumulation, one warm
+mineral accent at the living edge. Three plates are rendered from code
+(`generate.cjs`, `render-plate-2.mjs`, `render-plate-3.mjs`, zero-dependency
+PNG encoders); the first two compose into the diptych below:
+
+![Ecdysis diptych — plate 001, molt records; plate 002, cross section](design/ecdysis/ecdysis-diptych.png)
+
+Plate 003 turns the philosophy on itself — a nautilus cross-section whose
+logarithmic spiral of sealed chambers (r = a·e^{kθ}, the animal's real ×3.3
+growth constant) is patient accumulation made geometry:
+
+![Ecdysis plate 003 — nautilus spiral cross-section](design/ecdysis/plate-003-nautilus-spiral.png)
+
 ## Roadmap — next shells
 
 1. BREAKER.EXE and FLAPPY.BRO arcade cores on the same fixed-timestep bus.

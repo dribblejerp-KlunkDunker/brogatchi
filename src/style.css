@@ -106,6 +106,32 @@ html[data-theme='area51'] {
   --color-neon-green: #3CFF8B;
 }
 
+/* ECDYSIS — the shedding palette, lifted from design/ecdysis/*.mjs.
+   Near-black warm ground, cool structural strata, clinical ink text —
+   and ONE warm mineral accent (rust/amber) reserved for what is alive:
+   active window borders, coins, alerts. No neon anywhere; glow is a
+   whisper. */
+html[data-theme='ecdysis'] {
+  --color-void: #0c0b10;          /* plate-002 DARK — deep night ground */
+  --color-panel: #16151c;         /* ground, one step up */
+  --color-panel-light: #1e1c26;   /* two steps — hover/active surfaces */
+  --color-border: #26242f;        /* gill shadow register */
+  --color-border-active: #c97a3e; /* THE living edge — warm mineral */
+  --color-neon-cyan: #7694ac;     /* strataHi — cool structural blue */
+  --color-neon-magenta: #b0563a;  /* ember — the accent taken toward alarm */
+  --color-neon-amber: #c97a3e;    /* accent — shell / rust / amber */
+  --color-neon-green: #b0bcc8;    /* ink — clinical confirmation */
+  --color-text-main: #d8dde4;     /* ink, brightened for reading */
+  --color-text-muted: #6e7a86;    /* inkDim */
+}
+/* Ecdysis: glow is a whisper — the palette does the work */
+html[data-theme='ecdysis'] .text-glow-cyan,
+html[data-theme='ecdysis'] .text-glow-magenta,
+html[data-theme='ecdysis'] .text-glow-amber,
+html[data-theme='ecdysis'] .text-glow-green {
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.18);
+}
+
 html[data-theme='high-contrast'] {
   --color-void: #000000;
   --color-panel: #0A0A0A;
