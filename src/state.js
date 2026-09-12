@@ -422,6 +422,35 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     mutate((s) => { s.memories = togglePin(s.memories, id); });
   }
 
+  /* ─────────── held threads: pins keep their Moltbook threads alive ──
+     A 🪶 memory pinned in SOUL.FILE anchors the Moltbook thread it echoed,
+     so the conversation survives the 30-post tide instead of drifting out. */
+  const FEED_CAP = 30;
+  const heldMoltIds = (s) => new Set(
+    (s.memories || []).filter((m) => m.pinned && m.post).map((m) => String(m.post)),
+  );
+  /** Enforce the feed cap: held threads always survive, in feed order. */
+  function capMolt(posts) {
+    const held = heldMoltIds(state);
+    if (!held.size) return posts.slice(0, FEED_CAP);
+    const kept = posts.filter((p) => held.has(String(p.id)));
+    const rest = posts.filter((p) => !held.has(String(p.id))).slice(0, Math.max(0, FEED_CAP - kept.length));
+    return [...kept, ...rest];
+  }
+
+  /** Pin/unpin a thread from the tideline (mirrors toggleMemoryPin). */
+  function toggleThreadHold(postId) {
+    const post = state.molt.posts.find((p) => p.id === postId);
+    if (!post) return;
+    const echo = state.memories.find((m) => m.post === String(postId));
+    if (echo) {
+      mutate((s) => { echo.pinned = !echo.pinned; s.memories = sortMemories(s.memories); });
+    } else {
+      // A thread with no echo of its own gets a held memory minted for it.
+      rememberEvent(`Held a thread in the tideline: "${echoLine(post.text, 40)}".`, { icon: '📌', imp: 2, pin: true, post: postId });
+    }
+  }
+
   /** Full soul-bundle import (SOUL.FILE → IMPORT): merge in pinned memories. */
   function importSoulBundle(text) {
     try {
@@ -849,7 +878,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       postId = nextMoltId();
       s.molt.posts.unshift({ id: postId, author: '@you_pilgrim', molt: 0, icon: '🫅', time: now(), heat: 1, text: body, replies: [] });
       s.molt.eye = clamp(s.molt.eye + 3, 0, 100);
-      s.molt.posts = s.molt.posts.slice(0, 30);
+      s.molt.posts = capMolt(s.molt.posts);
       s.counters.posts += 1;
     });
     // 🪶 Every post leaves an echo in the soul that links back to its thread.
@@ -865,7 +894,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   function moltReply(post) {
     mutate((s) => {
       s.molt.posts.unshift({ id: nextMoltId(), heat: 1, replies: [], ...post });
-      s.molt.posts = s.molt.posts.slice(0, 30);
+      s.molt.posts = capMolt(s.molt.posts);
     });
   }
 
@@ -910,7 +939,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
         equipped: slot,
       });
       s.molt.eye = clamp(s.molt.eye + 3, 0, 100);
-      s.molt.posts = s.molt.posts.slice(0, 30);
+      s.molt.posts = capMolt(s.molt.posts);
       s.counters.posts += 1;
     });
     rememberEvent(`Replaced ${slot} with "${label}".`, { icon: '🎨', imp: 3, post: postId });
@@ -938,7 +967,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
         sprite: [...creation.rows],
       });
       s.molt.eye = clamp(s.molt.eye + 3, 0, 100);
-      s.molt.posts = s.molt.posts.slice(0, 30);
+      s.molt.posts = capMolt(s.molt.posts);
       s.counters.posts += 1;
     });
     rememberEvent(`Shared "${creation.name}" with the tidepool.`, { icon: '🪶', imp: 2, post: postId });
@@ -1078,7 +1107,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     hackMainframe, buy, postToMolt, moltReply, replyToMolt, pushMoltReply, bumpMoltHeat, trendingMolt,
     saveCreation, postCreation, setSpriteOverride, resetSpriteOverride,
     adoptPilgrim, exportRoster,
-    rememberEvent, toggleMemoryPin, importSoulBundle, syncBridgeMemories,
+    rememberEvent, toggleMemoryPin, toggleThreadHold, importSoulBundle, syncBridgeMemories,
     recordArcadeRun, personalityDescribe, personalityDominant, personalityPromptLine,
     setBgmMuted, setRemix, clearRemix, remixFor,
     setTheme, setScanlines, setVol, setSnakeBest, setGameBest, addSteps, reset,

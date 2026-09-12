@@ -305,4 +305,58 @@ describe('moltbook memory echo (🪶)', () => {
     reloaded.load();
     expect(reloaded.state.memories.find((m) => m.icon === '🪶').post).toBe(echo.post);
   });
+
+  it('holding a thread pins its echo; the thread survives a tide that would evict it', () => {
+    const { store } = makeStore();
+    store.load();
+    store.postToMolt('the thread worth keeping');
+    const held = store.state.molt.posts[0];
+
+    // 30+ newer posts push it out the old way
+    for (let i = 0; i < 34; i++) store.postToMolt(`tide noise ${i}`);
+    expect(store.state.molt.posts.some((p) => p.id === held.id)).toBe(false);
+
+    // restore it by replaying the same seed, then hold it and try again
+    const seedStore = makeStore();
+    seedStore.store.load();
+    seedStore.store.postToMolt('the thread worth keeping');
+    const target = seedStore.store.state.molt.posts[0];
+    seedStore.store.toggleThreadHold(target.id);          // no echo yet → mints one
+    const heldMem = seedStore.store.state.memories.find((m) => m.post === String(target.id));
+    expect(heldMem.pinned).toBe(true);
+    for (let i = 0; i < 34; i++) seedStore.store.postToMolt(`tide noise ${i}`);
+    expect(seedStore.store.state.molt.posts.some((p) => p.id === target.id)).toBe(true);
+    expect(seedStore.store.state.molt.posts.length).toBeLessThanOrEqual(30 + 1); // cap + the held one
+  });
+
+  it('toggleThreadHold flips the echo pin both ways and unholding frees the thread', () => {
+    const { store } = makeStore();
+    store.load();
+    store.postToMolt('echo-backed thread');
+    const post = store.state.molt.posts[0];
+    // postToMolt already wrote the 🪶 echo
+    const echo = store.state.memories.find((m) => m.post === String(post.id));
+    expect(echo).toBeTruthy();
+
+    store.toggleThreadHold(post.id);
+    expect(store.state.memories.find((m) => m.id === echo.id).pinned).toBe(true);
+    store.toggleThreadHold(post.id);
+    expect(store.state.memories.find((m) => m.id === echo.id).pinned).toBe(false);
+    expect(store.state.molt.posts.length).toBeLessThanOrEqual(30);
+  });
+
+  it('a held thread survives save/reload — the pin rides the soul', () => {
+    const storage = memStorage();
+    const store = createStore({ storage, now: () => 5000 });
+    store.load();
+    store.postToMolt('hold me across devices');
+    const post = store.state.molt.posts[0];
+    store.toggleThreadHold(post.id);
+    store.save();
+
+    const reloaded = createStore({ storage, now: () => 5000 });
+    reloaded.load();
+    expect(reloaded.state.molt.posts.some((p) => p.id === post.id)).toBe(true);
+    expect(reloaded.state.memories.some((m) => m.pinned && m.post === String(post.id))).toBe(true);
+  });
 });

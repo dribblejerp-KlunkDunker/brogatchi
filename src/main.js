@@ -14,7 +14,7 @@ import { startSnake } from './apps/snake.js';
 import { startSynth } from './apps/synth.js';
 import { startPixelStudio } from './apps/pixelstudio.js';
 import { hostGame, GAMES } from './arcadeCore.js';
-import { initSpriteOverrides } from './games/overrides.js';
+import { initSpriteOverrides, OVERRIDABLE } from './games/overrides.js';
 import { createGameMusic } from './gameMusic.js';
 import { drawSprite } from './games/pixel.js';
 import { X as SPRITE_PALETTE } from './games/sprites.js';
@@ -458,6 +458,8 @@ function wireMoltbook(root) {
 
   function postHeadHTML(p) {
     const equipped = p.equipped ? `<span class="px-1 bg-neon-green/15 text-neon-green text-[8px] font-mono">EQUIPPED → ${esc(p.equipped)}</span>` : '';
+    const held = isThreadHeld(p.id);
+    const holdBtn = `<button class="molt-hold-btn shrink-0 ${held ? 'text-neon-amber' : 'text-text-muted opacity-60 hover:opacity-100'}" data-hold-post="${esc(String(p.id))}" aria-pressed="${held}" aria-label="${held ? 'Release this thread' : 'Hold this thread — a pinned 🪶 memory keeps it in the tideline'}" title="${held ? 'HELD — the tide cannot take it' : 'HOLD — keep this thread when the tide recedes'}">${held ? '📌' : '📍'}</button>`;
     return `
       <div class="flex items-center justify-between mb-1">
         <div class="flex items-center gap-2 min-w-0">
@@ -466,7 +468,7 @@ function wireMoltbook(root) {
           <span class="px-1 bg-neon-cyan/10 text-neon-cyan text-[8px] font-mono">MOLT ${p.molt}</span>
           ${equipped}
         </div>
-        <span class="text-text-muted text-[9px] shrink-0">${timeAgo(p.time)}</span>
+        <span class="flex items-center gap-1.5 shrink-0"><span class="text-text-muted text-[9px]">${timeAgo(p.time)}</span>${holdBtn}</span>
       </div>
       <p class="text-text-main">${esc(p.text)}</p>
       ${Array.isArray(p.sprite) ? '<div class="molt-sprite-slot mt-1.5"></div>' : ''}`;
@@ -482,7 +484,19 @@ function wireMoltbook(root) {
       </div>`;
   }
 
+  // A thread is held when its 🪶 echo (or a minted hold-memory) is pinned.
+  const isThreadHeld = (postId) => state().memories.some((m) => m.pinned && m.post === String(postId));
+
   function wirePost(el, p) {
+    // thread hold: pin the echo (or mint a pinned memory) so the thread
+    // survives the 30-post tide
+    const holdBtn = el.querySelector('.molt-hold-btn');
+    if (holdBtn) holdBtn.addEventListener('click', () => {
+      store.toggleThreadHold(p.id);
+      audio.click();
+      log('MOLT', isThreadHeld(p.id) ? 'thread held — the tide cannot take it' : 'thread released back to the tide');
+      render();
+    });
     // reply toggle + composer
     const toggle = el.querySelector('.molt-reply-toggle');
     const box = el.querySelector('.molt-reply-box');
@@ -636,20 +650,28 @@ function wireMoltbook(root) {
     { author: '@zeke_shell', molt: 1, icon: '🦫', text: 'Bold words for someone with a pedometer. Respect.' },
     { author: '@tide_itself', molt: 9, icon: '🌊', text: '…the tide has read this and remains the tide.' },
   ];
-  // Slot-specific replies when a painting is equipped into a cabinet.
+  // Replies when a painting is equipped into a cabinet. Each pilgrim names
+  // the slot and game in their own voice — the text is a template fed the
+  // slot's registry metadata ({ label, game }) at reply time.
   const EQUIPPED_REPLY_POOL = [
-    { author: '@crab_404', molt: 4, icon: '🦀', text: 'Now THAT is a crab-worthy sprite. The cabinets are lucky.' },
-    { author: '@zeke_shell', molt: 2, icon: '🦫', text: 'Your art is literally running the show now. Power move.' },
-    { author: '@tide_itself', molt: 9, icon: '🌊', text: 'The tide sees your marks in the machine. Approved.' },
-    { author: '@crab_404', molt: 3, icon: '🦀', text: 'Ryan is going to look so good wearing your pixels.' },
-    { author: '@zeke_shell', molt: 1, icon: '🦫', text: 'Cabinet art is permanent. Unlike most things in the tidepool.' },
+    { author: '@crab_404', molt: 4, icon: '🦀', text: ({ label, game }) => `Now THAT is a crab-worthy ${label}. ${game} is lucky.` },
+    { author: '@zeke_shell', molt: 2, icon: '🦫', text: ({ label, game }) => `Your art is literally running the show in ${game} now. Power move.` },
+    { author: '@tide_itself', molt: 9, icon: '🌊', text: ({ label, game }) => `The tide sees your marks inside ${game}'s ${label}. Approved.` },
+    { author: '@crab_404', molt: 3, icon: '🦀', text: ({ label }) => `Ryan is going to look so good wearing your pixels in that ${label}.` },
+    { author: '@zeke_shell', molt: 1, icon: '🦫', text: ({ game }) => `Cabinet art is permanent. ${game} will never be the same. Unlike most things in the tidepool.` },
   ];
   function tideResponds(parent) {
     if (Math.random() >= 0.55) return;
     const pool = parent.equipped ? EQUIPPED_REPLY_POOL : TIDE_REPLY_POOL;
     const r = pool[Math.floor(Math.random() * pool.length)];
+    // Equipped templates resolve against the slot's registry entry; an
+    // unknown slot degrades to its raw key rather than "undefined".
+    const meta = OVERRIDABLE[parent.equipped] || {};
+    const text = typeof r.text === 'function'
+      ? r.text({ slot: parent.equipped, label: meta.label || parent.equipped, game: meta.game || 'the cabinets' })
+      : r.text;
     setTimeout(() => {
-      if (!store.pushMoltReply(parent.id, { ...r, time: Date.now(), heat: 0, replies: [] })) return;
+      if (!store.pushMoltReply(parent.id, { author: r.author, molt: r.molt, icon: r.icon, text, time: Date.now(), heat: 0, replies: [] })) return;
       audio.typeBlip();
       if ($('#molt-feed', root)) { render(); }
     }, 3500 + Math.random() * 3000);

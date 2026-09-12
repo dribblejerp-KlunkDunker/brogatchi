@@ -430,7 +430,9 @@ describe('moltbook UI: equipped sprites', () => {
     expect(top.textContent).toContain('EQUIPPED → COIN');
     expect(top.textContent).toContain('TIDE_COIN');
     expect(top.querySelector('.molt-sprite-slot canvas')).toBeTruthy();
-    expect(top.querySelector('.molt-replies').textContent).toContain('cabinet');
+    // the tide's reply names the slot and the game in the pilgrim's voice
+    expect(top.querySelector('.molt-replies').textContent).toContain('COIN');
+    expect(top.querySelector('.molt-replies').textContent).toContain('LOOT SHOWER');
 
     // Back to the shelf: the creation now reads as equipped, not shareable.
     c.querySelector('#molt-tab-gallery').click();
@@ -442,5 +444,66 @@ describe('moltbook UI: equipped sprites', () => {
     const crab = [...c.querySelectorAll('[data-creation-id]')].find((el) => el.textContent.includes('BRASS CRAB'));
     expect(crab.querySelector('.molt-equip-btn')).toBeTruthy();
     expect(crab.querySelector('.molt-share-btn')).toBeTruthy();
+  });
+});
+
+describe('moltbook UI: thread holds (📌)', () => {
+  it('the hold button pins the echo, marks the thread HELD, and a held thread survives a 40-post tide', async () => {
+    await bootShell();
+    const c = moltbookContent();
+
+    // post through the real composer, then hold it through the real button
+    postViaComposer('the one worth keeping');
+    const card = [...c.querySelectorAll('#molt-feed > div')].find((d) => d.dataset.moltId);
+    const holdBtn = card.querySelector('.molt-hold-btn');
+    expect(holdBtn).toBeTruthy();
+    expect(holdBtn.getAttribute('aria-pressed')).toBe('false');
+
+    holdBtn.click();
+    // echo memory for this post is now pinned in the soul
+    const post = window.__broStore.state.molt.posts.find((p) => p.id === card.dataset.moltId);
+    expect(window.__broStore.state.memories.some((m) => m.pinned && m.post === String(post.id))).toBe(true);
+
+    // re-render shows HELD state
+    const heldBtn = [...moltbookContent().querySelectorAll('.molt-hold-btn')]
+      .find((b) => b.dataset.holdPost === post.id);
+    expect(heldBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(heldBtn.textContent).toBe('📌');
+
+    // flood the feed past the cap — the held thread must not drift out
+    for (let i = 0; i < 40; i++) postViaComposer(`tide noise ${i}`);
+    const feed = [...moltbookContent().querySelectorAll('#molt-feed > div')].map((d) => d.dataset.moltId);
+    expect(feed).toContain(post.id);
+    expect(feed.length).toBeLessThanOrEqual(31);
+
+    // release it: the pin lifts (button back to 📍), and the thread —
+    // surfaced to the front while held — drifts out over the next tide
+    [...moltbookContent().querySelectorAll('.molt-hold-btn')]
+      .find((b) => b.dataset.holdPost === post.id).click();
+    expect(window.__broStore.state.memories.some((m) => m.pinned && m.post === String(post.id))).toBe(false);
+    const releasedBtn = [...moltbookContent().querySelectorAll('.molt-hold-btn')]
+      .find((b) => b.dataset.holdPost === post.id);
+    expect(releasedBtn.textContent).toBe('📍');
+    for (let i = 40; i < 71; i++) postViaComposer(`tide noise ${i}`);
+    expect([...moltbookContent().querySelectorAll('#molt-feed > div')].map((d) => d.dataset.moltId))
+      .not.toContain(post.id);
+  });
+
+  it('unpinning the 🪶 memory in SOUL.FILE releases the thread too — one pin, two views', async () => {
+    await bootShell();
+    const c = moltbookContent();
+    postViaComposer('single source of truth');
+    const post = window.__broStore.state.molt.posts[0];
+    [...c.querySelectorAll('.molt-hold-btn')].find((b) => b.dataset.holdPost === post.id).click();
+
+    // release from the SOUL side instead of the tideline
+    window.__broStore.toggleMemoryPin(
+      window.__broStore.state.memories.find((m) => m.post === String(post.id)).id,
+    );
+    expect(window.__broStore.state.memories.some((m) => m.pinned && m.post === String(post.id))).toBe(false);
+
+    // the store-level hold view agrees: unheld, the next tide takes it
+    for (let i = 0; i < 31; i++) postViaComposer(`wave ${i}`);
+    expect(window.__broStore.state.molt.posts.some((p) => p.id === post.id)).toBe(false);
   });
 });
