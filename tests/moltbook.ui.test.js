@@ -507,3 +507,66 @@ describe('moltbook UI: thread holds (📌)', () => {
     expect(window.__broStore.state.molt.posts.some((p) => p.id === post.id)).toBe(false);
   });
 });
+
+describe('moltbook UI: HELD tab + pinned indicator row', () => {
+  it('shows a pinned row on the feed, and the HELD tab lists exactly the held threads', async () => {
+    await bootShell();
+    const c = moltbookContent();
+
+    // nothing held yet: no row, and the HELD tab is empty
+    postViaComposer('first thread');
+    postViaComposer('second thread');
+    expect(c.querySelector('.molt-pinned-row')).toBeNull();
+    c.querySelector('#molt-tab-held').click();
+    expect(c.querySelector('#molt-tab-held').getAttribute('aria-selected')).toBe('true');
+    expect(c.querySelector('#molt-feed').textContent).toContain('NOTHING HELD');
+    c.querySelector('#molt-tab-live').click();
+
+    // hold one thread through its real button → the pinned row appears
+    const first = window.__broStore.state.molt.posts.find((p) => p.text === 'first thread');
+    const second = window.__broStore.state.molt.posts.find((p) => p.text === 'second thread');
+    [...c.querySelectorAll('.molt-hold-btn')].find((b) => b.dataset.holdPost === first.id).click();
+
+    const row = c.querySelector('.molt-pinned-row');
+    expect(row).toBeTruthy();
+    expect(row.querySelector('.molt-pinned-count').textContent).toBe('1');
+
+    // the row is a shortcut into the HELD tab
+    row.click();
+    expect(c.querySelector('#molt-tab-held').getAttribute('aria-selected')).toBe('true');
+    expect([...c.querySelectorAll('#molt-feed [data-molt-id]')].map((d) => d.dataset.moltId))
+      .toEqual([String(first.id)]);
+
+    // hold the second too: the tab shows both, the row counts both
+    // (back to LIVE first — the HELD tab only renders held threads)
+    c.querySelector('#molt-tab-live').click();
+    [...c.querySelectorAll('.molt-hold-btn')].find((b) => b.dataset.holdPost === second.id).click();
+    expect(c.querySelector('.molt-pinned-count').textContent).toBe('2');
+
+    // HELD tab: exactly the held threads, in feed order (newest first);
+    // surfacing to the front happens when the tide's cap next runs
+    c.querySelector('#molt-tab-held').click();
+    expect([...c.querySelectorAll('#molt-feed [data-molt-id]')].map((d) => d.dataset.moltId))
+      .toEqual([String(second.id), String(first.id)]);
+
+    // release one: both views shrink together
+    [...c.querySelectorAll('.molt-hold-btn')].find((b) => b.dataset.holdPost === first.id).click();
+    expect(c.querySelector('.molt-pinned-count').textContent).toBe('1');
+    expect([...c.querySelectorAll('#molt-feed [data-molt-id]')].map((d) => d.dataset.moltId))
+      .toEqual([String(second.id)]);
+  });
+
+  it('the HELD tab keeps its count honest against the store (heldMoltPosts)', async () => {
+    await bootShell();
+    const c = moltbookContent();
+    postViaComposer('held by hand');
+    const post = window.__broStore.state.molt.posts.find((p) => p.text === 'held by hand');
+    window.__broStore.toggleThreadHold(post.id);
+
+    c.querySelector('#molt-tab-held').click();
+    expect([...c.querySelectorAll('#molt-feed [data-molt-id]')].map((d) => d.dataset.moltId))
+      .toEqual([String(post.id)]);
+    expect(c.querySelectorAll('#molt-feed [data-molt-id]').length)
+      .toBe(window.__broStore.heldMoltPosts().length);
+  });
+});

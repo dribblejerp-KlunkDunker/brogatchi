@@ -433,8 +433,9 @@ function wireMoltbook(root) {
   const composer = $('#molt-composer', root);
   const tabLive = $('#molt-tab-live', root);
   const tabTide = $('#molt-tab-tide', root);
+  const tabHeld = $('#molt-tab-held', root);
   const tabGallery = $('#molt-tab-gallery', root);
-  let view = 'live'; // 'live' chronological · 'tide' riptide-ranked · 'gallery' painted creations
+  let view = 'live'; // 'live' chronological · 'tide' riptide-ranked · 'held' pinned threads · 'gallery' painted creations
 
   function eyeLabel(v) { return v >= 70 ? 'OPEN' : v >= 30 ? 'FLICKERING' : 'CLOSED'; }
 
@@ -529,7 +530,23 @@ function wireMoltbook(root) {
   }
 
   function renderPosts(s) {
-    const posts = view === 'tide' ? store.trendingMolt() : s.molt.posts;
+    const posts = view === 'tide' ? store.trendingMolt() : view === 'held' ? store.heldMoltPosts() : s.molt.posts;
+    const heldCount = store.heldMoltPosts().length;
+    if (heldCount && view !== 'gallery') {
+      // Pinned indicator row: the tide cannot take what is held.
+      const pinnedRow = document.createElement('button');
+      pinnedRow.className = 'molt-pinned-row w-full text-left border border-neon-amber/40 bg-neon-amber/10 px-2 py-1 font-mono text-[9px] text-neon-amber hover:text-glow-amber';
+      pinnedRow.setAttribute('aria-label', `Show ${heldCount} held thread${heldCount === 1 ? '' : 's'}`);
+      pinnedRow.innerHTML = `📌 <span class="molt-pinned-count">${heldCount}</span> HELD — the tide cannot take ${heldCount === 1 ? 'it' : 'them'}`;
+      pinnedRow.addEventListener('click', () => setView('held'));
+      feed.appendChild(pinnedRow);
+    }
+    if (view === 'held' && !posts.length) {
+      const empty = document.createElement('p');
+      empty.className = 'font-mono text-[9px] text-text-muted';
+      empty.textContent = 'NOTHING HELD — press 📍 on a thread to keep it from the tide.';
+      feed.appendChild(empty);
+    }
     posts.forEach((p) => {
       const d = document.createElement('div');
       d.className = 'border border-border bg-void/30 p-2';
@@ -684,7 +701,7 @@ function wireMoltbook(root) {
   $('#molt-cancel', root).addEventListener('click', () => composer.classList.add('hidden'));
 
   function applyView() {
-    [['live', tabLive], ['tide', tabTide], ['gallery', tabGallery]].forEach(([key, tab]) => {
+    [['live', tabLive], ['tide', tabTide], ['held', tabHeld], ['gallery', tabGallery]].forEach(([key, tab]) => {
       tab.setAttribute('aria-selected', String(view === key));
       tab.classList.toggle('active', view === key);
     });
@@ -697,6 +714,7 @@ function wireMoltbook(root) {
   }
   tabLive.addEventListener('click', () => setView('live'));
   tabTide.addEventListener('click', () => setView('tide'));
+  tabHeld.addEventListener('click', () => setView('held'));
   tabGallery.addEventListener('click', () => setView('gallery'));
 
   // SOUL.FILE hands you back to the thread a 🪶 memory echoed. Returns false

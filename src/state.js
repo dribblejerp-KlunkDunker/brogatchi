@@ -438,6 +438,12 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     return [...kept, ...rest];
   }
 
+  /** Every held thread, in feed order — the HELD tab and the pinned row. */
+  function heldMoltPosts() {
+    const held = heldMoltIds(state);
+    return state.molt.posts.filter((p) => held.has(String(p.id)));
+  }
+
   /** Pin/unpin a thread from the tideline (mirrors toggleMemoryPin). */
   function toggleThreadHold(postId) {
     const post = state.molt.posts.find((p) => p.id === postId);
@@ -1107,7 +1113,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     hackMainframe, buy, postToMolt, moltReply, replyToMolt, pushMoltReply, bumpMoltHeat, trendingMolt,
     saveCreation, postCreation, setSpriteOverride, resetSpriteOverride,
     adoptPilgrim, exportRoster,
-    rememberEvent, toggleMemoryPin, toggleThreadHold, importSoulBundle, syncBridgeMemories,
+    rememberEvent, toggleMemoryPin, toggleThreadHold, heldMoltPosts, importSoulBundle, syncBridgeMemories,
     recordArcadeRun, personalityDescribe, personalityDominant, personalityPromptLine,
     setBgmMuted, setRemix, clearRemix, remixFor,
     setTheme, setScanlines, setVol, setSnakeBest, setGameBest, addSteps, reset,
