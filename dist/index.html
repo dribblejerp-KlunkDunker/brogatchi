@@ -14,8 +14,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Bro OS" />
-  <script type="module" crossorigin src="./assets/index-iHXiZH2K.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-SCTm02Dn.css">
+  <script type="module" crossorigin src="./assets/index-B7TFL0Z1.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-DjKt1Kwo.css">
 </head>
 <body class="h-screen flex flex-col overflow-hidden select-none">
 
@@ -450,6 +450,24 @@
         <div class="flex items-center justify-between">
           <span class="text-text-muted">AUDIO TEST</span>
           <button id="sfx-test" class="btn-cyber text-[9px]">♪ BLIP</button>
+        </div>
+        <div class="border-t border-border pt-3">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-text-muted">SAVE CODE</span>
+            <div class="flex gap-1">
+              <button id="save-code-export" class="btn-cyber text-[9px]">☁ EXPORT</button>
+              <button id="save-code-import-btn" class="btn-cyber text-[9px]">⬆ IMPORT</button>
+            </div>
+          </div>
+          <div id="save-code-io" class="hidden">
+            <textarea id="save-code-text" rows="3" placeholder="PASTE A BRO3 SAVE CODE HERE…"
+              class="w-full bg-void border border-border p-2 font-mono text-[9px] text-text-main resize-y break-all focus:outline-none focus:border-neon-cyan" aria-label="Save code"></textarea>
+            <div class="flex gap-1 mt-1">
+              <button id="save-code-apply" class="btn-cyber text-[9px]">APPLY CODE</button>
+              <button id="save-code-copy" class="btn-cyber text-[9px]">COPY</button>
+            </div>
+          </div>
+          <p class="text-text-muted text-[9px] mt-1">One checksummed string — the whole v3 save, portable anywhere.</p>
         </div>
         <div class="border-t border-border pt-3 flex items-center justify-between">
           <span class="text-text-muted">FACTORY RESET</span>
