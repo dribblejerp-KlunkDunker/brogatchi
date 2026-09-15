@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createStore, levelFor, clamp, moltScore, SHOP_ITEMS, LEVEL_XP } from '../src/state.js';
+import { createStore, levelFor, clamp, moltScore, SHOP_ITEMS, LEVEL_XP, encodeSaveCode, decodeSaveCode } from '../src/state.js';
 
 function memStorage() {
   const m = new Map();
@@ -364,5 +364,57 @@ describe('CHIPTUNE.SYNTH remixes', () => {
     expect(b.remixFor('flappy', 0)).toBe(null);
     expect(b.remixFor('loot', 0)).toBe(null);
     expect(b.remixFor('mario', 1).bpm).toBe(90); // the readable one survives
+  });
+});
+
+describe('BRO3 save codes (☁ the save leaves the browser)', () => {
+  it('round-trips a store through code → bytes → code with state intact', () => {
+    const { store } = makeStore(5000);
+    store.addCoins(250);
+    store.feed();
+    const code = store.exportSaveCode();
+    expect(code.startsWith('BRO3.')).toBe(true);
+
+    const fresh = createStore({ storage: memStorage(), now: () => 5000 });
+    expect(fresh.importSaveCode(code)).toBe(true);
+    expect(fresh.state.coins).toBe(store.state.coins);
+    expect(fresh.state.memories.length).toBe(store.state.memories.length);
+  });
+
+  it('code survives clipboard hazards — wrapping, surrounding whitespace', () => {
+    const { store } = makeStore(5000);
+    const code = store.exportSaveCode();
+    const wrapped = `  ${code.slice(0, 40)}\n${code.slice(40)}  `;
+    const fresh = createStore({ storage: memStorage(), now: () => 5000 });
+    expect(fresh.importSaveCode(wrapped)).toBe(true);
+  });
+
+  it('rejects corruption: flipped char, truncation, wrong kind, garbage', () => {
+    const { store } = makeStore(5000);
+    const code = store.exportSaveCode();
+    const body = code.slice(5); // after "BRO3."
+
+    const fresh = createStore({ storage: memStorage(), now: () => 5000 });
+    // flip one payload char → checksum no longer matches
+    const flipped = 'BRO3.' + (body[0] === 'A' ? 'B' : 'A') + body.slice(1);
+    expect(fresh.importSaveCode(flipped)).toBe(false);
+    // truncated mid-payload → regex fails before anything else
+    expect(fresh.importSaveCode(code.slice(0, code.length - 10))).toBe(false);
+    // well-formed but not a save code
+    expect(fresh.importSaveCode('BRO3.0000.' + body)).toBe(false);
+    // a stray API token from the clipboard (real-world paste accident;
+    // synthetic token-shaped string, never a real credential)
+    expect(fresh.importSaveCode('AQ.' + 'Zm9vYmFy'.repeat(6))).toBe(false);
+    expect(fresh.importSaveCode('')).toBe(false);
+    // store untouched after every rejection
+    expect(fresh.state.coins).toBe(60);
+  });
+
+  it('encodeSaveCode/decodeSaveCode are pure, lossless, and self-verifying', () => {
+    const payload = { v: 3, kind: 'bro-os-save-code', state: { coins: 7, petName: 'RYAN' } };
+    const code = encodeSaveCode(payload);
+    expect(code).toMatch(/^BRO3\.[0-9a-f]{4}\.[A-Za-z0-9_-]+$/);
+    expect(decodeSaveCode(code)).toEqual(payload);
+    expect(decodeSaveCode('not a code at all')).toBe(null);
   });
 });

@@ -20,6 +20,45 @@ import { initialPersonality, applyEvents, minuteDrift, dominant as dominantTrait
 // game's layout is rejected here rather than drawn badly later.
 import { OVERRIDABLE, overrideProblem } from './games/overrides.js';
 
+/* ─────────── BRO3 save codes (the ☁ promise — a save that leaves the browser) ───────────
+   `BRO3.<sum>.<base64url(json)>`. The 16-bit sum rides in the header so a truncated
+   or hand-mangled code is rejected before JSON.parse ever runs. Dependency-free. */
+function bytesToB64url(bytes) {
+  let bin = '';
+  const CH = 0x8000; // chunk the fromCharCode spread so big saves can't blow the stack
+  for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode(...bytes.subarray(i, i + CH));
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlToBytes(s) {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+function codeSum(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h + s.charCodeAt(i)) & 0xffff;
+  return h.toString(16).padStart(4, '0');
+}
+
+export function encodeSaveCode(payload) {
+  const b64 = bytesToB64url(new TextEncoder().encode(JSON.stringify(payload)));
+  return `BRO3.${codeSum(b64)}.${b64}`;
+}
+
+/** Returns the parsed wrapper object, or null for anything that isn't an intact BRO3 code.
+    Strips all whitespace first — real pastes carry line wraps and stray spaces. */
+export function decodeSaveCode(code) {
+  try {
+    const m = /^BRO3\.([0-9a-f]{4})\.([A-Za-z0-9_-]+)$/.exec(String(code).replace(/\s+/g, ''));
+    if (!m || codeSum(m[2]) !== m[1]) return null;
+    return JSON.parse(new TextDecoder().decode(b64urlToBytes(m[2])));
+  } catch {
+    return null;
+  }
+}
+
 /** Riptide ranking: heat + conversation, decayed by age. Pure + injectable clock. */
 export function moltScore(post, nowMs = Date.now()) {
   const ageHours = Math.max(0, (nowMs - (post?.time || 0)) / 3600000);
@@ -667,6 +706,18 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   }
 
   /* ─────────── soul export / import (memories travel) ─────────── */
+  // Whole-save share code: same payload as exportState, sealed in a BRO3 code
+  // that survives clipboard paste (no whitespace, checksummed) on any device.
+  function exportSaveCode() {
+    return encodeSaveCode({ v: 3, kind: 'bro-os-save-code', exportedAt: now(), state: { ...state, lastTick: now() } });
+  }
+
+  function importSaveCode(code) {
+    const obj = decodeSaveCode(code);
+    if (!obj || obj.kind !== 'bro-os-save-code') return false;
+    return importState(JSON.stringify(obj)); // importState owns validation + normalization
+  }
+
   function exportState() {
     let legacySnapshot = null;
     try { legacySnapshot = storage ? storage.getItem(LEGACY_SNAPSHOT_KEY) : null; } catch { /* noop */ }
@@ -1117,6 +1168,6 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     recordArcadeRun, personalityDescribe, personalityDominant, personalityPromptLine,
     setBgmMuted, setRemix, clearRemix, remixFor,
     setTheme, setScanlines, setVol, setSnakeBest, setGameBest, addSteps, reset,
-    exportState, importState,
+    exportState, importState, exportSaveCode, importSaveCode,
   };
 }

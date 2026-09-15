@@ -1141,6 +1141,38 @@ function wireSettings(root) {
   $('#sfx-down', root).addEventListener('click', () => volStep('sfx', -0.1));
   $('#sfx-up', root).addEventListener('click', () => volStep('sfx', 0.1));
   $('#sfx-test', root).addEventListener('click', () => audio.levelUp());
+  // ☁ save codes — the whole v3 save as one portable, checksummed string.
+  const codeIO = $('#save-code-io', root);
+  $('#save-code-export', root).addEventListener('click', () => {
+    codeIO.classList.remove('hidden');
+    $('#save-code-text', root).value = store.exportSaveCode();
+    audio.click();
+    toast('SAVE CODE GENERATED — copy it somewhere safe', 'ok');
+  });
+  $('#save-code-import-btn', root).addEventListener('click', () => {
+    codeIO.classList.toggle('hidden');
+    audio.click();
+  });
+  $('#save-code-apply', root).addEventListener('click', () => {
+    if (store.importSaveCode($('#save-code-text', root).value)) {
+      audio.levelUp();
+      toast('SAVE RESTORED FROM CODE — the bro travels', 'ok');
+      applyTheme();
+      renderAll();
+    } else {
+      audio.error();
+      toast('CODE REJECTED — corrupted, truncated, or not a BRO3 code', 'err');
+    }
+  });
+  $('#save-code-copy', root).addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText($('#save-code-text', root).value);
+      toast('SAVE CODE COPIED', 'ok');
+    } catch {
+      toast('CLIPBOARD BLOCKED — select and copy manually', 'warn');
+    }
+    audio.click();
+  });
   $('#bgm-mute-toggle', root).addEventListener('click', () => {
     store.setBgmMuted(!state().bgmMuted);
     audio.setBgmMuted(state().bgmMuted);

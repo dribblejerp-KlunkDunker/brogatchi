@@ -59,6 +59,21 @@ describe('shell smoke (jsdom)', () => {
     expect(muteBtn.textContent).toBe('ON');
     expect(window.__broStore.state.bgmMuted).toBe(true);
 
+    // ☁ SAVE CODE: export reveals the IO box with a real code; a corrupted
+    // paste is rejected (store untouched); a good paste restores state.
+    const codeText = settingsContent.querySelector('#save-code-text');
+    settingsContent.querySelector('#save-code-export').dispatchEvent(new window.Event('click', { bubbles: true }));
+    expect(settingsContent.querySelector('#save-code-io').classList.contains('hidden')).toBe(false);
+    expect(codeText.value.startsWith('BRO3.')).toBe(true);
+    const coinsBefore = window.__broStore.state.coins;
+    codeText.value = 'BRO3.dead.beef'; // well-formed, wrong checksum
+    settingsContent.querySelector('#save-code-apply').dispatchEvent(new window.Event('click', { bubbles: true }));
+    expect(window.__broStore.state.coins).toBe(coinsBefore); // rejection left the store untouched
+    codeText.value = window.__broStore.exportSaveCode(); // fresh code: snapshot BEFORE the +123
+    window.__broStore.addCoins(123);
+    settingsContent.querySelector('#save-code-apply').dispatchEvent(new window.Event('click', { bubbles: true }));
+    expect(window.__broStore.state.coins).toBe(coinsBefore); // restored to the code's snapshot
+
     // close everything cleanly (teardowns must not throw)
     for (const id of ['chat', 'arcade', 'shop', 'composer', 'moltbook', 'jooh', 'journal', 'settings']) {
       App.close(id);
