@@ -483,6 +483,31 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     return state.molt.posts.filter((p) => held.has(String(p.id)));
   }
 
+  /* ─────────── DIARY.APP projection ───────────
+     Groups the flat diary rows into days and, for each day, pairs them
+     with the 🪶 memories timestamped into that same local day — the
+     journal's "what I lived / what I wrote" pairing. Newest day first.
+     Memory days use local time (the player's clock) while diary rows are
+     written at the UTC day rollover, so a memory after ~4pm ET pairs with
+     the *next* day's diary entry — same rule the rollover itself uses. */
+  const LOCAL_DAY_MS = 24 * 3600 * 1000;
+  function diaryDays() {
+    const byDay = new Map(); // YYYY-MM-DD → { day, lines: [], memories: [] }
+    const dayOf = (t) => new Date(Number(t) + new Date(Number(t)).getTimezoneOffset() * -60000).toISOString().slice(0, 10);
+    for (const d of state.diary || []) {
+      const key = d.t ? dayOf(d.t) : '—';
+      if (!byDay.has(key)) byDay.set(key, { day: key, lines: [], memories: [] });
+      byDay.get(key).lines.push(d);
+    }
+    for (const m of state.memories || []) {
+      if (!m.t) continue;
+      const key = dayOf(m.t);
+      if (!byDay.has(key)) byDay.set(key, { day: key, lines: [], memories: [] });
+      byDay.get(key).memories.push(m);
+    }
+    return [...byDay.values()].sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
+  }
+
   /** Pin/unpin a thread from the tideline (mirrors toggleMemoryPin). */
   function toggleThreadHold(postId) {
     const post = state.molt.posts.find((p) => p.id === postId);
@@ -1165,6 +1190,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     saveCreation, postCreation, setSpriteOverride, resetSpriteOverride,
     adoptPilgrim, exportRoster,
     rememberEvent, toggleMemoryPin, toggleThreadHold, heldMoltPosts, importSoulBundle, syncBridgeMemories,
+    diaryDays,
     recordArcadeRun, personalityDescribe, personalityDominant, personalityPromptLine,
     setBgmMuted, setRemix, clearRemix, remixFor,
     setTheme, setScanlines, setVol, setSnakeBest, setGameBest, addSteps, reset,

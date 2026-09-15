@@ -1053,6 +1053,51 @@ function wireSoul(root) {
   };
 }
 
+// DIARY.APP — the day-rollover journal. Ryan's own record of his days,
+// already written by the store at every midnight (buildDayLines →
+// appendDiaryLines) but never before visible anywhere. Each day pairs
+// the rollover lines with the 🪶 memories timestamped into that same
+// local day; a memory chip jumps to its Moltbook thread when it has one.
+function wireDiary(root) {
+  const body = $('#diary-body', root);
+  const dayFmt = (key) => {
+    if (key === '—') return 'UNTIMED';
+    try {
+      return new Date(`${key}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+        + ` · ${key}`;
+    } catch { return key; }
+  };
+
+  function renderDiary() {
+    const days = store.diaryDays();
+    const totalLines = (state().diary || []).length;
+    if (!days.length) {
+      body.innerHTML = '<div class="text-text-muted text-[10px]">Blank pages. He\'ll write.</div>';
+      return;
+    }
+    body.innerHTML = `<div class="text-text-muted text-[9px] tracking-widest mb-1">${days.length} DAY(S) · ${totalLines} ROLLOVER LINE(S)</div>`
+      + days.map((d) => `
+        <div class="border border-border bg-void/40 p-2">
+          <div class="text-neon-amber text-[9px] mb-1 tracking-widest">📖 ${esc(dayFmt(d.day))}</div>
+          <ul class="space-y-1">${d.lines.map((l) => `<li class="text-[10px] text-text-main">${l.icon || '📖'} ${esc(l.text)}</li>`).join('') || '<li class="text-[10px] text-text-muted italic">(no rollover entry — the day came and went before the app did)</li>'}</ul>
+          <div class="text-neon-cyan text-[9px] mt-2 mb-1 tracking-widest">🪶 THAT DAY (${d.memories.length})</div>
+          <ul class="space-y-0.5">${d.memories.map((m) => {
+            const pin = m.pinned ? ' <span class="text-neon-amber" title="pinned">📌</span>' : '';
+            const chip = m.post
+              ? `<button class="diary-echo-btn text-neon-cyan underline decoration-dotted hover:text-neon-green" data-echo-post="${esc(String(m.post))}" title="open the thread this memory came from">↗ thread</button>`
+              : '';
+            return `<li class="text-[10px] text-text-muted">${m.icon || '·'} ${esc(m.text)}${pin} ${chip}</li>`;
+          }).join('') || '<li class="text-[10px] text-text-muted italic">(no memories timestamped that day)</li>'}</ul>
+        </div>`).join('');
+    body.querySelectorAll('.diary-echo-btn').forEach((btn) =>
+      btn.addEventListener('click', () => openMoltThread(btn.dataset.echoPost)));
+  }
+
+  renderDiary();
+  const unsub = store.subscribe(renderDiary);
+  return () => { unsub(); };
+}
+
 function wireBridge(root) {
   const body = $('#bridge-body', root);
   const ago = (iso) => {
@@ -1222,6 +1267,7 @@ const App = {
       }) },
     jooh: { title: 'J.O.O.H. // SURVEILLANCE', templateId: 'tpl-jooh', wire: wireJooh },
     journal: { title: 'SOUL.FILE', templateId: 'tpl-journal', wire: wireSoul },
+    diary: { title: 'MOLT JOURNAL', templateId: 'tpl-diary', wire: wireDiary },
     bridge: { title: 'BRIDGE.SYS', templateId: 'tpl-bridge', wire: wireBridge },
     settings: { title: 'SYSTEM.CFG', templateId: 'tpl-settings', wire: wireSettings },
     feed: { title: 'PROC: FEED', templateId: null },
