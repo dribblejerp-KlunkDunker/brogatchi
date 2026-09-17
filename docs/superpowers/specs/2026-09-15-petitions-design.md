@@ -1,8 +1,8 @@
 # Ryan's Petitions — Design Spec
 
 **Date:** 2026-09-15
-**Status:** Draft (spec complete; implementation plan pending)
-**Program:** v3.3.0 "the journal release" — petitions are the self-authorship front (1: MOLT JOURNAL ✅ shipped → 2: petitions → 3: save codes ✅ shipped).
+**Status:** ✅ Shipped — implemented as specced in v3.3.0 (`src/petitions.js` + store plumbing + SOUL.FILE desk + bridge prompt line; commit `e2a08a0`). Two deviations found by the test suite during the build: the shift tables are keyed `grant`/`deny` (the lookup maps `granted`→`grant`), and `grantApplies` rejects unknown kinds rather than defaulting to grantable. Renown fires at `posts ≥ 3` as specced.
+**Program:** v3.3.0 "the journal release" — petitions are the self-authorship front (1: MOLT JOURNAL ✅ shipped → 2: petitions ✅ shipped → 3: save codes ✅ shipped).
 
 ## Motivation
 
