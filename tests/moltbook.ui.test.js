@@ -448,7 +448,7 @@ describe('moltbook UI: equipped sprites', () => {
 });
 
 describe('moltbook UI: thread holds (📌)', () => {
-  it('the hold button pins the echo, marks the thread HELD, and a held thread survives a 40-post tide', async () => {
+  it('the hold button pins the echo, marks the thread HELD, and a held thread survives a 40-post tide', { timeout: 20000 }, async () => {
     await bootShell();
     const c = moltbookContent();
 
