@@ -154,8 +154,18 @@ export function identityFromEnvelope(raw) {
       }
       if (Object.keys(t).length) id.traits = t;
     }
-    // Vitals are mood, not identity: the same Ryan posts differently starving
-    // and glowing. Thresholds mirror the shell so both call it the same thing.
+  // Ryan's open petition (2.0 self-authorship restored): when he has an
+  // ask pending on the desk, the harness knows it — posts can reference
+  // his own outstanding request without the player re-explaining it.
+  if (st.petitions?.live && typeof st.petitions.live.title === 'string' && st.petitions.live.title.trim()) {
+    const ask = st.petitions.live;
+    id.petition = {
+      title: clip(ask.title, 80),
+      request: clip(String(ask.request ?? ''), 120),
+    };
+  }
+  // Vitals are mood, not identity: the same Ryan posts differently starving
+  // and glowing. Thresholds mirror the shell so both call it the same thing.
     const vitals = {};
     if (st.stats && typeof st.stats === 'object') {
       for (const k of ['happy', 'hunger', 'energy', 'greed']) {
@@ -241,6 +251,12 @@ export function buildSystemPrompt(identity) {
   }
   if (Array.isArray(identity.quirks) && identity.quirks.length) {
     lines.push(`Your quirks: ${identity.quirks.slice(0, 8).join('; ')}.`);
+  }
+  if (identity.petition) {
+    lines.push(
+      `You have a petition pending with the user: "${identity.petition.title}" — you asked: ${identity.petition.request}.`,
+      'You are waiting on their answer. You may reference the ask; do not pretend it was already answered.',
+    );
   }
   if (identity.traits && Object.keys(identity.traits).length) {
     const fmt = (k) => `${k} ${identity.traits[k]}%`;

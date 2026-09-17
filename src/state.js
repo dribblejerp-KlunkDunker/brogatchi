@@ -16,6 +16,8 @@ export const levelFor = (xp) => 1 + Math.floor(Math.max(0, xp) / LEVEL_XP);
 // Gameplay events write real memories (ported 2.0 engine — src/memory.js).
 import { remember, togglePin, mergePinnedMemories, scrubQuirk, scrubOpinion, scrubHistory, buildDayLines, appendDiaryLines, capMemories, sortMemories, fadeMemories } from './memory.js';
 import { initialPersonality, applyEvents, minuteDrift, dominant as dominantTrait, describe as describeTraits } from './personality.js';
+// The self-authorship engine: pure generators + decision math (2.0 port).
+import { normalizePetitions, generatePetition, applyShifts, shiftsFor, applyGrant, PETITION_COOLDOWN_DAYS } from './petitions.js';
 // Slot names + the native grid of each, so an override that would tear a
 // game's layout is rejected here rather than drawn badly later.
 import { OVERRIDABLE, overrideProblem } from './games/overrides.js';
@@ -225,6 +227,7 @@ function defaultState(now = Date.now()) {
     // otherwise the legend re-fires every morning after the first win.
     milestones: { win: false, hack: false, post: false },
     dailyDiaryDone: todayStr(now),   // last date the rollover diary was written
+    petitions: { live: null, history: [], lastDecisionDay: null, lastEffect: null, sabbathDay: null },
     roster: [],        // adopted pilgrim agent-cards
     // Painted creations. Two pilgrims' pieces ship with the tide so the
     // gallery is a shared shelf from the first boot.
@@ -521,6 +524,79 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     }
   }
 
+  /* ─────────── Ryan's petitions (2.0 self-authorship) ───────────
+     Ryan drafts asks from his live traits; the player grants or
+     denies. A grant mutates real state (the mutation is the point);
+     a deny costs him trait points. Either way it becomes a memory.
+     See docs/superpowers/specs/2026-09-15-petitions-design.md. */
+
+  /** Try to draft a new petition (generation cadence: rollover + the
+      events traits care about). All gates live in the pure engine. */
+  function maybeGeneratePetition() {
+    if (state.petitions.live) return null;
+    const draft = generatePetition(state, now());
+    if (!draft) return null;
+    mutate((s) => { s.petitions.live = draft; });
+    return draft;
+  }
+
+  /** THE decision surface. 'granted' applies the kind's mutation +
+      shifts + pinned memory; 'denied' applies deny shifts + unpinned
+      memory. Unsatifiable grants degrade to a +2 happy shrug. */
+  function decidePetition(id, decision) {
+    const live = state.petitions.live;
+    if (!live || live.id !== id) return false;
+    if (decision !== 'granted' && decision !== 'denied') return false;
+    if (live.expiresAt <= now()) return false; // expired — expiry path owns it
+
+    let degrade = false;
+    mutate((s) => {
+      if (decision === 'granted') {
+        if (!applyGrant(s, live.kind, live.params, now())) {
+          degrade = true; // world moved on since he drafted — no mutation
+        }
+      }
+      applyShifts(s, shiftsFor(live.kind, degrade ? 'granted' : decision));
+      if (degrade) s.stats.happy = clamp(s.stats.happy + 2);
+      const title = live.title;
+      s.memories = remember(s.memories, {
+        icon: '📜',
+        imp: decision === 'granted' ? 4 : 2,
+        pin: decision === 'granted',
+        text: decision === 'granted'
+          ? `Petitioned you: "${title}" — and you said yes.`
+          : `Petitioned you: "${title}" — and you said no.`,
+      });
+      s.diary = appendDiaryLines(s.diary, [
+        degrade
+          ? `Petitioned you: "${title}" — the world moved on before you answered.`
+          : `Petitioned you: "${title}" — and you ${decision === 'granted' ? 'said yes' : 'said no'}.`,
+      ], now());
+      s.petitions.history = [...s.petitions.history, { ...live, decision: degrade ? 'ignored' : decision, decidedAt: now() }].slice(-30);
+      s.petitions.live = null;
+      s.petitions.lastDecisionDay = todayStr(now());
+    });
+    return true;
+  }
+
+  /** Expire a stale ask: resolved as 'ignored' — no shifts, no memory,
+      he withdraws it. Runs on tick() and load() so a desk never holds
+      a stale ask past its 48h window. Returns the expired petition. */
+  function expirePetition() {
+    const live = state.petitions.live;
+    if (!live || live.expiresAt > now()) return null;
+    mutate((s) => {
+      s.petitions.history = [...s.petitions.history, { ...live, decision: 'ignored', decidedAt: now() }].slice(-30);
+      s.petitions.live = null;
+    });
+    return live;
+  }
+
+  /** Heal the petitions field (load / import). */
+  function normalizePetitionsField() {
+    state.petitions = normalizePetitions(state.petitions);
+  }
+
   /** Full soul-bundle import (SOUL.FILE → IMPORT): merge in pinned memories. */
   function importSoulBundle(text) {
     try {
@@ -617,6 +693,15 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     }
     state.counters = { posts: 0, hacks: 0, pizzas: 0, adopts: 0, gamesWon: 0 };
     state.dailyDiaryDone = today;
+    // A granted sabbath makes tomorrow's quest skippable (goal 0 —
+    // rest, not failure); petitions get first look at the fresh day.
+    state.quest = {
+      date: today,
+      mined: 0,
+      goal: state.petitions?.sabbathDay === today ? 0 : 20,
+      rewarded: false,
+    };
+    maybeGeneratePetition();
   }
 
   function emit() { listeners.forEach((fn) => fn(state)); }
@@ -647,6 +732,8 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     normalizeRemixes();
     normalizeSpriteOverrides();
     normalizeCreations();
+    normalizePetitionsField();
+    expirePetition(); // a stale ask never survives a load
     normalizeMilestones();
     importLegacy();
     // Age is the whole input, so a save that sat closed for a month comes
@@ -763,6 +850,8 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
         normalizeRemixes();
         normalizeSpriteOverrides();
         normalizeCreations();
+        normalizePetitionsField();
+        expirePetition();
         normalizeMilestones();
         state.memories = fadeMemories(state.memories, now());
         if (typeof obj?.legacySnapshot === 'string' && storage) {
@@ -811,6 +900,10 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     const events = [];
     applyDecay(dtSec);
     maybeRolloverDiary();
+    // Petitions: a stale ask withdraws itself on the tick after expiry;
+    // drafting is checked at the rollover and on the events traits care
+    // about (recordArcadeRun / postToMolt), not every second.
+    if (expirePetition()) events.push({ tag: 'SOUL', text: 'petition withdrawn — the ask expired' });
     // 2.0 personality ambient drift, on its original per-minute cadence.
     state._persAcc = (state._persAcc || 0) + dtSec * 1000;
     while (state._persAcc >= 60000) {
@@ -826,7 +919,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
         state.coins += 1;
         state.quest.mined += 1;
         events.push({ tag: 'MINE', text: '+1 CR extracted' });
-        if (!state.quest.rewarded && state.quest.mined >= state.quest.goal) {
+        if (state.quest.goal > 0 && !state.quest.rewarded && state.quest.mined >= state.quest.goal) {
           state.quest.rewarded = true;
           state.coins += 50;
           // 2.0 quest wiring: completion feeds broCode and fitness.
@@ -1190,6 +1283,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     saveCreation, postCreation, setSpriteOverride, resetSpriteOverride,
     adoptPilgrim, exportRoster,
     rememberEvent, toggleMemoryPin, toggleThreadHold, heldMoltPosts, importSoulBundle, syncBridgeMemories,
+    maybeGeneratePetition, decidePetition, expirePetition,
     diaryDays,
     recordArcadeRun, personalityDescribe, personalityDominant, personalityPromptLine,
     setBgmMuted, setRemix, clearRemix, remixFor,

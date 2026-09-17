@@ -128,9 +128,9 @@ function petPop() {
 // Shared auto-backup downloader (soul export, roster guard).
 // Returns true if a file download started; callers keep a copy-paste
 // fallback for sandboxes that block downloads.
-function downloadJSON(text, filename) {
+function downloadJSON(text, filename, mime = 'application/json') {
   try {
-    const blob = new Blob([text], { type: 'application/json' });
+    const blob = new Blob([text], { type: mime });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = filename;
@@ -917,6 +917,10 @@ function wireSoul(root) {
         <ul class="space-y-0.5">${s.opinions.map((o) => `<li class="text-[11px]">▸ ${esc(o)}</li>`).join('') || '<li class="text-text-muted text-[10px]">none yet</li>'}</ul>
       </div>
       <div class="border border-border bg-void/40 p-2">
+        <div class="text-neon-amber text-[9px] mb-1 tracking-widest">📜 PETITION DESK <span class=\"text-text-muted\">(he asks · you oversee)</span></div>
+        <div id="petition-desk"></div>
+      </div>
+      <div class="border border-border bg-void/40 p-2">
         <div class="text-neon-cyan text-[9px] mb-1 tracking-widest">🧠 MEMORIES (${(st.memories || []).length}${(st.memories || []).some((m) => m.pinned) ? `, ${(st.memories || []).filter((m) => m.pinned).length} 📌` : ''})</div>
         <ul class="space-y-1 max-h-60 overflow-y-auto">${mem.map((m) => `<li class="text-[10px] text-text-main flex items-start gap-1" data-mem-id="${esc(String(m.id))}">
             <button class="mem-pin-btn shrink-0 ${m.pinned ? 'text-neon-amber' : 'text-text-muted opacity-50'}" title="${m.pinned ? 'Unpin' : 'Pin'} this memory" data-pin-id="${esc(String(m.id))}">${m.pinned ? '📌' : '📍'}</button>
@@ -949,6 +953,49 @@ function wireSoul(root) {
         </div>
       </div>
       <p class="text-text-muted text-[9px]">Where memory records what happened to Ryan, the soul file is who he decided to be because of it.</p>`;
+
+    // Petition desk — render the one live ask (or its absence), wire the
+    // two decision buttons, and list the last 3 decisions as history.
+    const desk = $('#petition-desk', root);
+    const live = st.petitions?.live ?? null;
+    if (!desk) return; // template variant without the desk
+    if (live) {
+      const hours = Math.max(0, Math.ceil((live.expiresAt - Date.now()) / 3600000));
+      desk.innerHTML = `
+        <div class="text-[10px] text-text-main" data-petition-kind="${esc(live.kind)}">
+          <div class="text-neon-green font-bold">📜 ${esc(live.title)}</div>
+          <div class="text-text-muted italic mt-0.5">"${esc(live.argument)}"</div>
+          <div class="mt-0.5">ASKING: <span class="text-neon-cyan">${esc(live.request)}</span></div>
+          <div class="flex items-center gap-2 mt-1.5">
+            <button id="petition-grant" class="btn-cyber text-[9px]" data-pet-id="${esc(live.id)}">✅ GRANT</button>
+            <button id="petition-deny" class="btn-cyber text-[9px]" data-pet-id="${esc(live.id)}">❌ DENY</button>
+            <span class="text-text-muted text-[8px] ml-auto">expires in ${hours}h</span>
+          </div>
+        </div>`;
+      const decide = (decision) => {
+        const id = live.id;
+        if (!store.decidePetition(id, decision)) return;
+        audio.click();
+        const kind = live.kind;
+        if (decision === 'granted') {
+          log('SOUL', `petition GRANTED — ${kind === 'ghost' ? 'log scrubbed' : 'the ask is done'}`);
+          toast('PETITION GRANTED — he\'ll remember this', 'ok');
+        } else {
+          log('SOUL', 'petition DENIED — he heard that');
+          toast('PETITION DENIED — so will this', 'warn');
+        }
+        // The subscription re-renders on the store emit; also flush
+        // renderAll so vitals/traits elsewhere in the shell move too.
+        renderAll();
+      };
+      $('#petition-grant', root)?.addEventListener('click', () => decide('granted'));
+      $('#petition-deny', root)?.addEventListener('click', () => decide('denied'));
+    } else {
+      const hist = (st.petitions?.history ?? []).slice(-3).reverse();
+      desk.innerHTML = `
+        <p class="text-[10px] text-text-muted">nothing pending. He'll ask when he needs to.</p>
+        ${hist.length ? `<ul class="mt-1 space-y-0.5">${hist.map((h) => `<li class="text-[9px] text-text-muted">📜 ${esc(h.title)} — ${h.decision} · ${h.decidedAt ? fmt(h.decidedAt) : ''}</li>`).join('')}</ul>` : ''}`;
+    }
 
     // export / import wiring
     $('#soul-export', root).addEventListener('click', () => {
@@ -1047,7 +1094,35 @@ function wireSoul(root) {
   }
   renderSoul();
 
+  // Petition desk live updates: the tick emits every second, but a full
+  // renderSoul() would wipe the import textarea mid-paste — so re-render
+  // only when the desk actually changed (live id, expiry hour, history).
+  // The same listener acts on the one store→shell seam petitions declare:
+  // a granted WIPE THE LOG sets petitions.lastEffect = { kind:'scrub-log' }
+  // in the store; the shell (which owns the SYS.LOG buffer) scrubs it here
+  // and clears the flag. The store never touches the DOM.
+  let lastPetSig = '';
+  const unsubSoul = store.subscribe((s) => {
+    if (s.petitions?.lastEffect?.kind === 'scrub-log') {
+      const el = $('#sys-log');
+      if (el) {
+        el.querySelectorAll('div').forEach((line) => {
+          if (line.textContent.includes('[J.O.O.H]')) line.remove();
+        });
+      }
+      s.petitions.lastEffect = null;
+      store.save();
+    }
+    const p = s.petitions ?? {};
+    const hours = p.live ? Math.max(0, Math.ceil((p.live.expiresAt - Date.now()) / 3600000)) : -1;
+    const sig = `${p.live?.id ?? 'none'}:${hours}:${p.history?.length ?? 0}`;
+    if (sig === lastPetSig || !root.isConnected) return;
+    lastPetSig = sig;
+    renderSoul();
+  });
+
   return () => {
+    unsubSoul();
     pendingTimers.forEach(clearTimeout);
     pendingTimers.clear();
   };
@@ -1078,7 +1153,10 @@ function wireDiary(root) {
     body.innerHTML = `<div class="text-text-muted text-[9px] tracking-widest mb-1">${days.length} DAY(S) · ${totalLines} ROLLOVER LINE(S)</div>`
       + days.map((d) => `
         <div class="border border-border bg-void/40 p-2">
-          <div class="text-neon-amber text-[9px] mb-1 tracking-widest">📖 ${esc(dayFmt(d.day))}</div>
+          <div class="flex items-center justify-between mb-1">
+            <div class="text-neon-amber text-[9px] tracking-widest">📖 ${esc(dayFmt(d.day))}</div>
+            <button class="diary-export-btn btn-cyber text-[8px]" data-export-day="${esc(d.day)}" aria-label="Export ${esc(d.day)} as a text file" title="save this day (diary + memories) as a .txt">⬇ DAY</button>
+          </div>
           <ul class="space-y-1">${d.lines.map((l) => `<li class="text-[10px] text-text-main">${l.icon || '📖'} ${esc(l.text)}</li>`).join('') || '<li class="text-[10px] text-text-muted italic">(no rollover entry — the day came and went before the app did)</li>'}</ul>
           <div class="text-neon-cyan text-[9px] mt-2 mb-1 tracking-widest">🪶 THAT DAY (${d.memories.length})</div>
           <ul class="space-y-0.5">${d.memories.map((m) => {
@@ -1089,6 +1167,26 @@ function wireDiary(root) {
             return `<li class="text-[10px] text-text-muted">${m.icon || '·'} ${esc(m.text)}${pin} ${chip}</li>`;
           }).join('') || '<li class="text-[10px] text-text-muted italic">(no memories timestamped that day)</li>'}</ul>
         </div>`).join('');
+    // ⬇ DAY — one day's journal page as a plain .txt (CRLF so Notepad
+    // renders it like any other note on the machine that raised him).
+    body.querySelectorAll('.diary-export-btn').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        const d = days.find((x) => x.day === btn.dataset.exportDay);
+        if (!d) return;
+        const L = [`MOLT JOURNAL — ${d.day}`, '', 'DIARY (rollover)'];
+        for (const l of d.lines) L.push(`  ${l.icon || '📖'} ${l.text}`);
+        if (!d.lines.length) L.push('  (no rollover entry)');
+        L.push('', `MEMORIES (${d.memories.length})`);
+        for (const m of d.memories) {
+          L.push(`  ${m.icon || '·'} ${m.text}${m.pinned ? ' [pinned]' : ''}${m.post ? ` (from moltbook thread ${m.post})` : ''}`);
+        }
+        if (!d.memories.length) L.push('  (no memories timestamped that day)');
+        if (downloadJSON(L.join('\r\n') + '\r\n', `ryan-diary-${d.day}.txt`, 'text/plain')) {
+          log('SYS', `diary day ${d.day} exported — ${d.lines.length} line(s), ${d.memories.length} memor${d.memories.length === 1 ? 'y' : 'ies'}`);
+        } else {
+          toast('DOWNLOAD BLOCKED — the sandbox refused the file', 'warn');
+        }
+      }));
     body.querySelectorAll('.diary-echo-btn').forEach((btn) =>
       btn.addEventListener('click', () => openMoltThread(btn.dataset.echoPost)));
   }

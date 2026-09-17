@@ -15,6 +15,10 @@ const SHELL_HTML = readFileSync('index.html', 'utf8');
 let App;
 let realGetContext;
 let realConsoleError;
+let realCreateObjectURL;
+let realRevokeObjectURL;
+let RealBlob;
+let realDownloadDesc;
 
 beforeAll(() => {
   realConsoleError = console.error;
@@ -22,6 +26,10 @@ beforeAll(() => {
     if (String(args[0]).includes('Not implemented')) return; // jsdom noise
     realConsoleError(...args);
   };
+  RealBlob = globalThis.Blob;
+  realCreateObjectURL = URL.createObjectURL;
+  realRevokeObjectURL = URL.revokeObjectURL;
+  realDownloadDesc = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'download');
   // jsdom has no 2D context — the pet viewport draws on boot.
   realGetContext = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'getContext');
   const ctxStub = new Proxy({}, {
@@ -41,7 +49,31 @@ beforeAll(() => {
 afterAll(() => {
   console.error = realConsoleError;
   Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', realGetContext);
+  Object.defineProperty(HTMLAnchorElement.prototype, 'download', realDownloadDesc);
 });
+
+// Capture EXPORT DAY downloads: jsdom's Blob lacks .text() and its
+// FileReader stalls under fake timers, so capture the constructor string
+// itself; stub both URL statics (jsdom lacks revokeObjectURL, which
+// downloadJSON defers via setTimeout).
+function captureDownloads() {
+  const downloads = [];
+  const filenames = [];
+  URL.createObjectURL = vi.fn(() => `blob:test-${downloads.length}`);
+  URL.revokeObjectURL = vi.fn();
+  globalThis.Blob = class extends RealBlob {
+    constructor(parts, opts) {
+      super(parts, opts);
+      downloads.push({ text: String(Array.isArray(parts) ? parts[0] ?? '' : '') });
+    }
+  };
+  Object.defineProperty(HTMLAnchorElement.prototype, 'download', {
+    set(v) { filenames.push(String(v)); realDownloadDesc.set.call(this, v); },
+    get() { return realDownloadDesc.get.call(this); },
+    configurable: true,
+  });
+  return { downloads, filenames };
+}
 
 afterEach(() => {
   for (const id of [...(App?.windows?.keys?.() ?? [])]) App.close(id, { silent: true });
@@ -127,5 +159,38 @@ describe('MOLT JOURNAL (DIARY.APP)', () => {
     const body = App.windows.get('diary').el.querySelector('#diary-body');
     expect(body.querySelector('img')).toBeNull();
     expect(body.textContent).toContain('<img src=x');
+  });
+
+  it('EXPORT DAY saves that day\u2019s lines + memories as a plain-text file', async () => {
+    await bootShell();
+    seedDiaryDay(window.__broStore);
+    const { downloads, filenames } = captureDownloads();
+    App.open('diary');
+    const btn = App.windows.get('diary').el.querySelector('.diary-export-btn');
+    expect(btn.dataset.exportDay).toBe('2026-09-14');
+    btn.click();
+    expect(filenames).toEqual(['ryan-diary-2026-09-14.txt']);
+    const text = downloads[0].text;
+    expect(text).toContain('MOLT JOURNAL — 2026-09-14');
+    expect(text).toContain('DIARY (rollover)');
+    expect(text).toContain('ordered 2 pizzas, hacked the mainframe 1 time');
+    expect(text).toContain('mined the good vein');
+    expect(text).toContain('(from moltbook thread seed-crab)');
+    expect(text.includes('\r\n')).toBe(true); // Notepad-friendly line endings
+    // exactly one day: the memory from the day before must NOT be in the file
+    expect(text).not.toContain('set the Breaker record');
+  });
+
+  it('EXPORT DAY on a sparse day emits the honest placeholders, not silence', async () => {
+    await bootShell();
+    window.__broStore.state.memories.push({ id: 'm-only', t: DAY14, icon: '🕹', text: 'played all night', imp: 2 });
+    const { downloads, filenames } = captureDownloads();
+    App.open('diary');
+    App.windows.get('diary').el.querySelector('.diary-export-btn').click();
+    expect(filenames[0]).toBe('ryan-diary-2026-09-14.txt');
+    const text = downloads[0].text;
+    expect(text).toContain('(no rollover entry)');
+    expect(text).toContain('played all night');
+    expect(text).toContain('MEMORIES (1)');
   });
 });
