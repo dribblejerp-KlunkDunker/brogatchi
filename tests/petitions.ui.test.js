@@ -49,6 +49,11 @@ afterEach(() => {
 });
 
 async function bootShell() {
+  // CI's jsdom HAS working localStorage (Windows node does not), so the
+  // store would otherwise persist across tests in this file and leak
+  // decisions between cases. Every boot starts from a clean soul.
+  try { localStorage.clear(); } catch { /* storage-free environments */ }
+  try { sessionStorage.clear(); } catch { /* same */ }
   document.head.innerHTML = SHELL_HTML.match(/<head>([\s\S]*?)<\/head>/)?.[1] ?? '';
   document.body.innerHTML = SHELL_HTML.match(/<body[^>]*>([\s\S]*)<\/body>/)?.[1] ?? '';
   document.documentElement.setAttribute('data-theme', 'cyberpunk');
