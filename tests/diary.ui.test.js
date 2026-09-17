@@ -76,6 +76,7 @@ function captureDownloads() {
 }
 
 afterEach(() => {
+  window.__broBootOverlay?.stop?.(); // boot timers must not outlive the env
   for (const id of [...(App?.windows?.keys?.() ?? [])]) App.close(id, { silent: true });
   window.App = undefined;
   window.__broStore = undefined;
