@@ -30,6 +30,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -64,3 +66,33 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  # Every deploy gets verified by its consumer: the job points the
+  # deployed-site check suite at the fresh page_url, which fetches the live
+  # bytes, proves the server serves the SAME bundle this commit tracks
+  # (content-hash filename equality — a stale CDN deployment fails here,
+  # not in front of a user), then boots those deployed bytes through the
+  # real shell harness in jsdom — dock, windows, tick loop, zero console
+  # errors. The suite is skipped (not failed) if Pages does not answer:
+  # the deploy job above already reported the authoritative state.
+  verify-deploy:
+    name: Verify deployed site
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Boot the production bundle from the live URL
+        env:
+          BRO_DEPLOY_URL: ${{ needs.deploy.outputs.page_url }}
+        run: npx vitest run tests/deployed-site.check.test.js
