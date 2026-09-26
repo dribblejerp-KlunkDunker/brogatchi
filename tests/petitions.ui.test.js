@@ -42,6 +42,7 @@ afterAll(() => {
 });
 
 afterEach(() => {
+  window.__broTick?.stop?.(); // the 1s tick must not outlive its test
   window.__broBootOverlay?.stop?.(); // boot timers must not outlive the env
   for (const id of [...(App?.windows?.keys?.() ?? [])]) App.close(id, { silent: true });
   window.App = undefined;

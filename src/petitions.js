@@ -125,7 +125,9 @@ const GENERATORS = [
       }
     : null),
   // 4 — the body, again: an immobile bro wants a reason to move.
-  (s) => (s.personality.fitness <= 15 && s.steps === 0
+  // With a real step lane (pedometer on), the ask is already answered by
+  // hardware — Ryan doesn't petition for what he already has.
+  (s) => (s.personality.fitness <= 15 && s.steps === 0 && !s.pedometer?.enabled
     ? {
         kind: 'trainer', title: 'THE STEP GOAL',
         argument: 'I sit. The rig sits. Everything sits.',

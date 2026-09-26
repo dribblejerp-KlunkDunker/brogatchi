@@ -128,4 +128,49 @@ describe('bridge voice: mood rides along with identity', () => {
     expect(prompt).toMatch(/How you are right now: STARVING/);
     expect(prompt).toContain('hunger 8%');
   });
+
+  it('STEP.SYNC: an enabled walk lane with steps reaches the prompt; a disabled one never does', () => {
+    // enabled + walked: the harness knows the real number
+    const walked = identityFromEnvelope(v3(null, { pedometer: { enabled: true, goal: 2000, today: { date: '2026-09-26', steps: 1240, rewarded: false } } }));
+    expect(walked.steps).toBe(1240);
+    const walkedPrompt = buildSystemPrompt(walked);
+    expect(walkedPrompt).toMatch(/pedometer counts the user's real steps: 1240 so far today/);
+    expect(walkedPrompt).toContain('Never claim a body');
+
+    // disabled or zero-step lanes stay out of the prompt entirely
+    const off = identityFromEnvelope(v3(null, { pedometer: { enabled: false, goal: 2000, today: { date: '2026-09-26', steps: 900, rewarded: false } } }));
+    expect(off.steps).toBeUndefined();
+    expect(buildSystemPrompt(off)).not.toMatch(/pedometer/);
+
+    const fresh = identityFromEnvelope(v3(null, { pedometer: { enabled: true, goal: 2000, today: { date: '2026-09-26', steps: 0, rewarded: false } } }));
+    expect(fresh.steps).toBeUndefined();
+
+    // a lane over the goal clips to the goal — he doesn't brag past the cap
+    const capped = identityFromEnvelope(v3(null, { pedometer: { enabled: true, goal: 2000, today: { date: '2026-09-26', steps: 3120, rewarded: true } } }));
+    expect(capped.steps).toBe(2000);
+  });
+
+  it('DREAM.CYCLE: an unread dream reaches the prompt verbatim; a stale read one never does', () => {
+    const dream = { id: 'd1', t: 1789574400000, awayMs: 3 * 86400000, awayDays: 3, mood: 'grand', text: 'I dreamed for 3 days straight — it kept coming back to Won LOOT SHOWER with 5 points. The record is still 5. I checked.', strands: ['a1'], readAt: null };
+
+    // unread: carried
+    const unread = identityFromEnvelope(v3(null, { dreams: { lastDreamedAt: dream.t, entries: [dream] } }));
+    expect(unread.dream.awayDays).toBe(3);
+    expect(unread.dream.text).toContain('I dreamed for 3 days straight');
+    const unreadPrompt = buildSystemPrompt(unread);
+    expect(unreadPrompt).toMatch(/While they were away, you dreamed/);
+    expect(unreadPrompt).toContain('do not invent a different one');
+
+    // read but < 24h: still fresh enough to mention
+    const fresh = identityFromEnvelope(v3(null, { dreams: { lastDreamedAt: dream.t, entries: [{ ...dream, readAt: Date.now() - 3600e3 }] } }));
+    expect(fresh.dream).toBeTruthy();
+
+    // read > 24h ago: gone from the prompt
+    const stale = identityFromEnvelope(v3(null, { dreams: { lastDreamedAt: dream.t, entries: [{ ...dream, readAt: Date.now() - 25 * 3600e3 }] } }));
+    expect(stale.dream).toBeUndefined();
+    expect(buildSystemPrompt(stale)).not.toMatch(/you dreamed/);
+
+    // no dreams field at all: nothing
+    expect(identityFromEnvelope(v3(null)).dream).toBeUndefined();
+  });
 });

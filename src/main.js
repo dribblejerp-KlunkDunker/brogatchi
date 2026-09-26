@@ -16,6 +16,8 @@ import { startPixelStudio } from './apps/pixelstudio.js';
 import { hostGame, GAMES } from './arcadeCore.js';
 import { initSpriteOverrides, OVERRIDABLE } from './games/overrides.js';
 import { createGameMusic } from './gameMusic.js';
+import { createPedometer } from './pedometer.js';
+import { evaluateNudges } from './nudges.js';
 import { drawSprite } from './games/pixel.js';
 import { X as SPRITE_PALETTE } from './games/sprites.js';
 
@@ -61,6 +63,11 @@ const red = createRedundancy({ local: appStorage, session: safeSession() });
 const recoveredFrom = red.restorePrimary();
 
 const store = createStore({ storage: appStorage });
+// STEP.SYNC sensor layer — the one-way seam: it may only call store.addSteps.
+const pedometer = createPedometer(store, (st) => {
+  const el = document.querySelector('#pedometer-status');
+  if (el) el.dataset.state = st;
+});
 const state = () => store.state;
 // Games resolve sprite art through the override resolver; hand it the save.
 initSpriteOverrides(store);
@@ -1255,6 +1262,82 @@ function wireSettings(root) {
   $('#bgm-val', root).textContent = Math.round(s.vol.bgm * 100);
   $('#sfx-val', root).textContent = Math.round(s.vol.sfx * 100);
   $('#bgm-mute-toggle', root).textContent = s.bgmMuted ? 'ON' : 'OFF';
+  // STEP.SYNC — the pedometer toggle (the click IS the iOS permission gesture)
+  const pStatus = $('#pedometer-status', root);
+  const pToggle = $('#pedometer-toggle', root);
+  const renderPedometer = () => {
+    const p = state().pedometer;
+    pToggle.textContent = p.enabled ? 'DISABLE' : 'ENABLE';
+    // TAP TO RESUME: the save says on but this session lost the sensor —
+    // the toggle is the re-arm (iOS needs the gesture anyway).
+    const label = (state().pedometer.enabled && pStatus.dataset.state !== 'LISTENING')
+      ? 'TAP TO RESUME'
+      : ({ OFF: 'OFF', LISTENING: 'LISTENING', UNSUPPORTED: 'NO SENSOR — DESK JOB IS YOUR FRIEND', DENIED: 'SENSOR DENIED' }[pStatus.dataset.state] ?? 'OFF');
+    pStatus.textContent = label;
+    pStatus.className = `font-mono text-[9px] ${p.enabled ? 'text-neon-green' : 'text-text-muted'}`;
+  };
+  pToggle.addEventListener('click', async () => {
+    if (state().pedometer.enabled) {
+      pedometer.stop();
+      store.setPedometerEnabled(false);
+      pStatus.dataset.state = 'OFF';
+      renderPedometer();
+      renderAll(); // and vanishes the moment it goes off
+      return;
+    }
+    const res = await pedometer.start();
+    store.setPedometerEnabled(res === 'LISTENING');
+    pStatus.dataset.state = res;
+    renderPedometer();
+    renderAll(); // the IRL.QUEST row appears the moment the sensor goes on
+    if (res === 'LISTENING') log('SYS', 'STEP.SYNC online — the bro counts real steps now');
+    if (res === 'UNSUPPORTED' || res === 'DENIED') log('WARN', `STEP.SYNC refused (${res}) — DESK JOB lane stays open`);
+  });
+  $('#pedometer-desk', root).addEventListener('click', () => {
+    store.addSteps(250);
+    log('STP', '+250 steps, desk-certified');
+  });
+  pStatus.dataset.state = state().pedometer.enabled ? 'LISTENING' : 'OFF';
+  renderPedometer();
+  // NUDGES — the doorbell (the click IS the permission gesture)
+  const nStatus = $('#nudges-status', root);
+  const nToggle = $('#nudges-toggle', root);
+  const renderNudges = () => {
+    const enabled = state().nudges.enabled;
+    nToggle.textContent = enabled ? 'DISABLE' : 'ENABLE';
+    nStatus.textContent = nStatus.dataset.state === 'BLOCKED' ? 'BLOCKED — browser denied' : enabled ? 'ON' : 'OFF';
+    nStatus.className = `font-mono text-[9px] ${enabled ? 'text-neon-green' : 'text-text-muted'}`;
+  };
+  nToggle.addEventListener('click', async () => {
+    if (state().nudges.enabled) {
+      store.setNudgesEnabled(false);
+      renderNudges();
+      return;
+    }
+    if (!('Notification' in window)) {
+      nStatus.dataset.state = 'BLOCKED';
+      renderNudges();
+      log('WARN', 'NUDGES unsupported here — the tray does not exist');
+      return;
+    }
+    try {
+      const perm = typeof Notification.requestPermission === 'function' ? await Notification.requestPermission() : Notification.permission;
+      if (perm !== 'granted') {
+        nStatus.dataset.state = 'BLOCKED';
+        renderNudges();
+        log('WARN', 'NUDGES denied by the browser — the bro stays quiet');
+        return;
+      }
+      store.setNudgesEnabled(true);
+      log('SYS', 'NUDGES online — the doorbell is armed');
+    } catch {
+      nStatus.dataset.state = 'BLOCKED';
+      log('WARN', 'NUDGES permission failed — the bro stays quiet');
+    }
+    renderNudges();
+  });
+  nStatus.dataset.state = state().nudges.enabled ? 'ON' : 'OFF';
+  renderNudges();
   const pm = $('#persist-mode', root);
   pm.textContent = VOLATILE_MEMORY ? 'VOLATILE ⚠' : 'LOCAL';
   pm.className = VOLATILE_MEMORY ? 'text-neon-magenta' : 'text-neon-green';
@@ -1620,6 +1703,28 @@ function renderAll() {
   $('#quest-state').innerHTML = s.quest.rewarded
     ? '<span class="text-neon-amber text-glow-amber">COMPLETE ✓</span>'
     : `[<span id="quest-mined">${s.quest.mined}</span>/<span id="quest-goal-2">${s.quest.goal}</span>]`;
+  // IRL.QUEST — the walk lane, visible only when the pedometer is on
+  const p = s.pedometer;
+  const irlRow = $orNull('#irl-quest-row');
+  if (irlRow) {
+    irlRow.classList.toggle('hidden', !p.enabled);
+    if (p.enabled) {
+      const fmt = (n) => n.toLocaleString('en-US');
+      $('#irl-goal').textContent = fmt(p.goal);
+      $orNull('#irl-steps')?.replaceChildren(fmt(Math.min(p.today.steps, p.goal)));
+      $orNull('#irl-goal-2')?.replaceChildren(fmt(p.goal));
+      $('#irl-bar').style.width = `${Math.min(100, (p.today.steps / p.goal) * 100)}%`;
+      $('#irl-state').innerHTML = p.today.rewarded
+        ? '<span class="text-neon-green text-glow-green">COMPLETE ✓</span>'
+        : `[<span id="irl-steps">${fmt(p.today.steps)}</span>/<span id="irl-goal-2">${fmt(p.goal)}</span>]`;
+    }
+  }
+  // STEP.SYNC settings row (rendered even when the window is closed — the
+  // elements live in the hidden template, updates are cheap no-ops then)
+  $orNull('#pedometer-bar') && ($('#pedometer-bar').style.width = `${Math.min(100, (p.today.steps / p.goal) * 100)}%`);
+  $orNull('#pedometer-progress') && ($('#pedometer-progress').firstChild.textContent = `${p.today.steps.toLocaleString('en-US')} / ${p.goal.toLocaleString('en-US')} today · lifetime `);
+  $orNull('#pedometer-lifetime')?.replaceChildren(String(s.steps).padStart(4, '0'));
+  $orNull('#pedometer-status') && ($('#pedometer-status').className = `font-mono text-[9px] ${p.enabled ? 'text-neon-green' : 'text-text-muted'}`);
   // settings-derived visuals
   applyTheme();
 }
@@ -1640,6 +1745,14 @@ function updateClock() {
 }
 
 store.load();
+// STEP.SYNC boot re-attach: the save says the sensor was on — try to resume
+// silently. Desktop Chromium re-grants; iOS refuses without a gesture and
+// SYSTEM.CFG shows TAP TO RESUME (the toggle is the re-arm).
+if (state().pedometer.enabled) {
+  pedometer.start().then((res) => {
+    if (res !== 'LISTENING') log('WARN', `STEP.SYNC resume refused (${res}) — tap ENABLE in SYSTEM.CFG to re-arm`);
+  });
+}
 if (recoveredFrom) {
   log('SYS', `⚠ primary save was missing/corrupt — memory RECOVERED from ${recoveredFrom} mirror`);
 }
@@ -1682,14 +1795,36 @@ if (VOLATILE_MEMORY) {
 }
 
 setInterval(updateClock, 1000);
-setInterval(() => {
+// NUDGES runtime state — the debounce map lives HERE, never in the save
+// (a save that sat closed for a week has no stale cooldown debt).
+const nudgeLastSent = {};
+const __tickTimer = setInterval(() => {
   const events = store.tick(1);
+  // NUDGE evaluation: enabled + not focused (the doorbell only rings when
+  // you're not already looking). Focus-skips consume no cooldown.
+  if (state().nudges.enabled && !document.hasFocus()) {
+    try {
+      const r = evaluateNudges(state(), nudgeLastSent, new Date().getHours(), Date.now());
+      if (r?.clear?.length) for (const k of r.clear) delete nudgeLastSent[k];
+      if (r?.event && 'Notification' in window) {
+        const n = new Notification(r.event.title, { body: r.event.body, tag: r.event.tag });
+        n.onclick = () => { window.focus(); n.close(); };
+        nudgeLastSent[r.event.key] = Date.now();
+        log('NUDGE', `${r.event.key} — ${r.event.title}`);
+      }
+    } catch { /* a notification failure must never break the tick */ }
+  }
   events.forEach((ev) => {
     log(ev.tag, ev.text);
     if (ev.questDone) { audio.coin(); toast('DAILY.QUEST COMPLETE — +50 CR', 'ok'); }
+    if (ev.tag === 'STP') { audio.coin(); toast('IRL.QUEST COMPLETE — +40 CR. Touch grass, reported.', 'ok'); }
   });
   renderAll();
 }, 1000);
+// Test handle: real-timer suites stop the 1s tick before teardown so a
+// prior test's ticker can't fire into the next test's jsdom environment
+// (the nudges suite caught the leak — same discipline as __broBootOverlay).
+window.__broTick = { stop() { clearInterval(__tickTimer); } };
 
 // pet interaction
 $('#pet-display').addEventListener('click', () => {
@@ -1765,3 +1900,27 @@ setInterval(() => red.sync(), 30000); // heartbeat mirror
 if (VOLATILE_MEMORY) {
   setTimeout(() => toast('VOLATILE MEMORY — export his soul (👻 SOUL) before closing', 'warn'), 2600);
 }
+
+// DREAM.CYCLE overlay — the unread dream is the only trigger. The composer
+// + entry ran in the store's first tick; this just presents what's stored.
+(function wireDreamOverlay() {
+  const latest = store.state?.dreams?.entries?.[store.state.dreams.entries.length - 1];
+  if (!latest || latest.readAt != null) return;
+  const tpl = document.querySelector('#tpl-dream');
+  if (!tpl) return;
+  const node = tpl.content.firstElementChild.cloneNode(true);
+  node.querySelector('#dream-text').textContent = `“${latest.text}”`;
+  const dismiss = () => {
+    if (!node.isConnected) return;
+    node.remove();
+    document.removeEventListener('keydown', onKey);
+    if (store.markDreamRead()) {
+      log('SYS', 'dream reel acknowledged — +2 HPY');
+      renderAll();
+    }
+  };
+  const onKey = (e) => { if (e.key === 'Escape') dismiss(); };
+  node.querySelector('#dream-dismiss').addEventListener('click', dismiss);
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(node);
+})();

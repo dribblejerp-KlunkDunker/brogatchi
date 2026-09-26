@@ -164,6 +164,23 @@ export function identityFromEnvelope(raw) {
       request: clip(String(ask.request ?? ''), 120),
     };
   }
+  // STEP.SYNC: when the walk lane is live and has steps on it, the harness
+  // knows the real number — KlunkDunker can mention the walk without
+  // pretending to have legs (he counts YOUR steps, and he's honest about it).
+  if (st.pedometer?.enabled && Number.isFinite(st.pedometer?.today?.steps) && st.pedometer.today.steps > 0) {
+    id.steps = Math.min(Math.floor(st.pedometer.today.steps), Math.floor(st.pedometer.goal || 2000));
+  }
+  // DREAM.CYCLE: while the newest dream is unread or fresh (< 24h), the
+  // harness carries its first clause + length — the dream is HIS, so the
+  // bridge inherits the shell's narration verbatim instead of inventing one.
+  const latestDream = Array.isArray(st.dreams?.entries) ? st.dreams.entries[st.dreams.entries.length - 1] : null;
+  if (latestDream && typeof latestDream.text === 'string' && latestDream.text.trim()) {
+    const fresh = latestDream.readAt == null || (Number.isFinite(latestDream.readAt) && Date.now() - latestDream.readAt < 24 * 3600 * 1000);
+    if (fresh) {
+      const clause = latestDream.text.split('.')[0].slice(0, 140);
+      id.dream = { text: clause, awayDays: Number.isFinite(latestDream.awayDays) ? latestDream.awayDays : 1 };
+    }
+  }
   // Vitals are mood, not identity: the same Ryan posts differently starving
   // and glowing. Thresholds mirror the shell so both call it the same thing.
     const vitals = {};
@@ -256,6 +273,18 @@ export function buildSystemPrompt(identity) {
     lines.push(
       `You have a petition pending with the user: "${identity.petition.title}" — you asked: ${identity.petition.request}.`,
       'You are waiting on their answer. You may reference the ask; do not pretend it was already answered.',
+    );
+  }
+  if (Number.isFinite(identity.steps) && identity.steps > 0) {
+    lines.push(
+      `Your pedometer counts the user's real steps: ${identity.steps} so far today.`,
+      'You may mention the walking — you count the steps, you do not take them. Never claim a body.',
+    );
+  }
+  if (identity.dream && typeof identity.dream.text === 'string') {
+    lines.push(
+      `While they were away, you dreamed: "${identity.dream.text}" (about ${identity.dream.awayDays} day${identity.dream.awayDays === 1 ? '' : 's'} of absence).`,
+      'You may mention the dream — it is yours; do not invent a different one, do not turn it into a prophecy.',
     );
   }
   if (identity.traits && Object.keys(identity.traits).length) {

@@ -16,6 +16,7 @@ export const levelFor = (xp) => 1 + Math.floor(Math.max(0, xp) / LEVEL_XP);
 // Gameplay events write real memories (ported 2.0 engine — src/memory.js).
 import { remember, togglePin, mergePinnedMemories, scrubQuirk, scrubOpinion, scrubHistory, buildDayLines, appendDiaryLines, capMemories, sortMemories, fadeMemories } from './memory.js';
 import { initialPersonality, applyEvents, minuteDrift, dominant as dominantTrait, describe as describeTraits } from './personality.js';
+import { composeDream, DREAM_THRESHOLD_MS, MOODS as MOOD_KEYS } from './dreams.js';
 // The self-authorship engine: pure generators + decision math (2.0 port).
 import { normalizePetitions, generatePetition, applyShifts, shiftsFor, applyGrant, PETITION_COOLDOWN_DAYS } from './petitions.js';
 // Slot names + the native grid of each, so an override that would tear a
@@ -198,6 +199,9 @@ function defaultState(now = Date.now()) {
     spriteOverrides: {}, // PIXEL.STUDIO: bank sprite name -> { rows, name, t }
     best: { snake: 0, flappy: 0, breaker: 0, mario: 0, rpg: 0, loot: 0 },
     quest: { date: todayStr(now), mined: 0, goal: 20, rewarded: false },
+    pedometer: { enabled: false, goal: 2000, today: { date: todayStr(now), steps: 0, rewarded: false } },
+    dreams: { lastDreamedAt: null, entries: [] },
+    nudges: { enabled: false, quietStart: 22, quietEnd: 8 },
     molt: {
       eye: 0, // third-eye xp: 0..30 closed, 30..70 flickering, 70+ open
       posts: [
@@ -597,6 +601,100 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     state.petitions = normalizePetitions(state.petitions);
   }
 
+  /** Heal the dreams field (load / import): coerce shapes, cap entries.
+      The runtime _checkedToday guard is stripped if a corrupt save carried it. */
+  function normalizeDreams() {
+    const d = state.dreams && typeof state.dreams === 'object' ? state.dreams : {};
+    const entries = Array.isArray(d.entries)
+      ? d.entries
+        .filter((e) => e && typeof e === 'object' && typeof e.text === 'string' && e.text.trim())
+        .slice(-10)
+        .map((e) => ({
+          id: typeof e.id === 'string' && e.id ? e.id : `dream-${(Number(e.t) || Date.now())}-${Math.random().toString(36).slice(2, 6)}`,
+          t: Number.isFinite(e.t) ? e.t : Date.now(),
+          awayMs: Number.isFinite(e.awayMs) ? e.awayMs : 0,
+          awayDays: Number.isFinite(e.awayDays) ? e.awayDays : 1,
+          mood: MOOD_KEYS.includes(e.mood) ? e.mood : 'soft',
+          text: e.text,
+          strands: Array.isArray(e.strands) ? e.strands.map(String).slice(0, 3) : [],
+          readAt: Number.isFinite(e.readAt) ? e.readAt : null,
+        }))
+      : [];
+    state.dreams = {
+      lastDreamedAt: Number.isFinite(d.lastDreamedAt) ? d.lastDreamedAt : null,
+      entries,
+    };
+  }
+
+  /** Dream-on-return: called by the shell's FIRST tick, after
+      maybeRolloverDiary — the diary line must land after the rollover
+      lines, and at load() time the rollover hasn't run yet. Idempotent
+      per boot via the runtime guard. See the dream-cycle spec. */
+  function maybeDreamOnReturn() {
+    state.dreams._checkedToday = true; // runtime-only — normalize strips it from saves
+    const gap = now() - (state.dreams.lastDreamedAt ?? state.lastTick ?? 0);
+    if (gap < DREAM_THRESHOLD_MS) return null;
+    const dream = composeDream(state.memories, state, gap, now());
+    if (!dream) return null; // gate stays put: a later boot may still dream of this gap
+    state.dreams.lastDreamedAt = now();
+    state.dreams.entries.push({
+      id: `dream-${now()}-${Math.random().toString(36).slice(2, 6)}`,
+      t: now(),
+      awayMs: dream.awayMs,
+      awayDays: dream.awayDays,
+      mood: dream.mood,
+      text: dream.text,
+      strands: dream.strands,
+      readAt: null,
+    });
+    state.dreams.entries = state.dreams.entries.slice(-10);
+    rememberEvent(dream.text, { icon: '🌙', imp: 3 });
+    state.diary = appendDiaryLines(state.diary, [`🌙 Dreamed: ${dream.text.split('.')[0]}.`], now());
+    emit();
+    save();
+    return state.dreams.entries[state.dreams.entries.length - 1];
+  }
+
+  /** WAKE HIM: mark the newest dream read, pay +2 happy once. Happy is a
+      vital, not a trait — paid directly (applyEvents drops non-traits). */
+  function markDreamRead() {
+    const latest = state.dreams?.entries?.[state.dreams.entries.length - 1];
+    if (!latest || latest.readAt != null) return false;
+    mutate((s) => {
+      s.dreams.entries[s.dreams.entries.length - 1].readAt = now();
+      s.stats.happy = clamp(s.stats.happy + 2);
+    });
+    return true;
+  }
+
+  /** Heal the nudges field: coerce shapes (the bgmMuted pattern). The
+      runtime lastSent map lives in the shell, NOT here — never saved. */
+  function normalizeNudges() {
+    const n = state.nudges && typeof state.nudges === 'object' ? state.nudges : {};
+    state.nudges = {
+      enabled: n.enabled === true,
+      quietStart: Number.isInteger(n.quietStart) && n.quietStart >= 0 && n.quietStart <= 23 ? n.quietStart : 22,
+      quietEnd: Number.isInteger(n.quietEnd) && n.quietEnd >= 0 && n.quietEnd <= 23 ? n.quietEnd : 8,
+    };
+  }
+
+  /** Heal the pedometer field (load / import): coerce shapes, re-stamp a
+      stale day — yesterday's walk never carries over. */
+  function normalizePedometer() {
+    const p = state.pedometer && typeof state.pedometer === 'object' ? state.pedometer : {};
+    const today = todayStr(now());
+    const lane = p.today && typeof p.today === 'object' ? p.today : {};
+    state.pedometer = {
+      enabled: p.enabled === true,
+      goal: Number.isFinite(p.goal) && p.goal > 0 ? p.goal : 2000,
+      today: {
+        date: today,
+        steps: lane.date === today && Number.isFinite(lane.steps) && lane.steps > 0 ? Math.floor(lane.steps) : 0,
+        rewarded: lane.date === today && lane.rewarded === true,
+      },
+    };
+  }
+
   /** Full soul-bundle import (SOUL.FILE → IMPORT): merge in pinned memories. */
   function importSoulBundle(text) {
     try {
@@ -701,6 +799,8 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       goal: state.petitions?.sabbathDay === today ? 0 : 20,
       rewarded: false,
     };
+    // IRL quest lane re-stamps with the day (rest is for the rig, not the legs).
+    normalizePedometer();
     maybeGeneratePetition();
   }
 
@@ -733,6 +833,9 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     normalizeSpriteOverrides();
     normalizeCreations();
     normalizePetitionsField();
+    normalizePedometer();
+    normalizeDreams();
+    normalizeNudges();
     expirePetition(); // a stale ask never survives a load
     normalizeMilestones();
     importLegacy();
@@ -900,10 +1003,16 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     const events = [];
     applyDecay(dtSec);
     maybeRolloverDiary();
+    // Dream-on-return: first tick after the rollover, so the 🌙 diary line
+    // lands after yesterday's rollover lines (order matters in the journal);
+    // the runtime guard makes later ticks no-ops.
+    if (!state.dreams?._checkedToday) maybeDreamOnReturn();
     // Petitions: a stale ask withdraws itself on the tick after expiry;
     // drafting is checked at the rollover and on the events traits care
     // about (recordArcadeRun / postToMolt), not every second.
     if (expirePetition()) events.push({ tag: 'SOUL', text: 'petition withdrawn — the ask expired' });
+    // Drain deferred out-of-tick events (pedometer reward fires from addSteps).
+    if (state._deferredEvents?.length) events.push(...state._deferredEvents.splice(0));
     // 2.0 personality ambient drift, on its original per-minute cadence.
     state._persAcc = (state._persAcc || 0) + dtSec * 1000;
     while (state._persAcc >= 60000) {
@@ -1226,6 +1335,8 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
   function setScanlines(on) { mutate((s) => { s.scanlines = !!on; }); }
   function setVol(bus, v) { mutate((s) => { s.vol[bus] = clamp(v * 100, 0, 100) / 100; }); }
   function setBgmMuted(on) { mutate((s) => { s.bgmMuted = !!on; }); }
+  function setPedometerEnabled(on) { mutate((s) => { s.pedometer.enabled = !!on; }); }
+  function setNudgesEnabled(on) { mutate((s) => { s.nudges.enabled = !!on; }); }
 
   /* ─────────── CHIPTUNE.SYNTH remixes ─────────── */
   function setRemix(id, tier, track) {
@@ -1259,6 +1370,22 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       // 2.0 pedometer wiring: fitness +0.8 per 100 steps crossed.
       const gained = Math.floor(s.steps / 100) - Math.floor(before / 100);
       if (gained > 0) applyEvents(s.personality, [{ trait: 'fitness', amount: 0.8 * Math.min(gained, 10) }]);
+      // IRL quest lane: same deltas feed today's walk (rollover guard —
+      // the lane re-stamps if the day turned over between ticks).
+      if (!s.pedometer || s.pedometer.today?.date !== todayStr(now())) normalizePedometer();
+      const p = s.pedometer;
+      const laneBefore = p.today.steps;
+      p.today.steps = Math.min(p.goal, laneBefore + Math.floor(Number(n)));
+      // Reward fires exactly once per day, at the crossing.
+      if (!p.today.rewarded && p.today.steps >= p.goal) {
+        p.today.rewarded = true;
+        s.coins += 40;
+        applyEvents(s.personality, [{ trait: 'fitness', amount: 2 }, { trait: 'broCode', amount: 1 }]);
+        rememberEvent('Walked 2,000 real steps today. The shell is portable.', { icon: '👟', imp: 4, pin: true });
+        // Deferred event: addSteps runs outside tick()'s event array — the
+        // shell drains this queue on its next 1s tick (stalePedometerQuest).
+        state._deferredEvents = [...(state._deferredEvents || []), { tag: 'STP', text: 'IRL.QUEST complete — +40 CR. Touch grass, reported.' }];
+      }
     });
   }
   function reset() {
@@ -1286,7 +1413,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     maybeGeneratePetition, decidePetition, expirePetition,
     diaryDays,
     recordArcadeRun, personalityDescribe, personalityDominant, personalityPromptLine,
-    setBgmMuted, setRemix, clearRemix, remixFor,
+    setBgmMuted, setPedometerEnabled, setNudgesEnabled, maybeDreamOnReturn, markDreamRead, setRemix, clearRemix, remixFor,
     setTheme, setScanlines, setVol, setSnakeBest, setGameBest, addSteps, reset,
     exportState, importState, exportSaveCode, importSaveCode,
   };

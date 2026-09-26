@@ -26,6 +26,7 @@ const STATUS_FIXTURE = {
 
 describe('BRIDGE.SYS window (jsdom shell)', () => {
   afterEach(() => {
+    window.__broTick?.stop?.(); // the 1s tick must not outlive its test
     window.__broBootOverlay?.stop?.(); // boot timers must not outlive the env
     window.App?.close('bridge', { silent: true });
     vi.unstubAllGlobals();
