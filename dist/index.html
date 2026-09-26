@@ -14,8 +14,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Bro OS" />
-  <script type="module" crossorigin src="./assets/index-TBasUD4e.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-15siB2hv.css">
+  <script type="module" crossorigin src="./assets/index-BXLu5gUa.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-C8aq9-cI.css">
 </head>
 <body class="h-screen flex flex-col overflow-hidden select-none">
 
@@ -161,6 +161,15 @@
         <div class="h-1 bg-void border border-border overflow-hidden">
           <div id="quest-bar" class="h-full bg-neon-magenta transition-all duration-500" style="width:0%"></div>
         </div>
+        <div id="irl-quest-row" class="hidden mt-1.5">
+          <p class="font-mono text-[11px] text-text-main">
+            <span class="text-neon-green">&gt;</span> IRL.QUEST — walk <span id="irl-goal" class="text-neon-amber">2,000</span> steps.
+            <span id="irl-state" class="text-text-muted">[<span id="irl-steps">0</span>/<span id="irl-goal-2">2,000</span>]</span>
+          </p>
+          <div class="h-1 bg-void border border-border overflow-hidden mt-1">
+            <div id="irl-bar" class="h-full bg-neon-green transition-all duration-500" style="width:0%"></div>
+          </div>
+        </div>
       </div>
 
       <!-- Widget: SYS.LOG live feed -->
@@ -218,6 +227,16 @@
   <!-- ═══════════════════════════════════════════ -->
   <!-- WINDOW TEMPLATE (Phase 5: + maximize)       -->
   <!-- ═══════════════════════════════════════════ -->
+  <template id="tpl-dream">
+    <div class="fixed inset-0 z-[70] flex items-center justify-center bg-void/90 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Ryan's dream">
+      <div class="max-w-lg w-[92%] border border-neon-magenta bg-panel p-6 shadow-[0_0_40px_rgba(255,0,110,0.25)]">
+        <div class="font-display text-xs tracking-widest text-neon-magenta text-glow-magenta mb-3">🌙 DREAM.CYCLE // RYAN DREAMED WHILE YOU WERE GONE</div>
+        <p id="dream-text" class="font-mono text-[12px] leading-relaxed text-text-main mb-5"></p>
+        <button id="dream-dismiss" class="btn-cyber text-[11px]">WAKE HIM</button>
+        <p class="text-text-muted text-[9px] mt-2">or press ESC</p>
+      </div>
+    </div>
+  </template>
   <template id="tpl-window">
     <div class="os-window pointer-events-auto absolute flex flex-col border border-border-active bg-panel shadow-2xl" style="width:440px; height:380px; top:60px; left:80px;" role="dialog">
       <div class="window-titlebar flex items-center justify-between h-8 px-3 bg-panel-light border-b border-border cursor-grab active:cursor-grabbing shrink-0">
@@ -482,6 +501,32 @@
             </div>
           </div>
           <p class="text-text-muted text-[9px] mt-1">One checksummed string — the whole v3 save, portable anywhere.</p>
+        </div>
+        <div class="border-t border-border pt-3">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-text-muted">STEP.SYNC</span>
+            <span id="pedometer-status" class="font-mono text-[9px] text-text-muted">OFF</span>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <button id="pedometer-toggle" class="btn-cyber text-[9px]">ENABLE</button>
+            <button id="pedometer-desk" class="btn-cyber text-[9px]" title="The honest desktop lane — the sim takes it seriously">DESK JOB +250</button>
+          </div>
+          <div class="h-1 bg-void border border-border overflow-hidden mt-2">
+            <div id="pedometer-bar" class="h-full bg-neon-green transition-all duration-500" style="width:0%"></div>
+          </div>
+          <p id="pedometer-progress" class="font-mono text-[9px] text-text-muted mt-1">0 / 2,000 today · lifetime <span id="pedometer-lifetime">0000</span></p>
+          <p class="text-text-muted text-[9px] mt-1">Real steps while the app is open. Desk job is a designed mode, not a defeat.</p>
+        </div>
+        <div class="border-t border-border pt-3">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-text-muted">NUDGES</span>
+            <span id="nudges-status" class="font-mono text-[9px] text-text-muted">OFF</span>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <button id="nudges-toggle" class="btn-cyber text-[9px]">ENABLE</button>
+            <span class="font-mono text-[9px] text-text-muted">quiet 22:00–08:00</span>
+          </div>
+          <p class="text-text-muted text-[9px] mt-1">Ryan pings the tray when he needs you — never while you're looking.</p>
         </div>
         <div class="border-t border-border pt-3 flex items-center justify-between">
           <span class="text-text-muted">FACTORY RESET</span>
