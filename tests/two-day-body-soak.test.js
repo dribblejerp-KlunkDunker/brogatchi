@@ -14,8 +14,8 @@
 //    hours hold inside the loop, crisis debounces hold, the walk nudge
 //    fires in the evening window, and the re-arm sweep releases a
 //    cooldown whose condition went false (the next episode rings). The
-//    walk's session-scoped debounce is pinned as the implementation's
-//    actual contract, with a note.
+//    walk nudge re-arms on the lane's rollover — the v3.4.1 day-scoped
+//    key makes a fresh day a fresh send.
 //  - DREAM.CYCLE (storage-gated — jsdom environments without localStorage
 //    skip it; the dreams.ui suite owns that seam): an absence ≥ 20h
 //    composes exactly one dream; it shows, wakes once (+2 HPY), logs,
@@ -344,26 +344,41 @@ describe('two-day body soak: pedometer, dreams, nudges under the real tick loop'
     expect(state().pedometer.today.steps).toBe(0);
     expect(state().pedometer.today.rewarded).toBe(false);
 
-    // ...and DESK JOB pays again on day 2 (a second IRL reward across the soak).
+    // ...and DESK JOB starts day 2's lane (only half — the evening probe
+    // needs an unfinished walk). No reward yet.
     vi.setSystemTime(new Date('2026-09-27T12:00:00'));
     window.__broNudges.pinHour(12);
     App.open('settings');
-    const coinsBeforeDay2 = state().coins;
     const desk2 = App.windows.get('settings').el.querySelector('#pedometer-desk');
-    for (let i = 0; i < 8; i++) desk2.click();
+    for (let i = 0; i < 4; i++) desk2.click();
+    expect(state().pedometer.today.steps).toBe(1000);
+    expect(state().pedometer.today.rewarded).toBe(false);
+    App.close('settings', { silent: true });
+
+    // Feed him and let a tick run BEFORE the evening probe: day 1's hunger
+    // crisis (still 10) outranks the walk in priority, and its send is not
+    // what's under test here — the re-arm block below owns it.
+    state().stats.hunger = 74;
+    await vi.advanceTimersByTimeAsync(2 * 1000);
+
+    // Day-2 evening probe, hour pinned to 19:00: the lane rolled over, so
+    // the walk nudge RE-ARMS — the v3.4.1 day-scoped key (`walk:<date>`,
+    // the lane's rollover re-stamp is the re-arm) makes a new day a new
+    // send; the shell needs no rollover awareness of its own.
+    window.__broNudges.pinHour(19);
+    await vi.advanceTimersByTimeAsync(2 * 1000);
+    const walkSends = sent().filter((n) => n.opts.tag === 'walk');
+    expect(walkSends).toHaveLength(2); // day 1's send, then day 2's re-arm
+    expect(walkSends[1].opts.body).toContain('1,000 steps short');
+    window.__broNudges.pinHour(12);
+
+    // Finish the lane: DESK JOB pays the day-2 reward (+40, once).
+    App.open('settings');
+    const coinsBeforeDay2 = state().coins;
+    for (let i = 0; i < 4; i++) desk2.click();
     expect(state().pedometer.today.rewarded).toBe(true);
     expect(state().coins).toBe(coinsBeforeDay2 + 40);
     App.close('settings', { silent: true });
-
-    // Day-2 evening probe, hour pinned to 19:00: the walk nudge stays
-    // silent. The implementation's re-arm for 'walk' is a RELOAD —
-    // lastSent is runtime-only and nothing clears it on rollover, so a
-    // long-lived session's day-2 evening does not ring again. Pinned as
-    // the actual contract (a candidate v3.4.1 refinement, not a soak bug).
-    window.__broNudges.pinHour(19);
-    await vi.advanceTimersByTimeAsync(2 * 1000);
-    expect(sent().filter((n) => n.opts.tag === 'walk')).toHaveLength(1);
-    window.__broNudges.pinHour(12);
 
     // Crisis lanes on day 2: the re-arm discipline across days — feed him
     // (condition false → 'hunger' released), starve him again (a NEW

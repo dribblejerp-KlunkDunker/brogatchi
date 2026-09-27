@@ -63,7 +63,7 @@ describe('evaluateNudges — conditions fire exactly under their trigger', () =>
 
   it('the walk fires in the evening when ≥200 short; never before 18:00; never when done', () => {
     const walker = baseState({ pedometer: { enabled: true, goal: 2000, today: { date: 'd', steps: 1800, rewarded: false } } });
-    expect(evaluateNudges(walker, {}, 19, NOW).event.key).toBe('walk'); // 200 short
+    expect(evaluateNudges(walker, {}, 19, NOW).event.key).toBe('walk:d'); // 200 short, keyed to the lane's day
     expect(evaluateNudges(walker, {}, 14, NOW).event).toBeNull(); // daytime
     const tooClose = baseState({ pedometer: { enabled: true, goal: 2000, today: { date: 'd', steps: 1801, rewarded: false } } });
     expect(evaluateNudges(tooClose, {}, 19, NOW).event).toBeNull(); // 199 short
@@ -91,7 +91,7 @@ describe('quiet hours', () => {
 
   it('the walk’s evening window ends at quiet hours (18:00–22:00 in practice)', () => {
     const walker = baseState({ pedometer: { enabled: true, goal: 2000, today: { date: 'd', steps: 0, rewarded: false } } });
-    expect(evaluateNudges(walker, {}, 21, NOW).event?.key).toBe('walk');
+    expect(evaluateNudges(walker, {}, 21, NOW).event?.key).toBe('walk:d');
     expect(evaluateNudges(walker, {}, 22, NOW).event).toBeNull();
   });
 });
@@ -107,6 +107,24 @@ describe('debounce and re-arm', () => {
   it('after the 6h window the same episode can nudge again', () => {
     const sent = { hunger: NOW - 7 * HOUR };
     expect(evaluateNudges(starving, sent, 12, NOW).event.key).toBe('hunger');
+  });
+
+  it('the walk re-arms on the lane’s rollover: a new day is a new key (v3.4.1)', () => {
+    // Day 1's send must not eat day 2's evening — the soak caught the
+    // bare 'walk' key living for a whole session (never cleared on
+    // rollover), so the key is scoped to the lane's date and the shell
+    // is handed the stale keys via `clear`.
+    const day1 = baseState({ pedometer: { enabled: true, goal: 2000, today: { date: '2026-09-26', steps: 1000, rewarded: false } } });
+    expect(evaluateNudges(day1, {}, 19, NOW).event.key).toBe('walk:2026-09-26');
+    // Same session, day 2's lane re-stamped: day 1's key (and the legacy
+    // bare key) are stale — they arrive in `clear`, and day 2 rings again.
+    const day2 = baseState({ pedometer: { enabled: true, goal: 2000, today: { date: '2026-09-27', steps: 1000, rewarded: false } } });
+    const r = evaluateNudges(day2, { 'walk:2026-09-26': NOW - HOUR, walk: NOW - 25 * HOUR }, 19, NOW);
+    expect(r.event.key).toBe('walk:2026-09-27');
+    expect(r.clear).toContain('walk:2026-09-26');
+    expect(r.clear).toContain('walk');
+    // Same day again → still debounced (once per day, per lane date).
+    expect(evaluateNudges(day2, { 'walk:2026-09-27': NOW - HOUR }, 19, NOW).event).toBeNull();
   });
 
   it('re-arm: the evaluator returns `clear` when the condition goes false', () => {

@@ -100,16 +100,26 @@ export function evaluateNudges(state, lastSent, nowHour, now = Date.now()) {
 
   // 5 — the walk, in the evening only (local hour ≥ 18, and never in quiet
   // hours — the window is 18:00–22:00 in practice), while the lane is
-  // unfinished and at least 200 steps short. Once per day: the lane's own
-  // rollover re-stamp IS the re-arm, so no time-debounce here.
+  // unfinished and at least 200 steps short. Once per DAY: the key is
+  // scoped to the lane's own date (the lane's rollover re-stamp IS the
+  // re-arm), so a fresh day gets a fresh key and the evaluator hands the
+  // shell the stale keys to clear — the shell needs no rollover awareness.
   const p = state.pedometer;
   if (!quiet && p?.enabled && !p.today?.rewarded && nowHour >= 18) {
     const short = (p.goal || 2000) - (p.today.steps || 0);
-    if (short >= 200 && !lastSent.walk) {
-      return {
-        event: { key: 'walk', title: '👟 The walk is undone', body: `${short.toLocaleString('en-US')} steps short of the quest. The evening is young.`, tag: 'walk' },
-        clear: clears,
-      };
+    if (short >= 200) {
+      const dayKey = `walk:${p.today.date ?? ''}`;
+      // The legacy bare 'walk' key (pre-v3.4.1 sessions) reads as stale
+      // here by construction — cleared along with any other day's keys.
+      for (const k of Object.keys(lastSent)) {
+        if ((k === 'walk' || k.startsWith('walk:')) && k !== dayKey) clears.push(k);
+      }
+      if (!lastSent[dayKey]) {
+        return {
+          event: { key: dayKey, title: '👟 The walk is undone', body: `${short.toLocaleString('en-US')} steps short of the quest. The evening is young.`, tag: 'walk' },
+          clear: clears,
+        };
+      }
     }
   }
 
