@@ -91,8 +91,13 @@ function seedStaleSave(gapMs, now) {
   localStorage.setItem(SAVE_KEY, JSON.stringify(base));
 }
 
-async function bootShell() {
+async function bootShell({ seed } = {}) {
+  // Clear the save first, then let the test write its seed BEFORE main.js
+  // imports (the boot reads storage during import). The seed-inside-boot
+  // shape exists because CI's jsdom HAS storage — an unconditional clear
+  // after seeding wiped the save (CI caught what the local env skipped).
   try { localStorage.clear(); } catch { /* storage-free environments */ }
+  if (seed) seed();
   document.head.innerHTML = SHELL_HTML.match(/<head>([\s\S]*?)<\/head>/)?.[1] ?? '';
   document.body.innerHTML = SHELL_HTML.match(/<body[^>]*>([\s\S]*)<\/body>/)?.[1] ?? '';
   document.documentElement.setAttribute('data-theme', 'cyberpunk');
@@ -103,8 +108,7 @@ async function bootShell() {
 describe('DREAM.CYCLE — the overlay in the real shell', () => {
   it.skipIf(!HAS_STORAGE)('a stale save renders the overlay with the stored dream; WAKE HIM pays once and logs', async () => {
     const NOW = new Date(2026, 8, 16, 12, 0, 0).getTime();
-    seedStaleSave(3 * 24 * 3600 * 1000, NOW);
-    await bootShell();
+    await bootShell({ seed: () => seedStaleSave(3 * 24 * 3600 * 1000, NOW) });
     window.__broBootOverlay?.stop?.(); // splash gone; overlay should be up
 
     const overlay = document.querySelector('[aria-label="Ryan\'s dream"]');
@@ -129,8 +133,7 @@ describe('DREAM.CYCLE — the overlay in the real shell', () => {
 
   it.skipIf(!HAS_STORAGE)('Escape dismisses too; a reload does not re-show the read dream', async () => {
     const NOW = new Date(2026, 8, 16, 12, 0, 0).getTime();
-    seedStaleSave(3 * 24 * 3600 * 1000, NOW);
-    await bootShell();
+    await bootShell({ seed: () => seedStaleSave(3 * 24 * 3600 * 1000, NOW) });
     window.__broBootOverlay?.stop?.();
     expect(document.querySelector('[aria-label="Ryan\'s dream"]')).toBeTruthy();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -153,8 +156,7 @@ describe('DREAM.CYCLE — the overlay in the real shell', () => {
 
   it.skipIf(!HAS_STORAGE)('a short-gap save shows no overlay at all', async () => {
     const NOW = new Date(2026, 8, 16, 12, 0, 0).getTime();
-    seedStaleSave(2 * 3600 * 1000, NOW); // 2h — a nap, not a dream
-    await bootShell();
+    await bootShell({ seed: () => seedStaleSave(2 * 3600 * 1000, NOW) }); // 2h — a nap, not a dream
     window.__broBootOverlay?.stop?.();
     expect(document.querySelector('[aria-label="Ryan\'s dream"]')).toBeNull();
     expect(window.__broStore.state.dreams.entries).toHaveLength(0);

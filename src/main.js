@@ -1798,13 +1798,14 @@ setInterval(updateClock, 1000);
 // NUDGES runtime state — the debounce map lives HERE, never in the save
 // (a save that sat closed for a week has no stale cooldown debt).
 const nudgeLastSent = {};
+let __nudgeHourOverride = null; // tests pin the wall-clock hour (quiet hours must not flake on CI)
 const __tickTimer = setInterval(() => {
   const events = store.tick(1);
   // NUDGE evaluation: enabled + not focused (the doorbell only rings when
   // you're not already looking). Focus-skips consume no cooldown.
   if (state().nudges.enabled && !document.hasFocus()) {
     try {
-      const r = evaluateNudges(state(), nudgeLastSent, new Date().getHours(), Date.now());
+      const r = evaluateNudges(state(), nudgeLastSent, __nudgeHourOverride ?? new Date().getHours(), Date.now());
       if (r?.clear?.length) for (const k of r.clear) delete nudgeLastSent[k];
       if (r?.event && 'Notification' in window) {
         const n = new Notification(r.event.title, { body: r.event.body, tag: r.event.tag });
@@ -1825,6 +1826,11 @@ const __tickTimer = setInterval(() => {
 // prior test's ticker can't fire into the next test's jsdom environment
 // (the nudges suite caught the leak — same discipline as __broBootOverlay).
 window.__broTick = { stop() { clearInterval(__tickTimer); } };
+window.__broNudges = {
+  pinHour(h) { __nudgeHourOverride = h; },
+  unpinHour() { __nudgeHourOverride = null; },
+  lastSent: nudgeLastSent,
+};
 
 // pet interaction
 $('#pet-display').addEventListener('click', () => {

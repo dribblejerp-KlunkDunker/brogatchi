@@ -55,6 +55,11 @@ afterEach(() => {
   vi.resetModules();
 });
 
+// CI runs at arbitrary UTC hours — inside quiet hours (22–8) the crisis
+// lanes are CORRECTLY silent. Every send test pins noon via the hook's
+// documented handle so the suite tests the doorbell, not the clock.
+function pinNoon() { window.__broNudges?.pinHour?.(12); }
+
 async function bootShell() {
   try { localStorage.clear(); } catch { /* storage-free environments */ }
   try { sessionStorage.clear(); } catch { /* same */ }
@@ -144,6 +149,7 @@ describe('NUDGES — the send path in the tick consumer', () => {
   it('unfocused tab + starving bro: sends once, logs, debounces the second tick', async () => {
     const sent = stubNotification('granted');
     await bootShell();
+    pinNoon();
     const win = openSettings();
     win.el.querySelector('#nudges-toggle').click();
     await new Promise((r) => setTimeout(r, 0));
@@ -169,6 +175,7 @@ describe('NUDGES — the send path in the tick consumer', () => {
   it('a focused tab never sends and consumes no cooldown', async () => {
     const sent = stubNotification('granted');
     await bootShell();
+    pinNoon();
     const win = openSettings();
     win.el.querySelector('#nudges-toggle').click();
     await new Promise((r) => setTimeout(r, 0));
@@ -192,6 +199,7 @@ describe('NUDGES — the send path in the tick consumer', () => {
   it('disabled nudges never send, even in a crisis', async () => {
     const sent = stubNotification('granted');
     await bootShell();
+    pinNoon();
     const store = window.__broStore;
     store.state.stats.hunger = 10; // crisis, but the toggle is OFF
     await new Promise((r) => setTimeout(r, 1400));
