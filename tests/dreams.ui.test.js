@@ -107,7 +107,7 @@ async function bootShell({ seed } = {}) {
 
 describe('DREAM.CYCLE — the overlay in the real shell', () => {
   it.skipIf(!HAS_STORAGE)('a stale save renders the overlay with the stored dream; WAKE HIM pays once and logs', async () => {
-    const NOW = new Date(2026, 8, 16, 12, 0, 0).getTime();
+    const NOW = Date.now(); // relative to the real clock — load() decays by (now − lastTick)
     await bootShell({ seed: () => seedStaleSave(3 * 24 * 3600 * 1000, NOW) });
     window.__broBootOverlay?.stop?.(); // splash gone; overlay should be up
 
@@ -122,24 +122,26 @@ describe('DREAM.CYCLE — the overlay in the real shell', () => {
     expect(store.state.dreams.entries).toHaveLength(1);
     expect(store.state.dreams.entries[0].readAt).toBeNull();
 
-    // dismiss by button
+    // dismiss by button — the +2 is a DELTA on whatever the 8h-capped
+    // offline decay left (a 3-day-old save wakes sad; that's the sim)
+    const happyBefore = store.state.stats.happy;
     overlay.querySelector('#dream-dismiss').click();
     expect(document.querySelector('[aria-label="Ryan\'s dream"]')).toBeNull();
     expect(store.state.dreams.entries[0].readAt).not.toBeNull();
-    expect(store.state.stats.happy).toBe(82 + 2); // exactly the +2
+    expect(store.state.stats.happy).toBe(Math.min(100, happyBefore + 2));
     const logText = document.querySelector('#sys-log')?.textContent ?? '';
     expect(logText).toContain('dream reel acknowledged');
   });
 
   it.skipIf(!HAS_STORAGE)('Escape dismisses too; a reload does not re-show the read dream', async () => {
-    const NOW = new Date(2026, 8, 16, 12, 0, 0).getTime();
+    const NOW = Date.now();
     await bootShell({ seed: () => seedStaleSave(3 * 24 * 3600 * 1000, NOW) });
     window.__broBootOverlay?.stop?.();
     expect(document.querySelector('[aria-label="Ryan\'s dream"]')).toBeTruthy();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(document.querySelector('[aria-label="Ryan\'s dream"]')).toBeNull();
     const store = window.__broStore;
-    expect(store.state.stats.happy).toBe(84);
+    expect(store.state.dreams.entries[0].readAt).not.toBeNull(); // the payment happened (once)
 
     // reload: the dream is read, the gate is recent — no overlay, no new dream
     window.__broBootOverlay?.stop?.();
@@ -155,7 +157,7 @@ describe('DREAM.CYCLE — the overlay in the real shell', () => {
   });
 
   it.skipIf(!HAS_STORAGE)('a short-gap save shows no overlay at all', async () => {
-    const NOW = new Date(2026, 8, 16, 12, 0, 0).getTime();
+    const NOW = Date.now();
     await bootShell({ seed: () => seedStaleSave(2 * 3600 * 1000, NOW) }); // 2h — a nap, not a dream
     window.__broBootOverlay?.stop?.();
     expect(document.querySelector('[aria-label="Ryan\'s dream"]')).toBeNull();
