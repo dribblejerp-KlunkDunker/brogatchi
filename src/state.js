@@ -618,6 +618,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
           text: e.text,
           strands: Array.isArray(e.strands) ? e.strands.map(String).slice(0, 3) : [],
           readAt: Number.isFinite(e.readAt) ? e.readAt : null,
+          _diaryPending: undefined, // runtime flag — never restored from a save
         }))
       : [];
     state.dreams = {
@@ -626,10 +627,15 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     };
   }
 
-  /** Dream-on-return: called by the shell's FIRST tick, after
-      maybeRolloverDiary — the diary line must land after the rollover
-      lines, and at load() time the rollover hasn't run yet. Idempotent
-      per boot via the runtime guard. See the dream-cycle spec. */
+  /** Dream-on-return: safe to call from boot (the shell does, so the
+      overlay is up the moment the splash lifts) or from the first tick —
+      the _checkedToday runtime guard makes later calls no-ops.
+
+      Diary ordering: the boot call composes the dream but DEFERS the 🌙
+      diary line (_diaryPending on the entry) — the rollover hasn't run at
+      boot, and the line must land AFTER yesterday's rollover lines. The
+      first tick flushes the pending line after maybeRolloverDiary. A tick-
+      first caller (store-only tests) gets both in one pass. */
   function maybeDreamOnReturn() {
     state.dreams._checkedToday = true; // runtime-only — normalize strips it from saves
     const gap = now() - (state.dreams.lastDreamedAt ?? state.lastTick ?? 0);
@@ -646,13 +652,24 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
       text: dream.text,
       strands: dream.strands,
       readAt: null,
+      _diaryPending: true, // runtime flag — flushed by the first tick, stripped by normalize
     });
     state.dreams.entries = state.dreams.entries.slice(-10);
     rememberEvent(dream.text, { icon: '🌙', imp: 3 });
-    state.diary = appendDiaryLines(state.diary, [`🌙 Dreamed: ${dream.text.split('.')[0]}.`], now());
     emit();
     save();
     return state.dreams.entries[state.dreams.entries.length - 1];
+  }
+
+  /** Flush a boot-composed dream's deferred diary line — called by the
+      first tick, after maybeRolloverDiary, so the 🌙 line lands in order. */
+  function flushDreamDiary() {
+    const latest = state.dreams?.entries?.[state.dreams.entries.length - 1];
+    if (!latest?._diaryPending) return;
+    delete latest._diaryPending;
+    state.diary = appendDiaryLines(state.diary, [`🌙 Dreamed: ${latest.text.split('.')[0]}.`], now());
+    emit();
+    save();
   }
 
   /** WAKE HIM: mark the newest dream read, pay +2 happy once. Happy is a
@@ -1007,6 +1024,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     // lands after yesterday's rollover lines (order matters in the journal);
     // the runtime guard makes later ticks no-ops.
     if (!state.dreams?._checkedToday) maybeDreamOnReturn();
+    flushDreamDiary(); // a boot-composed dream's diary line lands after the rollover
     // Petitions: a stale ask withdraws itself on the tick after expiry;
     // drafting is checked at the rollover and on the events traits care
     // about (recordArcadeRun / postToMolt), not every second.
@@ -1413,7 +1431,7 @@ export function createStore({ storage = null, now = () => Date.now() } = {}) {
     maybeGeneratePetition, decidePetition, expirePetition,
     diaryDays,
     recordArcadeRun, personalityDescribe, personalityDominant, personalityPromptLine,
-    setBgmMuted, setPedometerEnabled, setNudgesEnabled, maybeDreamOnReturn, markDreamRead, setRemix, clearRemix, remixFor,
+    setBgmMuted, setPedometerEnabled, setNudgesEnabled, maybeDreamOnReturn, flushDreamDiary, markDreamRead, setRemix, clearRemix, remixFor,
     setTheme, setScanlines, setVol, setSnakeBest, setGameBest, addSteps, reset,
     exportState, importState, exportSaveCode, importSaveCode,
   };

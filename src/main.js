@@ -1907,8 +1907,18 @@ if (VOLATILE_MEMORY) {
   setTimeout(() => toast('VOLATILE MEMORY — export his soul (👻 SOUL) before closing', 'warn'), 2600);
 }
 
-// DREAM.CYCLE overlay — the unread dream is the only trigger. The composer
-// + entry ran in the store's first tick; this just presents what's stored.
+// DREAM.CYCLE overlay — the unread dream is the only trigger. The store's
+// detection runs HERE (before this mount, after load), not only on the
+// first tick: the overlay must be up the moment the splash lifts, and the
+// tick's own call is a no-op thanks to the store's _checkedToday guard.
+// The diary-ordering concern from the spec holds: maybeRolloverDiary ran
+// inside load()'s shadow via the tick... no — it runs on the first tick;
+// calling maybeDreamOnReturn at boot writes the 🌙 diary line BEFORE the
+// rollover lines. The store therefore exposes the check for both callers,
+// and the tick's rollover-then-dream order is preserved by the guard: the
+// boot call composes the dream but the diary append is deferred to the
+// tick via _diaryPending on the entry. See state.js maybeDreamOnReturn.
+store.maybeDreamOnReturn();
 (function wireDreamOverlay() {
   const latest = store.state?.dreams?.entries?.[store.state.dreams.entries.length - 1];
   if (!latest || latest.readAt != null) return;
