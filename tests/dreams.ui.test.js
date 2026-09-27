@@ -86,7 +86,11 @@ function seedStaleSave(gapMs, now) {
     dreams: { lastDreamedAt: null, entries: [] },
     memories: [{ id: 'm-seed-1', icon: '🎮', text: 'Won LOOT SHOWER with 5 points. First run on record.', imp: 4, pinned: true, t: now - gapMs - 3600e3, day: 'Sep 12, 2026' }],
     diary: [],
-    lastTick: now,
+    // The save itself must look GAP-days old — the dream's gap is
+    // now − lastTick, so lastTick = NOW means "written this second"
+    // and no dream ever composes. (CI caught what the storage-free
+    // local env skipped; the live preview seeded lastTick directly.)
+    lastTick: now - gapMs,
   };
   localStorage.setItem(SAVE_KEY, JSON.stringify(base));
 }
@@ -96,7 +100,7 @@ async function bootShell({ seed } = {}) {
   // imports (the boot reads storage during import). The seed-inside-boot
   // shape exists because CI's jsdom HAS storage — an unconditional clear
   // after seeding wiped the save (CI caught what the local env skipped).
-  try { localStorage.clear(); } catch { /* storage-free environments */ }
+  try { localStorage.clear(); sessionStorage.clear(); } catch { /* storage-free environments */ }
   if (seed) seed();
   document.head.innerHTML = SHELL_HTML.match(/<head>([\s\S]*?)<\/head>/)?.[1] ?? '';
   document.body.innerHTML = SHELL_HTML.match(/<body[^>]*>([\s\S]*)<\/body>/)?.[1] ?? '';
