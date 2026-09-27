@@ -121,6 +121,37 @@ describe('the store gate — maybeDreamOnReturn', () => {
     expect(s2.state.dreams.entries).toHaveLength(1);
   });
 
+  it('an open session after the dream anchors the gate: same-session reloads never re-dream', () => {
+    const storage = memStorage();
+    // Absence → dream at FAKE_NOW − GAP. The player then keeps the shell
+    // open and reloads minutes later: the gate measures the absence since
+    // the DREAM (lastDreamedAt), not since lastTick — so presence counts.
+    let t = FAKE_NOW - GAP;
+    const s1 = createStore({ storage, now: () => t });
+    s1.rememberEvent('Dream material.', { icon: '🧠', imp: 3 });
+    t = FAKE_NOW; // return: compose the dream
+    const s2 = createStore({ storage, now: () => t });
+    s2.load(); s2.tick(1);
+    expect(s2.state.dreams.entries).toHaveLength(1);
+    expect(s2.state.dreams.lastDreamedAt).toBe(FAKE_NOW);
+
+    // …the session stays open for hours (lastTick keeps moving), then a
+    // reload at dream + 30 min — a SHORT absence since the dream:
+    t = FAKE_NOW + 30 * 60 * 1000;
+    const s3 = createStore({ storage, now: () => t });
+    s3.load(); s3.tick(1);
+    expect(s3.state.dreams.entries).toHaveLength(1); // no second dream
+    expect(s3.state.dreams.lastDreamedAt).toBe(FAKE_NOW); // anchor unmoved
+
+    // …but a REAL absence — reload a full day later — dreams again,
+    // exactly once, on top of the preserved first entry:
+    t = FAKE_NOW + DAY_MS;
+    const s4 = createStore({ storage, now: () => t });
+    s4.load(); s4.tick(1);
+    expect(s4.state.dreams.entries).toHaveLength(2);
+    expect(s4.state.dreams.lastDreamedAt).toBe(FAKE_NOW + DAY_MS);
+  });
+
   it('a short gap never dreams, and the gate still allows a later longer gap', () => {
     const storage = memStorage();
     const s1 = createStore({ storage, now: () => FAKE_NOW - 2 * 3600e3 });

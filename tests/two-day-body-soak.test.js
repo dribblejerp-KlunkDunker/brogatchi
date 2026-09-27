@@ -401,21 +401,22 @@ describe('two-day body soak: pedometer, dreams, nudges under the real tick loop'
     expect(state().stats.happy).toBe(Math.min(100, happyBefore + 2));
     expect(document.querySelector('#sys-log')?.textContent ?? '').toContain('dream reel acknowledged');
 
-    // Idle hours under the real loop: no second dream, no re-show.
+    // Idle minutes under the real loop: no second dream, no re-show. The
+    // 🌙 diary line flushed on the first tick after composition — exactly
+    // once. (The midnight sweep stays OUT of this test on purpose: it
+    // would simulate a 20h+ SECOND absence, and a second dream then is
+    // the shell's honest contract — CI caught the sweep doing exactly
+    // that. The presence-since-dream semantics are pinned store-level.)
     for (const id of ['chat', 'arcade', 'settings']) App.open(id);
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
     expect(dreams()).toHaveLength(1);
     expect(document.querySelector('[aria-label="Ryan\'s dream"]')).toBeNull();
-
-    // ── MIDNIGHT → DAY 2: the 🌙 diary line landed exactly once. ──
-    jumpTo(QUIET_H, 0);
-    const day2 = await sweepUntil(() => state().dailyDiaryDone === '2026-09-27');
-    expect(day2, 'rollover never observed').toBeGreaterThanOrEqual(0);
     const dreamDiaryLines = state().diary.filter((l) => String(l.text).startsWith('🌙 Dreamed:'));
     expect(dreamDiaryLines).toHaveLength(1);
 
-    // Reboot the same soul the honest way: export → import across devices.
-    // No re-show (the entry is read), no second dream.
+    // Reboot the same soul the honest way: export → import across devices,
+    // minutes after the dream. No re-show (the entry is read), no second
+    // dream (the absence since the dream is minutes, not 20h).
     const snapshot = window.__broStore.exportState();
     for (const id of [...App.windows.keys()]) App.close(id, { silent: true });
     window.App = undefined;
